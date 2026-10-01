@@ -66,6 +66,22 @@ function clickByLabel(label: string) {
   click(el!);
 }
 
+/** The trigger's accessible name carries the value, so match by prefix. */
+function clickByLabelPrefix(prefix: string) {
+  const el = document.body.querySelector(`[aria-label^="${prefix}"]`);
+  expect(el, `control starting with "${prefix}"`).toBeTruthy();
+  click(el!);
+}
+
+/** The value's visible/announced form, same options as the picker. */
+function expectedValueLabel(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 /** The 42 calendar day buttons, identified by their ISO aria-label. */
 function dayCells(): HTMLButtonElement[] {
   return Array.from(document.body.querySelectorAll<HTMLButtonElement>("button[aria-label]")).filter((b) =>
@@ -93,16 +109,24 @@ describe("DueDatePicker", () => {
 
   it("2. the calendar shows the current month and day 15 returns that local calendar day", async () => {
     const onChange = vi.fn();
-    render(<DueDatePicker value={getISO.today} onChange={onChange} />);
+    const today = getISO.today;
+    render(<DueDatePicker value={today} onChange={onChange} />);
 
-    clickByLabel("Choose due date");
+    // WCAG 2.5.3: the accessible name contains the visible value.
+    const trigger = document.body.querySelector(`[aria-label^="Choose due date"]`);
+    expect(trigger?.getAttribute("aria-label")).toContain(expectedValueLabel(today));
+
+    clickByLabelPrefix("Choose due date");
     const now = new Date();
     expect(document.body.textContent).toContain(monthLabel(now.getFullYear(), now.getMonth()));
 
     const expected = localTodayISO(new Date(now.getFullYear(), now.getMonth(), 15));
     clickByLabel(expected);
     expect(onChange).toHaveBeenCalledWith(expected);
+
     await settle(); // let the Modal exit phase finish
+    expect(document.body.querySelectorAll('[role="dialog"]'), "dialog closes on select").toHaveLength(0);
+    expect(dayCells(), "day cells unmount after select").toHaveLength(0);
   });
 
   it("3. getMonthGrid is Monday-first and a Monday-start month opens on the 1st", () => {
@@ -122,9 +146,9 @@ describe("DueDatePicker", () => {
     expect(june[0].inMonth).toBe(true);
   });
 
-  it("4. every day cell carries the h-11 w-11 tap-target contract", () => {
+  it("4. every day cell carries the tap-target and 360px-fit class contract", () => {
     render(<DueDatePicker value={getISO.today} onChange={vi.fn()} />);
-    clickByLabel("Choose due date");
+    clickByLabelPrefix("Choose due date");
 
     const cells = dayCells();
     expect(cells).toHaveLength(42);
@@ -132,6 +156,22 @@ describe("DueDatePicker", () => {
       const label = cell.getAttribute("aria-label") || "";
       expect(cell.className, label).toContain("h-11");
       expect(cell.className, label).toContain("w-11");
+      expect(cell.className, label).toContain("max-w-full");
+      expect(cell.className, label).toContain("hit-44");
     }
+  });
+
+  it("5. the selected day is programmatically pressed, other days are not", () => {
+    const today = getISO.today;
+    render(<DueDatePicker value={today} onChange={vi.fn()} />);
+    clickByLabelPrefix("Choose due date");
+
+    const cells = dayCells();
+    const selected = cells.find((c) => c.getAttribute("aria-label") === today)!;
+    expect(selected).toBeTruthy();
+    expect(selected.getAttribute("aria-pressed")).toBe("true");
+
+    const other = cells.find((c) => c.getAttribute("aria-label") !== today)!;
+    expect(other.getAttribute("aria-pressed")).toBe("false");
   });
 });

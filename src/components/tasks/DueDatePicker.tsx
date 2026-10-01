@@ -65,7 +65,7 @@ export default function DueDatePicker({ value, onChange }: DueDatePickerProps) {
         variant="secondary"
         size="sm"
         onClick={() => setOpen(true)}
-        aria-label="Choose due date"
+        aria-label={`Choose due date, ${formatDue(value)}`}
         aria-haspopup="dialog"
         aria-expanded={open}
       >
@@ -111,8 +111,9 @@ export default function DueDatePicker({ value, onChange }: DueDatePickerProps) {
                 key={cell.iso}
                 type="button"
                 aria-label={cell.iso}
+                aria-pressed={selected}
                 onClick={() => selectDay(cell.iso)}
-                className={`h-11 w-11 rounded-full text-sm ${tone}`}
+                className={`h-11 w-11 max-w-full rounded-full hit-44 text-sm ${tone}`}
               >
                 {cell.day}
               </button>
