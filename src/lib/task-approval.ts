@@ -530,17 +530,22 @@ function resolvePayees(
   // strict closes list everyone, partial closes list the checked-in only.
   // Validate membership — do not recompute participation.
   const payees: string[] = [];
-  const payeeIds = new Set<string>();
   const skipped: string[] = [];
+  // Every requested entry is recorded in `seen` BEFORE the skip decisions:
+  // a stored award list repeating a name — accepted or skipped, resolved or
+  // not — is a malformed record = invalid (parsePending only catches
+  // byte-identical strings, so "Bailey" + "Bailey Garcia" both reach here).
+  const seen = new Set<string>();
   for (const requested of pending.crew) {
     const member = resolveHumanMember(roster, requested);
+    const key = member ? member.name : requested.trim();
+    if (seen.has(key)) return "invalid";
+    seen.add(key);
     if (!member) { skipped.push(requested); continue; }
-    if (payeeIds.has(member.id)) return "invalid";
     if (!crewState.memberNames.has(member.name) || crewState.removedNames.has(member.name)) {
       skipped.push(member.name);
       continue;
     }
-    payeeIds.add(member.id);
     payees.push(member.name);
   }
   if (payees.length === 0) return "invalid";

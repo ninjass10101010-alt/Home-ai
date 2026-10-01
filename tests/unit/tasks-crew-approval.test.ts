@@ -368,6 +368,82 @@ describe("Crew approval", () => {
     expect(earns[0].member).toBe("Caspian Garcia");
   });
 
+  it("rejects a stored award list that repeats a member by different spellings", async () => {
+    // parsePending only de-dupes byte-identical trimmed strings, so "Bailey"
+    // + "Bailey Garcia" both reach resolvePayees, resolve to the SAME person
+    // and both hit the removal skip before any id is recorded — a duplicate
+    // of a SKIPPED entry is still a malformed record = invalid.
+    const task = crewPendingTask({
+      crewSize: 2,
+      crew: {
+        members: [
+          member("Caspian Garcia", "2026-09-18T19:00:00.000Z"),
+          member("Bailey Garcia", "2026-09-18T19:05:00.000Z"),
+        ],
+        removed: ["Bailey Garcia"],
+      },
+      pendingApproval: {
+        byName: "Crew",
+        at: "2026-09-18T20:00:00.000Z",
+        points: 15,
+        crew: ["Bailey", "Bailey Garcia", "Caspian Garcia"],
+      },
+    });
+    const { pb, history, points, weekWrites, taskWrites, snapshotWrites } = makePb([task]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+
+    const res = await POST(jsonReq({
+      action: "approve",
+      taskId: task.id,
+      memberName: PARENT.name,
+      pin: "0202",
+    }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("invalid_task_state");
+    expect(weekWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(history()).toHaveLength(0);
+    expect(points()).toEqual({});
+  });
+
+  it("rejects a stored award list with a byte-identical repeated name", async () => {
+    const task = crewPendingTask({
+      crewSize: 2,
+      crew: {
+        members: [
+          member("Caspian Garcia", "2026-09-18T19:00:00.000Z"),
+          member("Bailey Garcia", "2026-09-18T19:05:00.000Z"),
+        ],
+        removed: ["Bailey Garcia"],
+      },
+      pendingApproval: {
+        byName: "Crew",
+        at: "2026-09-18T20:00:00.000Z",
+        points: 15,
+        crew: ["Bailey Garcia", "Bailey Garcia", "Caspian Garcia"],
+      },
+    });
+    const { pb, history, points, weekWrites, taskWrites, snapshotWrites } = makePb([task]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+
+    const res = await POST(jsonReq({
+      action: "approve",
+      taskId: task.id,
+      memberName: PARENT.name,
+      pin: "0202",
+    }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("invalid_task_state");
+    expect(weekWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(history()).toHaveLength(0);
+    expect(points()).toEqual({});
+  });
+
   it("refuses a partial pending whose byName is not Crew", async () => {
     const task = crewPendingTask({
       crewSize: 2,
