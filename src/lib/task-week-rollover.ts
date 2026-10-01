@@ -17,7 +17,19 @@ import {
   type SnapshotTask,
 } from "@/lib/snapshot-tasks";
 import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
+import { isRecord } from "@/lib/task-operation-contract";
 import type { Transaction, WeekData } from "@/types/tasks";
+
+export interface ArchivedTaskDef {
+  title: string;
+  points: number;
+  category: string;
+  priority: string;
+  assigneeName?: string;
+  universal?: boolean;
+  crewSize?: number;
+  crewCloseMode?: string;
+}
 
 export interface TaskWeekRolloverResult {
   weekStart: string;
@@ -526,12 +538,41 @@ export async function ensureCurrentTaskWeek(
             },
           );
           const deletedTaskIds = [...new Set([...tombstoneIds, ...reset.deletedTaskIds])];
+          const defs: ArchivedTaskDef[] = liveBefore
+            .filter((task) =>
+              !task.recurring &&
+              task.completed === true &&
+              task.completedInWeek === previousWeekStart,
+            )
+            .map((task) => ({
+              title: String(task.title ?? ""),
+              points: Number(task.points ?? 0),
+              category: String(task.category ?? "chores"),
+              priority: String(task.priority ?? "medium"),
+              ...(task.universal
+                ? { universal: true }
+                : { assigneeName: String(task.assignee ?? "") }),
+              ...(typeof task.crewSize === "number" && task.crewSize >= 2
+                ? {
+                    crewSize: task.crewSize,
+                    ...(task.crewCloseMode ? { crewCloseMode: String(task.crewCloseMode) } : {}),
+                  }
+                : {}),
+            }))
+            .filter((def) => def.title);
+          const priorArchived = isRecord((data as any).archivedTasks) ? (data as any).archivedTasks as Record<string, ArchivedTaskDef[]> : {};
+          const nextArchived = previousWeekStart
+            ? { ...priorArchived, [previousWeekStart]: defs }
+            : priorArchived;
+          const keptKeys = Object.keys(nextArchived).sort().slice(-4);
+          const archivedTasks = Object.fromEntries(keptKeys.map((key) => [key, nextArchived[key]]));
           const expectedTasks = reset.tasks.filter((task) => !existingIds.has(Number(task.id)));
           return {
             data: {
               ...data,
               tasks: reset.tasks,
               deletedTaskIds,
+              archivedTasks,
               weekData: currentWeek,
               taskWeekStart: weekStart,
             },

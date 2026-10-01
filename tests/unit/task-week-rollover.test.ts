@@ -721,6 +721,71 @@ describe("ensureCurrentTaskWeek", () => {
   });
 });
 
+describe("archivedTasks capture", () => {
+  it("captures completed one-offs of the previous week, keyed by its Monday", async () => {
+    const harness = createHarness();
+    seedRollover(harness, [
+      sourceTask({ id: 1 }),
+      sourceTask({
+        id: 10,
+        title: "Wash car",
+        recurring: undefined,
+        points: 8,
+        category: "chores",
+        priority: "high",
+      }),
+      sourceTask({
+        id: 20,
+        title: "Old one-off",
+        recurring: undefined,
+        completedInWeek: "2026-09-14",
+      }),
+    ]);
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    await ensureCurrentTaskWeek({ now: NOW });
+
+    expect(harness.snapshotData().archivedTasks?.[PRIOR]).toEqual([
+      {
+        title: "Wash car",
+        points: 8,
+        category: "chores",
+        priority: "high",
+        assigneeName: "Alex",
+      },
+    ]);
+    expect(Object.keys(harness.snapshotData().archivedTasks ?? {})).toEqual([PRIOR]);
+  });
+
+  it("evicts keys beyond the newest four", async () => {
+    const harness = createHarness();
+    seedRollover(harness, [
+      sourceTask({ id: 1 }),
+      sourceTask({ id: 10, title: "Wash car", recurring: undefined, points: 8 }),
+    ]);
+    const priorDef = {
+      title: "Old def",
+      points: 1,
+      category: "chores",
+      priority: "medium",
+      assigneeName: "Alex",
+    };
+    harness.state.consuela_data_snapshots[0].data.archivedTasks = {
+      "2026-08-24": [priorDef],
+      "2026-08-31": [priorDef],
+      "2026-09-07": [priorDef],
+      "2026-09-14": [priorDef],
+    };
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    await ensureCurrentTaskWeek({ now: NOW });
+
+    const archived = harness.snapshotData().archivedTasks ?? {};
+    expect(Object.keys(archived).sort()).toEqual(["2026-08-31", "2026-09-07", "2026-09-14", "2026-09-21"]);
+    expect(archived["2026-08-24"]).toBeUndefined();
+  });
+});
+
 describe("resetRecurringTasksForWeek", () => {
   it("uses the supplied server ID allocator", () => {
     const tasks = [sourceTask({ id: 7 })];
