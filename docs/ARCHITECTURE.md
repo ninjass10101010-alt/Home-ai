@@ -475,6 +475,15 @@ rotate/revoke are **not** written to the MUSE audit log (known v1 gap — the
 > **Ops on deploy:** `npm run pb:seed` creates `consuela_muse` +
 > `consuela_muse_log` and carries the briefing `acknowledgedBy` field.
 
+**Crew close modes + the daily sweep — CONTRACTS (2026-09-29):**
+
+1. `crewCloseMode` absent ⇒ `strict`; never default-change existing rows.
+2. `pendingApproval.crew` is the award list; approval validates membership, never recomputes participation.
+3. All crew payouts — strict, parent, deadline — pass through parent approval; `crew-close` and the sweep only stage pendings.
+4. `crew-close` rides the claim seam (parent role + parent PIN; receipt + keyed lock like its siblings).
+5. The daily sweep is idempotent per local day (`lastDaySweep.day`) and never mutates a task holding a live `pendingApproval`.
+6. Sweep failures are labeled `tasks:daysweep:*` and surface through the sync GET's existing failed/reconciled shape (503 only when the sweep itself is unavailable) — never a false success.
+
 ---
 
 

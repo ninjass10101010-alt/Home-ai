@@ -189,6 +189,9 @@ CONTRACTS:
 7. `GLASS`/`GLASS_NIGHT` are retuned in place (Drive alphas, night derived by the historical +0.10s) — **not** a second card material; the app-wide `.glass` family is untouched.
 8. The pre-existing night-wash AA gap (top stop `#6f74a8` vs slate-800 = 3.30) is documented and out of scope; the new keys do not regress it.
 
+### UI Change Record — 2026-09-29 — Crew close modes
+- **2026-09-29 — Crew close modes.** Add/Edit crew section gains a third control, "Close when" (SegmentedControl: Everyone / Parent closes / At due date) with an explainer line; CrewTasksCard rows show a mode chip for non-strict crews and a SoftButton "✓ Close with check-ins (N of M)" when applicable (≥44px via primitive). Needs-approval rows show "N of M checked in" for partial crews. No new primitives, no palette changes.
+
 ### UI Change Record — 2026-09-24 — Nullable hourly temperature, boosted scene truth, and composite modal cells
 - Added / Changed: `src/components/ui/WeatherWidget.tsx`, `WxToys.tsx`, `tests/unit/weather-widget.test.tsx`, and the focused contrast model.
 - Data / Accessibility: `HourPoint.temp` remains nullable through parsing and every selected-temperature surface; missing values preserve the hour, announce temperature unavailability, and render an em dash without a degree mark instead of borrowing the current reading or fabricating `0°`. Cloud layers and birds use scoped visibility/data-visible state so zero or unknown cloud cover and disallowed birds stay unavailable under boosted contrast. Modal selected and unselected hourly labels share one foreground validated across the actual translucent panel/overlay composites in both themes and clear, storm, night, and holiday accents.
