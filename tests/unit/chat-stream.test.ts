@@ -151,3 +151,97 @@ describe("streamConsuelaChat", () => {
     expect((err as Error).name).toBe("AbortError");
   });
 });
+
+describe("streamConsuelaChat watchdog", () => {
+  // A wedged intermediary: one frame lands, then the body never resolves and
+  // never closes. Fetch has already resolved here, so only a watchdog raced
+  // against the body reads can end this call.
+  function wedgedSSE(firstFrame = 'data: {"t":"partial"}\n\n') {
+    const enc = new TextEncoder();
+    return new ReadableStream<Uint8Array>({
+      start(c) { c.enqueue(enc.encode(firstFrame)); },
+    });
+  }
+
+  function wedgedJSON() {
+    return new ReadableStream<Uint8Array>({ start() { /* never resolves */ } });
+  }
+
+  function errOf(p: Promise<unknown>) {
+    return p.then(() => null, (e: unknown) => e as Error);
+  }
+
+  it("rejects on the watchdog when the SSE body read wedges", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(wedgedSSE(), { status: 200, headers: { "content-type": "text/event-stream" } })));
+    const err = await errOf(streamConsuelaChat({ message: "hi", watchdogMs: 50 }));
+    expect(err?.message).toMatch(/timed out/i);
+  });
+
+  it("reports a watchdog expiry as a failure, never as a user stop", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(wedgedSSE(), { status: 200, headers: { "content-type": "text/event-stream" } })));
+    const err = await errOf(streamConsuelaChat({ message: "hi", watchdogMs: 50 }));
+    // chat-store renders "Stopped." for an AbortError and a failure bubble for
+    // anything else — a timeout shown as a user stop would be dishonest.
+    expect(err).toBeInstanceOf(Error);
+    expect(err?.name).not.toBe("AbortError");
+  });
+
+  it("keeps streaming tokens flowing until the watchdog fires", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(wedgedSSE('data: {"t":"par"}\n\n'), { status: 200, headers: { "content-type": "text/event-stream" } })));
+    const err = await errOf(streamConsuelaChat({
+      message: "hi",
+      watchdogMs: 50,
+      onToken: (full) => seen.push(full),
+    }));
+    expect(seen).toEqual(["par"]);
+    expect(err?.message).toMatch(/timed out/i);
+  });
+
+  it("rejects on the watchdog when the buffered JSON body wedges", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(wedgedJSON(), { status: 200, headers: { "content-type": "application/json" } })));
+    const err = await errOf(streamConsuelaChat({ message: "hi", watchdogMs: 50 }));
+    expect(err?.message).toMatch(/timed out/i);
+    expect(err?.name).not.toBe("AbortError");
+  });
+
+  it("still reports a user stop as AbortError, not a timeout", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(wedgedSSE(), { status: 200, headers: { "content-type": "text/event-stream" } })));
+    const controller = new AbortController();
+    const pending = streamConsuelaChat({
+      message: "hi",
+      signal: controller.signal,
+      watchdogMs: 60_000,
+    });
+    controller.abort();
+    const err = await errOf(pending);
+    expect(err?.name).toBe("AbortError");
+    expect(err?.message).not.toMatch(/timed out/i);
+  });
+
+  it("still reports a user stop during the buffered read as AbortError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(wedgedJSON(), { status: 200, headers: { "content-type": "application/json" } })));
+    const controller = new AbortController();
+    const pending = streamConsuelaChat({
+      message: "hi",
+      signal: controller.signal,
+      watchdogMs: 60_000,
+    });
+    controller.abort();
+    const err = await errOf(pending);
+    expect(err?.name).toBe("AbortError");
+  });
+
+  it("does not fire a short watchdog on a stream that completes in time", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      sseResponse('data: {"t":"done"}\n\ndata: [DONE]\n\n')));
+    await expect(streamConsuelaChat({ message: "hi", watchdogMs: 50 }))
+      .resolves.toEqual({ content: "done", streamed: true });
+  });
+});

@@ -13,8 +13,10 @@ export interface StreamConsuelaChatOptions {
   history?: Array<{ role: string; content: string }>;
   agent?: string;
   system?: string;
-  /** Resolves early with the partial content when the caller stops generation. */
+  /** Aborts the request when the caller stops generation. */
   signal?: AbortSignal;
+  /** Hard cap on the whole exchange, defaults to 5 minutes. */
+  watchdogMs?: number;
   /** Called per token with the full content so far and the new delta. */
   onToken?: (fullContent: string, delta: string) => void;
   /** Called per tool-status event with a friendly label and the parsed frame
@@ -56,12 +58,33 @@ export function parseSSEFrames(buffer: string): { frames: SSEFrame[]; rest: stri
   return { frames, rest };
 }
 
+/**
+ * The caller's stop and the watchdog are one event once composed into a single
+ * signal, so only the caller's own signal can tell them apart — and the
+ * distinction is load-bearing: chat-store renders "Stopped." with the partial
+ * text for an AbortError and a failure bubble for anything else. A timeout
+ * reported as a user stop would be a lie the parent sees in the thread.
+ */
+function failError(stopSignal: AbortSignal | undefined): Error {
+  if (stopSignal?.aborted) {
+    const e = new Error("Generation stopped");
+    e.name = "AbortError";
+    return e;
+  }
+  return new Error("Chat request timed out");
+}
+
 export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promise<StreamConsuelaChatResult> {
-  // Compose the caller's stop signal with the route watchdog: aborting either
-  // aborts the fetch; the caller's own signal never leaks the watchdog identity.
-  const signal = opts.signal
-    ? AbortSignal.any([opts.signal, AbortSignal.timeout(300_000)])
-    : AbortSignal.timeout(300_000);
+  const stopSignal = opts.signal;
+  // One composed signal for the whole exchange. Both the fetch and every read
+  // below race it: some runtimes and proxies don't honor the fetch abort on the
+  // body stream, so bounding only the fetch leaves a wedged read bouncing the
+  // typing dots with no honest error. The caller's signal never leaks the
+  // watchdog's identity into the request.
+  const failSignal = AbortSignal.any([
+    ...(stopSignal ? [stopSignal] : []),
+    AbortSignal.timeout(opts.watchdogMs ?? 300_000),
+  ]);
   let res: Response;
   try {
     res = await fetch("/api/hermes/chat", {
@@ -72,7 +95,7 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
       // route hangs (e.g. PB auth/config wedged). The longest legitimate flow
       // (trigger_update) restarts the server anyway, which drops the connection
       // regardless.
-      signal,
+      signal: failSignal,
       body: JSON.stringify({
         message: opts.message,
         history: opts.history,
@@ -82,63 +105,48 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
       }),
     });
   } catch (err) {
-    // A caller-initiated stop is not an error — it resolves with whatever
-    // streamed before the stop, tagged so the caller can label it honestly.
-    if (opts.signal?.aborted) {
-      const e = new Error("Generation stopped");
-      e.name = "AbortError";
-      throw e;
-    }
+    if (failSignal.aborted) throw failError(stopSignal);
     throw err;
   }
   if (!res.ok) throw new Error(`Chat request failed (${res.status})`);
 
-  const ctype = res.headers.get("content-type") || "";
-  if (!ctype.includes("text/event-stream") || !res.body) {
-    const data = await res.json();
-    const content = String(data.content || data.reply || "");
-    // No onToken here: on the buffered path there is nothing to stream, and
-    // emitting the whole reply early would let callers render before their
-    // thinking-floor/animation beat. The caller sets the final content after
-    // the await (gated on `streamed: false`).
-    return {
-      content,
-      streamed: false,
-      proposals: Array.isArray(data.proposals) ? data.proposals : undefined,
-    };
-  }
+  // The single listener raced against every await that can wedge: the buffered
+  // res.json() and each body read. The swallow-catch keeps a post-return abort
+  // (never raced again) from becoming an unhandled rejection; the listener is
+  // detached in the finally below.
+  let onFail: (() => void) | null = null;
+  const failRace = new Promise<never>((_, reject) => {
+    onFail = () => reject(failError(stopSignal));
+    if (failSignal.aborted) onFail();
+    else failSignal.addEventListener("abort", onFail, { once: true });
+  });
+  failRace.catch(() => {});
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let content = "";
-  let errorMsg: string | null = null;
-
-  // Race the body reads against the caller's stop signal: some runtimes /
-  // proxy streams don't honor the fetch abort on the body, and a blocked
-  // read() would leave the stop button hanging. Listeners are cleaned up in
-  // the finally below; the swallow-catch keeps a post-loop abort (never
-  // raced again) from becoming an unhandled rejection.
-  const stopSignal = opts.signal;
-  let onAbort: (() => void) | null = null;
-  const abortRace = stopSignal
-    ? new Promise<never>((_, reject) => {
-        onAbort = () => {
-          const e = new Error("Generation stopped");
-          e.name = "AbortError";
-          reject(e);
-        };
-        if (stopSignal.aborted) onAbort();
-        else stopSignal.addEventListener("abort", onAbort, { once: true });
-      })
-    : null;
-  abortRace?.catch(() => {});
-
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
+    const ctype = res.headers.get("content-type") || "";
+    if (!ctype.includes("text/event-stream") || !res.body) {
+      const data = await Promise.race([res.json(), failRace]);
+      const content = String(data.content || data.reply || "");
+      // No onToken here: on the buffered path there is nothing to stream, and
+      // emitting the whole reply early would let callers render before their
+      // thinking-floor/animation beat. The caller sets the final content after
+      // the await (gated on `streamed: false`).
+      return {
+        content,
+        streamed: false,
+        proposals: Array.isArray(data.proposals) ? data.proposals : undefined,
+      };
+    }
+
+    reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let content = "";
+    let errorMsg: string | null = null;
+
     outer: for (;;) {
-      const { done, value } = await (abortRace
-        ? Promise.race([reader.read(), abortRace])
-        : reader.read());
+      const { done, value } = await Promise.race([reader.read(), failRace]);
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const { frames, rest } = parseSSEFrames(buffer);
@@ -170,18 +178,21 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
         }
       }
     }
+
+    if (errorMsg) throw new Error(errorMsg);
+    return { content, streamed: true };
   } catch (err) {
-    if (stopSignal?.aborted) {
-      try { await reader.cancel(); } catch { /* body already gone */ }
-      const e = new Error("Generation stopped");
-      e.name = "AbortError";
-      throw e;
+    if (failSignal.aborted) {
+      // A wedged body is still holding its socket — release it, including the
+      // buffered path where res.json() owns the reader rather than us.
+      try {
+        if (reader) await reader.cancel();
+        else await res.body?.cancel();
+      } catch { /* body already gone or locked by the abandoned json() */ }
+      throw failError(stopSignal);
     }
     throw err;
   } finally {
-    if (stopSignal && onAbort) stopSignal.removeEventListener("abort", onAbort);
+    if (onFail) failSignal.removeEventListener("abort", onFail);
   }
-
-  if (errorMsg) throw new Error(errorMsg);
-  return { content, streamed: true };
 }
