@@ -66,6 +66,7 @@ export type UpdateTaskCommand = {
       | "speedBonus"
       | "crewSize"
       | "crewCloseMode"
+      | "expiresAfterDays"
     >
   >;
 };
