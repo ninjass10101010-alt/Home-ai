@@ -183,13 +183,14 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
     return { content, streamed: true };
   } catch (err) {
     if (failSignal.aborted) {
-      // Release the reader we hold. The buffered path has none to release:
-      // res.json() was evaluated as the race argument and already locked
-      // res.body, so the fetch's own abort of failSignal is what reclaims that
-      // socket.
-      try {
-        if (reader) await reader.cancel();
-      } catch { /* body already gone */ }
+      // Best-effort release of the reader we hold, deliberately NOT awaited: on
+      // a runtime that doesn't honor the fetch abort on the body — the case
+      // this watchdog exists for — a stalled cancel would delay the honest
+      // stop/timeout error and re-introduce the very hang we're ending. The
+      // buffered path has no reader to release (res.json() was evaluated as the
+      // race argument and already locked res.body), so there the socket is left
+      // to the fetch's own abort of failSignal, where the runtime honors it.
+      if (reader) void reader.cancel().catch(() => { /* body already gone */ });
       throw failError(stopSignal);
     }
     throw err;

@@ -167,13 +167,29 @@ describe("streamConsuelaChat watchdog", () => {
     return new ReadableStream<Uint8Array>({ start() { /* never resolves */ } });
   }
 
+  // A wedged body whose cancel algorithm also stalls or rejects — the runtime
+  // shape that made awaiting reader.cancel() reintroduce the very hang the
+  // watchdog removes. The honest error must land regardless.
+  function uncancellableSSE(cancel: () => Promise<void>) {
+    const enc = new TextEncoder();
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(c) { c.enqueue(enc.encode('data: {"t":"par"}\n\n')); },
+        cancel,
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  }
+
   // A pre-response stall: the route never answers, so the fetch itself is the
   // only thing racing the fail signal. Rejects the way real fetch does — an
   // AbortError DOMException — so these tests pin which error we surface, not
   // merely that one was surfaced.
   function stalledFetch() {
     return vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, rej) => {
-      init.signal?.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError")));
+      // Non-optional on purpose: a dropped `signal:` must fail here and now, not
+      // turn both pre-fetch tests into ambiguous 5s timeouts.
+      init.signal!.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError")));
     }));
   }
 
@@ -197,6 +213,23 @@ describe("streamConsuelaChat watchdog", () => {
     // would be dishonest.
     expect(err).toBeInstanceOf(Error);
     expect(err?.name).not.toBe("AbortError");
+  });
+
+  it("still rejects when the body's cancel algorithm never settles", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      uncancellableSSE(() => new Promise<void>(() => { /* never settles */ }))));
+    const err = await errOf(streamConsuelaChat({ message: "hi", watchdogMs: 50 }));
+    expect(err?.message).toMatch(/timed out/i);
+  });
+
+  it("keeps a rejecting cancel algorithm from escaping as an unhandled rejection", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      uncancellableSSE(() => Promise.reject(new Error("socket already dead")))));
+    const err = await errOf(streamConsuelaChat({ message: "hi", watchdogMs: 50 }));
+    expect(err?.message).toMatch(/timed out/i);
+    // yield so a stray rejection surfaces inside this test, where vitest
+    // attributes it, instead of after the file has torn down
+    await new Promise((r) => setTimeout(r, 0));
   });
 
   it("keeps streaming tokens flowing until the watchdog fires", async () => {
