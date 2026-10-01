@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { queueTaskCommand, type QueueTaskCommandInput } from "@/lib/task-command-queue";
 import { useTaskOperationOutbox } from "@/hooks/useTaskOperationOutbox";
-import type { FlushTaskOutboxResult, TaskOutboxEntry } from "@/lib/task-operation-outbox";
+import type { FlushTaskOutboxResult, TaskOutboxAcknowledgedEvent, TaskOutboxEntry } from "@/lib/task-operation-outbox";
 
 export interface UseTaskCommandQueueOptions {
   onAdopted?: () => void;
@@ -18,7 +18,7 @@ export interface TaskCommandCounts {
   failed: number;
 }
 
-export type TaskOutboxAcknowledgementListener = (acknowledgement: { operationId?: string }) => void;
+export type TaskOutboxAcknowledgementListener = (acknowledgement: TaskOutboxAcknowledgedEvent) => void;
 
 export interface TaskCommandQueue {
   queue: (input: QueueTaskCommandInput) => TaskOutboxEntry;

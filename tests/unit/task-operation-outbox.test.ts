@@ -23,6 +23,7 @@ import {
   flushTaskOutbox,
   getTaskOutboxServerSnapshot,
   getTaskOutboxSnapshot,
+  isSupportedTaskOperation,
   listTaskOutbox,
   pullTaskSnapshotDocument,
   createFetchTaskOutboxDriver,
@@ -1567,6 +1568,15 @@ describe("real route request bodies with an ephemeral PIN", () => {
       accepted: (body) => !("error" in parseClaimCommand(body)),
     },
     {
+      name: "claim crew-close",
+      entry: enqueueClaim({
+        operationId: "op-body-crew-close-array",
+        action: "crew-close",
+        payload: { taskId: 42, memberName: "Alex" },
+      }),
+      accepted: (body) => !("error" in parseClaimCommand(body)),
+    },
+    {
       name: "approve",
       entry: enqueueTaskOperation({
         operationId: "op-body-approve",
@@ -1743,6 +1753,49 @@ describe("real route request bodies with an ephemeral PIN", () => {
       ),
     ).toBe(true);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("crew-close rides the claim seam", () => {
+  it("is a supported claim operation whose body the claim route parser accepts", () => {
+    expect(isSupportedTaskOperation("/api/tasks/claim", "crew-close")).toBe(true);
+
+    const entry = enqueueClaim({
+      operationId: "op-body-crew-close",
+      action: "crew-close",
+      payload: { taskId: 42, memberName: "Alex" },
+    });
+    expect(entry.payload).toMatchObject({ taskId: 42, memberName: "Alex" });
+
+    const body = buildTaskOperationRequestBody(entry, PIN);
+    expect("error" in parseClaimCommand(body)).toBe(false);
+    expect(body).toMatchObject({ action: "crew-close", taskId: 42, pin: PIN });
+    expect(body).not.toHaveProperty("displayTarget");
+    expect(JSON.stringify(entry.payload)).not.toContain(PIN);
+    expect(allStoredText()).not.toContain(PIN);
+  });
+
+  it("holds a crew-close entry for the PIN it must never send bare", async () => {
+    expect(isSupportedTaskOperation("/api/tasks/claim", "crew-close")).toBe(true);
+    enqueueClaim({
+      operationId: "op-crew-close-pin",
+      action: "crew-close",
+      payload: { taskId: 42, memberName: "Alex" },
+    });
+    const send = vi.fn();
+
+    const result = await flushWithAdoption({ send: send as never });
+
+    expect(send).not.toHaveBeenCalled();
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(entryFor("op-crew-close-pin").status).toBe("auth-required");
+
+    const withCredential = await flushWithAdoption({
+      send: respond(200, ack("op-crew-close-pin")),
+      getCredential: () => PIN,
+    });
+    expect(withCredential).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
   });
 });
 

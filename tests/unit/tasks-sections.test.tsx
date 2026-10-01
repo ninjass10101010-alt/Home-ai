@@ -91,9 +91,9 @@ describe("tasks sections (audit 5.7)", () => {
 
   it("CrewTasksCard stays hidden unless the parent gate is on", () => {
     const crewTask = { id: 9, title: "Rake the yard", points: 10, crew: { members: [{ name: "Alex", emoji: "🧒" }] }, crewSize: 2, completed: false, pendingApproval: false } as never;
-    const hidden = render(createElement(CrewTasksCard, { tasks: [crewTask], visible: false, onRemoveMember: vi.fn() }));
+    const hidden = render(createElement(CrewTasksCard, { tasks: [crewTask], visible: false, onRemoveMember: vi.fn(), onCloseCrew: vi.fn() }));
     expect(hidden.textContent).toBe("");
-    const shown = render(createElement(CrewTasksCard, { tasks: [crewTask], visible: true, onRemoveMember: vi.fn() }));
+    const shown = render(createElement(CrewTasksCard, { tasks: [crewTask], visible: true, onRemoveMember: vi.fn(), onCloseCrew: vi.fn() }));
     expect(shown.textContent).toContain("Rake the yard");
     expect(shown.textContent).toContain("Alex");
   });

@@ -16,6 +16,7 @@ import {
   type FlushTaskOutboxResult,
   type SnapshotRead,
   type TaskOutboxAcknowledgement,
+  type TaskOutboxAcknowledgedEvent,
   type TaskOutboxEntry,
 } from "@/lib/task-operation-outbox";
 
@@ -29,7 +30,7 @@ export interface UseTaskOperationOutboxOptions {
 
 export interface UseTaskOperationOutboxResult {
   entries: TaskOutboxEntry[];
-  onAcknowledged: (listener: (acknowledgement: { operationId?: string }) => void) => () => void;
+  onAcknowledged: (listener: (acknowledgement: TaskOutboxAcknowledgedEvent) => void) => () => void;
   pending: number;
   queued: number;
   reconciling: number;
@@ -91,7 +92,7 @@ export function useTaskOperationOutbox(
   const flush = useCallback(() => requestTaskOutboxFlush(), []);
   const cancel = useCallback((operationId: string) => cancelTaskOutboxEntry(operationId), []);
   const onAcknowledged = useCallback(
-    (listener: (acknowledgement: { operationId?: string }) => void) => onTaskOutboxAcknowledged(listener),
+    (listener: (acknowledgement: TaskOutboxAcknowledgedEvent) => void) => onTaskOutboxAcknowledged(listener),
     [],
   );
 

@@ -947,4 +947,34 @@ describe("POST /api/tasks/manage — crewCloseMode", () => {
     expect(harness.snapshotWrites()).toBe(0);
     expect(harness.snapshot().tasks.some((task: Row) => task.title === "Wash the car")).toBe(false);
   });
+
+  it("accepts a crew→solo patch that nulls crewCloseMode instead of leaking the crew mode", async () => {
+    const snapshot = {
+      revision: "4",
+      tasks: [{
+        ...defaultTask(),
+        assignee: "Crew",
+        assigneeEmoji: "🤝",
+        crewSize: 3,
+        crewCloseMode: "parent",
+        crew: { members: [], removed: [] },
+      }],
+      deletedTaskIds: [],
+      weekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+    };
+    const harness = makeHarness({ snapshot });
+    const response = await postManage(harness, {
+      action: "update",
+      operationId: "op-crew-close-to-solo",
+      taskId: 77,
+      patch: { title: "Water plants", assignee: "Alex Child", universal: false, crewSize: null, crewCloseMode: null },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.task.crewCloseMode ?? null).toBeNull();
+    const stored = harness.snapshot().tasks.find((task: Row) => task.id === 77);
+    expect(stored?.crewCloseMode ?? null).toBeNull();
+    expect(stored?.crewSize ?? null).toBeNull();
+  });
 });

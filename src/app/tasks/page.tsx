@@ -51,9 +51,11 @@ import {
   saveDeletedTaskIds,
   isCrewTask, crewMembers, crewMemberCount, crewFull, crewHasMember,
   crewMemberCheckedIn, crewCheckinProgress,
+  crewCloseModeOf,
   normalizeSpeedBonus,
 } from "@/lib/task-utils";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
+import type { TaskOutboxAcknowledgedEvent } from "@/lib/task-operation-outbox";
 import { writeTaskConfig } from "@/lib/task-config-client";
 import type { TaskConfigCommand } from "@/lib/task-config";
 import {
@@ -166,6 +168,7 @@ function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
     stealable: false,
     crewSize: null,
     crew: null,
+    crewCloseMode: "strict",
   };
 }
 
@@ -396,6 +399,9 @@ export default function TasksPage() {
   const [crewRemoveTarget, setCrewRemoveTarget] = useState<{ taskId: number; memberName: string } | null>(null);
   const [crewRemovePin, setCrewRemovePin] = useState("");
   const [crewRemoveError, setCrewRemoveError] = useState("");
+  const [crewCloseTarget, setCrewCloseTarget] = useState<{ taskId: number } | null>(null);
+  const [crewClosePin, setCrewClosePin] = useState("");
+  const [crewCloseError, setCrewCloseError] = useState("");
 
   useEffect(() => { saveRewards(rewards); }, [rewards]);
   useEffect(() => { savePenalties(penalties); }, [penalties]);
@@ -429,7 +435,24 @@ export default function TasksPage() {
   const addOptimisticRow = useCallback((operationId: string, row: OptimisticRow) => {
     setOptimisticRows((prev) => ({ ...prev, [operationId]: row }));
   }, []);
-  const onAcknowledged = useCallback((acknowledged: { operationId?: string }) => {
+  // Defined above the acknowledgment listener so that listener can raise the
+  // eligibility copy from the same stable callback.
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }, []);
+  const onAcknowledged = useCallback((acknowledged: TaskOutboxAcknowledgedEvent) => {
+    // An approval ack carries how many award-list members the family server
+    // left out (roster changed between close and approve). Say it as
+    // eligibility: a replay recomputes that set from the CURRENT roster, so
+    // "N not eligible" stays true either way — "skipped N just now" would not.
+    if (
+      (acknowledged.action === "approve" || acknowledged.action === "approve-all") &&
+      typeof acknowledged.skipped === "number" &&
+      acknowledged.skipped > 0
+    ) {
+      showToast(`${acknowledged.skipped} not eligible`);
+    }
     const operationId = acknowledged?.operationId;
     if (!operationId) return;
     setOptimisticRows((prev) => {
@@ -438,7 +461,7 @@ export default function TasksPage() {
       delete next[operationId];
       return next;
     });
-  }, []);
+  }, [showToast]);
   const {
     queue: queueCommand,
     counts: outboxCounts,
@@ -531,11 +554,6 @@ export default function TasksPage() {
     setTimeout(() => setConfettiActive(false), 2500);
   }, []);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  };
-
   const startEdit = (task: Task) => {
     if (!isParent) return; // P0 gate — kids/guests can never edit family chores
     if (!tasks.some((row) => row.id === task.id)) {
@@ -567,11 +585,15 @@ export default function TasksPage() {
     if (!editForm.title.trim()) return;
     // Normalize mode fields so a stale value from a previous mode can't leak
     // (e.g. switching Crew -> Assigned must drop crewSize/crew).
+    // `crewCloseMode` mirrors the crewSize treatment: it is a crew-only field,
+    // so a crew→solo switch must NULL it explicitly — the server refuses a
+    // non-crew patch that still names a crew mode, and a stale stored value
+    // would otherwise ride the spread into the assigned-task patch.
     const normalized: Task = isCrewTask(editForm)
-      ? { ...editForm, universal: false, speedBonus: undefined, crew: { members: crewMembers(editForm) } }
+      ? { ...editForm, universal: false, speedBonus: undefined, crewCloseMode: editForm.crewCloseMode ?? "strict", crew: { members: crewMembers(editForm) } }
       : editForm.universal
-        ? { ...editForm, crewSize: null, crew: null, speedBonus: normalizeSpeedBonus(editForm.speedBonus) }
-        : { ...editForm, crewSize: null, crew: null, speedBonus: undefined, universal: false };
+        ? { ...editForm, crewSize: null, crew: null, crewCloseMode: null, speedBonus: normalizeSpeedBonus(editForm.speedBonus) }
+        : { ...editForm, crewSize: null, crew: null, crewCloseMode: null, speedBonus: undefined, universal: false };
     if (isAdding) {
       const temporaryId = uid();
       const added = queueCommand({
@@ -960,6 +982,53 @@ export default function TasksPage() {
       setCrewRemoveTarget(null);
       setCrewRemovePin("");
       setCrewRemoveError("");
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
+  // Parent closes a parent-mode crew with whatever check-ins exist. Same
+  // parent-PIN verification loop as every other review action, ONE durable
+  // claim command, and no optimistic row (decision §3): the toast and the
+  // outbox status carry the wait, and only the server stages the pending.
+  const submitCrewClose = async () => {
+    if (!crewCloseTarget || !crewClosePin || pinBusy) return;
+    setPinBusy(true);
+    try {
+      let parent: any = null;
+      let unreachable = false;
+      for (const m of membersData.filter((m: any) => m.role === "parent")) {
+        const result = await verifyPinRemote(m.fullName, crewClosePin);
+        if (result.status === "ok") { parent = m; break; }
+        if (result.status === "unreachable") { unreachable = true; break; }
+      }
+      if (unreachable) {
+        setCrewCloseError(unreachableCopy());
+        setCrewClosePin("");
+        setTimeout(() => setCrewCloseError(""), 2500);
+        return;
+      }
+      if (!parent) {
+        setCrewCloseError("Parent PIN required to close the crew.");
+        setCrewClosePin("");
+        setTimeout(() => setCrewCloseError(""), 2500);
+        return;
+      }
+      const target = tasks.find((x) => x.id === crewCloseTarget.taskId);
+      const awards = target ? crewMembers(target).filter((m) => m.checkedInAt) : [];
+      queueCommand({
+        route: "/api/tasks/claim",
+        action: "crew-close",
+        payload: { taskId: crewCloseTarget.taskId, memberName: parent.fullName },
+        displayTarget: { kind: "task", taskId: crewCloseTarget.taskId, title: target?.title },
+        credential: { pin: crewClosePin },
+      });
+      showToast(
+        `Closing the crew — the ${awards.length} helper${awards.length !== 1 ? "s" : ""} who checked in land${awards.length === 1 ? "s" : ""} in approval for +${target?.points ?? 0} pts each.`,
+      );
+      setCrewCloseTarget(null);
+      setCrewClosePin("");
+      setCrewCloseError("");
     } finally {
       setPinBusy(false);
     }
@@ -1844,7 +1913,9 @@ export default function TasksPage() {
                   {formType === "crew" && (() => {
                     const minSize = Math.max(2, crewMemberCount(editForm));
                     const size = editForm.crewSize ?? minSize;
+                    const closeMode = editForm.crewCloseMode ?? "strict";
                     return (
+                      <>
                       <div>
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Crew size</span>
                         <div className="flex items-center gap-3">
@@ -1857,6 +1928,27 @@ export default function TasksPage() {
                           <span className="mt-1 block text-xs text-text-muted">Can&apos;t go below {minSize} — {crewMemberCount(editForm)} already joined.</span>
                         )}
                       </div>
+                      <div>
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Close when</span>
+                        <SegmentedControl
+                          aria-label="Close when"
+                          value={closeMode}
+                          onChange={(value) => updateForm("crewCloseMode", value as "strict" | "parent" | "deadline")}
+                          options={[
+                            { id: "strict", label: "Everyone" },
+                            { id: "parent", label: "Parent closes" },
+                            { id: "deadline", label: "At due date" },
+                          ]}
+                        />
+                        <p className="mt-2 text-xs text-text-secondary">
+                          {closeMode === "parent"
+                            ? "A parent can close it once at least one helper checked in — only the helpers who checked in land in approval."
+                            : closeMode === "deadline"
+                              ? "The morning after the due date, helpers who checked in go to approval. If nobody checked in it just turns overdue."
+                              : "It completes when the crew is full and everyone checked in — all-or-nothing."}
+                        </p>
+                      </div>
+                      </>
                     );
                   })()}
                   {formType === "assigned" && (
@@ -1921,6 +2013,11 @@ export default function TasksPage() {
                 setCrewRemoveTarget({ taskId, memberName });
                 setCrewRemovePin("");
                 setCrewRemoveError("");
+              }}
+              onCloseCrew={(taskId) => {
+                setCrewCloseTarget({ taskId });
+                setCrewClosePin("");
+                setCrewCloseError("");
               }}
             />
 
@@ -2068,6 +2165,7 @@ export default function TasksPage() {
                   {pendingApprovals.map((task) => {
                     const crew = task.pendingApproval!.crew ?? [];
                     const isCrew = crew.length > 0;
+                    const joined = isCrewTask(task) ? crewMemberCount(task) : 0;
                     return (
                     <div
                       key={task.id}
@@ -2083,6 +2181,9 @@ export default function TasksPage() {
                           {isCrew
                             ? `🤝 Crew ${crew.length}/${task.crewSize ?? crew.length} · ${task.points}pts each · ${crew.map((n) => n.split(" ")[0]).join(", ")}`
                             : `${task.pendingApproval!.byName.split(" ")[0]} · tapped ${task.pendingApproval!.at.split("T")[0]} · ${task.points}pts`}
+                          {isCrew && crew.length !== joined && (
+                            <span className="text-xs text-text-secondary"> · {crew.length} of {joined} checked in</span>
+                          )}
                         </div>
                       </div>
                       <button type="button" aria-label={`Approve ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("approve"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle">Approve</button>
@@ -2737,6 +2838,47 @@ export default function TasksPage() {
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
             {crewRemoveError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{crewRemoveError}</p>}
+          </div>
+        </Modal>
+      )}
+
+      {crewCloseTarget !== null && (
+        <Modal
+          open
+          onClose={() => { setCrewCloseTarget(null); setCrewClosePin(""); setCrewCloseError(""); }}
+          title="Close the crew?"
+          description={(() => {
+            const target = tasks.find((x) => x.id === crewCloseTarget.taskId);
+            const names = target
+              ? crewMembers(target).filter((m) => m.checkedInAt).map((m) => m.name.split(" ")[0])
+              : [];
+            return names.length > 0
+              ? `Award ${target?.points ?? 0} pts to ${names.join(", ")} — the others aren't counted.`
+              : "Nobody has checked in yet.";
+          })()}
+          footer={
+            <>
+              <SoftButton onClick={submitCrewClose} loading={pinBusy} disabled={!crewClosePin || pinBusy} className="flex-1">Close crew</SoftButton>
+              <SoftButton variant="secondary" onClick={() => { setCrewCloseTarget(null); setCrewClosePin(""); setCrewCloseError(""); }} className="flex-1">Cancel</SoftButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-text-secondary">Enter a parent PIN to close this crew. Only the helpers who checked in go to approval.</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={crewClosePin}
+              onChange={(e) => { setCrewClosePin(e.target.value.replace(/[^0-9]/g, "")); setCrewCloseError(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") submitCrewClose(); }}
+              placeholder="Parent PIN"
+
+              aria-label="Parent PIN"
+              autoFocus
+              className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
+            />
+            {crewCloseError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{crewCloseError}</p>}
           </div>
         </Modal>
       )}

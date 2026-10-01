@@ -1,5 +1,6 @@
 import SectionCard from "@/components/patterns/SectionCard";
-import { crewMemberCount, crewMembers, isCrewTask } from "@/lib/task-utils";
+import SoftButton from "@/components/ui/SoftButton";
+import { crewCloseModeOf, crewMemberCount, crewMembers, isCrewTask } from "@/lib/task-utils";
 import type { Task } from "@/types/tasks";
 
 /**
@@ -11,9 +12,10 @@ interface CrewTasksCardProps {
   tasks: Task[];
   visible: boolean;
   onRemoveMember: (taskId: number, memberName: string) => void;
+  onCloseCrew: (taskId: number) => void;
 }
 
-export default function CrewTasksCard({ tasks, visible, onRemoveMember }: CrewTasksCardProps) {
+export default function CrewTasksCard({ tasks, visible, onRemoveMember, onCloseCrew }: CrewTasksCardProps) {
   return (
     <>
       {visible && (() => {
@@ -46,6 +48,18 @@ export default function CrewTasksCard({ tasks, visible, onRemoveMember }: CrewTa
                       ))}
                       {crewMemberCount(task) === 0 && <span className="text-xs text-text-muted">Nobody has joined yet.</span>}
                     </div>
+                    {crewCloseModeOf(task) !== "strict" && (
+                      <div className="mt-1 text-xs text-text-muted">
+                        {crewCloseModeOf(task) === "parent" ? "Parent closes" : "Auto-closes at the due date"}
+                      </div>
+                    )}
+                    {crewCloseModeOf(task) === "parent" && crewMembers(task).some((m) => m.checkedInAt) && (
+                      <div className="mt-2">
+                        <SoftButton onClick={() => onCloseCrew(task.id)} className="w-full">
+                          ✓ Close with check-ins ({crewMembers(task).filter((m) => m.checkedInAt).length} of {task.crewSize})
+                        </SoftButton>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

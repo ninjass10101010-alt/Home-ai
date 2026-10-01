@@ -148,6 +148,7 @@ const CLAIM_PAYLOAD_KEYS: Record<string, readonly string[]> = {
   "crew-join": ["taskId", "memberName", "assigneeEmoji"],
   "crew-checkin": ["taskId", "memberName", "assigneeEmoji"],
   "crew-remove": ["taskId", "memberName", "targetName"],
+  "crew-close": ["taskId", "memberName"],
 };
 
 const APPROVE_PAYLOAD_KEYS: Record<string, readonly string[]> = {
@@ -259,7 +260,7 @@ const CREDENTIAL_BODY_KEYS: Record<string, readonly (keyof TaskOutboxCredential)
 // PIN is refused there, not here.
 const CREDENTIAL_REQUIRED_ACTIONS: Record<string, Set<string>> = {
   "/api/tasks/approve": new Set(["approve", "approve-all", "send-back"]),
-  "/api/tasks/claim": new Set(["claim", "crew-remove"]),
+  "/api/tasks/claim": new Set(["claim", "crew-remove", "crew-close"]),
   "/api/tasks/manage": new Set(),
   "/api/tasks/config": new Set(),
   "/api/tasks/ledger": new Set(["penalty", "adjust"]),
@@ -735,8 +736,18 @@ function mutateOutbox(reducer: (fresh: TaskOutboxEntry[]) => TaskOutboxEntry[]):
 
 // Acknowledgment events live here, next to the code that raises them, so a
 // caller can observe "operation X landed" without mounting the React hook.
+// The counts are optional on purpose: only the body of the operation that just
+// landed carries them, a local cancel raises the event with no body at all, and
+// every consumer must read them defensively (`0` is omitted by the routes, an
+// older ack shape simply has no key).
 export interface TaskOutboxAcknowledgedEvent {
   operationId?: string;
+  /** The landed entry's action, so a listener can tell an approval from a claim. */
+  action?: string;
+  paid?: number;
+  cleared?: number;
+  /** Award-list members the server left out — surfaced as eligibility, never as a timestamp. */
+  skipped?: number;
 }
 
 // A separate signal from the acknowledgment: the canonical STORES were just
@@ -1192,7 +1203,13 @@ async function acknowledge(
   }
   forgetTaskCommandCredential(entry.operationId);
   removeTaskOutboxEntry(entry.operationId);
-  notifyAcknowledged({ operationId: entry.operationId });
+  notifyAcknowledged({
+    operationId: entry.operationId,
+    action: entry.action,
+    paid: body.paid,
+    cleared: body.cleared,
+    skipped: body.skipped,
+  });
   return { acknowledged: 1, retryable: 0, permanent: 0 };
 }
 
