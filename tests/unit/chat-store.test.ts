@@ -12,6 +12,7 @@ import {
   send,
   stop,
   startNewConversation,
+  OPTIMISTIC_ID_CEILING,
 } from "@/lib/chat-store";
 
 const SPEAKER = { name: "Rebecca", emoji: "🐱" };
@@ -129,28 +130,63 @@ describe("chat-store core", () => {
     expect(new Set(msgs.map((m) => m.id)).size).toBe(msgs.length);
   });
 
-  it("keeps optimistic ids strictly below the PB synthetic base after hydration", async () => {
+  it("keeps the optimistic range disjoint from the PB-assigned range in one snapshot", async () => {
     vi.stubGlobal("fetch", okFetch([{ role: "assistant", content: "pb", createdAt: "2026-09-20T10:00:00.000Z" }]));
     streamMock.fn.mockResolvedValue({ content: "ok", streamed: true });
     await ensureHydrated();
     await send("hi", SPEAKER);
-    const pbBase = 2_000_000;
-    const optimistic = getSnapshot().messages.filter((m) => m.id < pbBase && m.id !== 1);
-    expect(optimistic.length).toBeGreaterThan(0);
-    expect(optimistic.every((m) => m.id > 0 && m.id < pbBase)).toBe(true);
+
+    const msgs = getSnapshot().messages;
+    // Selected by CONTENT, never by id range: filtering on the property under
+    // test would make the assertion below true by construction.
+    const optimistic = msgs.filter((m) => m.content === "hi" || m.content === "ok");
+    const pbIds = msgs.filter((m) => m.content === "pb").map((m) => m.id);
+    expect(optimistic).toHaveLength(2);
+    expect(pbIds).toHaveLength(1);
+    // The boundary comes from the hydrated snapshot itself — every id this load
+    // allocated sits below the lowest PB-assigned id, so the two ranges can
+    // never overlap and no allocation can overwrite a PB row.
+    expect(Math.max(...optimistic.map((m) => m.id))).toBeLessThan(Math.min(...pbIds));
+    expect(new Set(msgs.map((m) => m.id)).size).toBe(msgs.length);
   });
 
-  it("clamps the reseed so a foreign stored id cannot push allocations into PB space", async () => {
+  it("refuses to allocate past the ceiling when a reseed lands the counter on it", async () => {
+    // CEILING - 1 is IN range, so the reseed accepts it and sets msgCounter to
+    // exactly CEILING — the state the reseed can reach on its own.
     localStorage.setItem("consuela-chat-messages", JSON.stringify([
-      { id: 1_999_999, role: "assistant", content: "migrated row", timestamp: "Yesterday", at: 1 },
+      { id: OPTIMISTIC_ID_CEILING - 1, role: "assistant", content: "foreign row", timestamp: "Yesterday", at: 1 },
     ]));
     streamMock.fn.mockResolvedValue({ content: "ok", streamed: true });
     await ensureHydrated();
+    // One allocation, so the saturated id stays unique and the thread can still
+    // assert global id uniqueness.
+    await startNewConversation();
+
+    const msgs = getSnapshot().messages;
+    const marker = msgs.find((m) => m.role === "system" && m.content === "New conversation");
+    expect(marker?.id).toBe(OPTIMISTIC_ID_CEILING);
+    const ids = msgs.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("clamps the reseed so a foreign stored id cannot push allocations into PB space", async () => {
+    // The lowest id the range check rejects: above the ceiling, still far below
+    // PB space, and in the same range a migration would land in.
+    localStorage.setItem("consuela-chat-messages", JSON.stringify([
+      { id: OPTIMISTIC_ID_CEILING + 1, role: "assistant", content: "migrated row", timestamp: "Yesterday", at: 1 },
+    ]));
+    vi.stubGlobal("fetch", okFetch([{ role: "assistant", content: "pb-row", createdAt: "2026-09-20T10:00:00.000Z" }]));
+    streamMock.fn.mockResolvedValue({ content: "ok", streamed: true });
+    await ensureHydrated();
     await send("hi", SPEAKER);
-    const fresh = getSnapshot().messages.filter((m) => m.content === "hi" || m.content === "ok");
+    const msgs = getSnapshot().messages;
+    const fresh = msgs.filter((m) => m.content === "hi" || m.content === "ok");
+    const pbIds = msgs.filter((m) => m.content === "pb-row").map((m) => m.id);
     expect(fresh).toHaveLength(2);
-    expect(fresh.every((m) => m.id > 0 && m.id < 2_000_000)).toBe(true);
-    const ids = getSnapshot().messages.map((m) => m.id);
+    expect(pbIds).toHaveLength(1);
+    // Asserted against a PB row in the SAME snapshot, not a re-hardcoded base.
+    expect(fresh.every((m) => m.id > 0 && m.id < Math.min(...pbIds))).toBe(true);
+    const ids = msgs.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 

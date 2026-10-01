@@ -141,13 +141,14 @@ function todayISO(): string {
 const PB_SYNTHETIC_ID_BASE = 2_000_000;
 
 /**
- * How much room the reseed leaves above the highest stored id before it gives
- * up and clamps. Optimistic ids are dense (a few per turn), so this is a
- * generous ceiling on a single page load's allocations — and staying well
- * under PB space keeps the two ranges disjoint even if a stored id sits near
- * the base.
+ * Hard upper bound of the optimistic range. Nothing this module issues gets
+ * near it — the only writers are the seed greeting, then a few hundred
+ * allocations climbing from 100 — so an id at or above this line in a stored
+ * payload is FOREIGN: another app's ids, or a migration that renumbered a
+ * thread. The reseed reads those rows as no input at all, and the allocation
+ * seam refuses to climb past here. Exported for the id-space tests.
  */
-const OPTIMISTIC_ID_CEILING = PB_SYNTHETIC_ID_BASE - 1_000;
+export const OPTIMISTIC_ID_CEILING = PB_SYNTHETIC_ID_BASE - 1_000;
 
 // Synthetic ids for PB-hydrated rows must be unique ACROSS reconciles, not
 // just within one fetch — a per-fetch index collides and duplicate React keys
@@ -200,23 +201,40 @@ let abortController: AbortController | null = null;
  *
  * Two guards, because rows only exist once they materialize: the reseed is
  * MONOTONIC (ids already handed out — e.g. a reply row reserved before its
- * first token — must not be re-issued), and it is CLAMPED so a hand-edited or
- * migrated localStorage id cannot push the next allocation into PB space.
+ * first token — must not be re-issued), and it reads ONLY ids inside the
+ * optimistic range, so a hand-edited or migrated localStorage id seeds nothing.
+ * The ceiling itself is held by nextOptimisticId, below.
  */
 function reseedOptimisticCounter(rows: Message[]): void {
   let max = 100;
   for (const m of rows) {
-    // Anything at or above the ceiling is not an optimistic id we issued, so
-    // it must neither seed the counter nor be walked into by later allocations.
-    if (typeof m.id !== "number" || m.id < 0 || m.id >= OPTIMISTIC_ID_CEILING) continue;
+    // The range check is load-bearing: `persistHistory()` writes PB-synthetic
+    // rows too, so every real payload holds ids >= PB_SYNTHETIC_ID_BASE — let
+    // one seed the counter and the very next page load allocates in PB space.
+    // The `typeof` guard is load-bearing for a different reason:
+    // `loadChatHistory()` casts rows to `any`, so a single string id makes
+    // Math.max return NaN and pins msgCounter to NaN for the whole page load.
+    if (typeof m.id !== "number" || m.id >= OPTIMISTIC_ID_CEILING) continue;
     max = Math.max(max, m.id);
   }
-  msgCounter = Math.max(msgCounter, Math.min(max + 1, OPTIMISTIC_ID_CEILING));
+  // Monotonic: ids already handed out this load — e.g. a reply row reserved
+  // before its first token — must not be re-issued.
+  msgCounter = Math.max(msgCounter, max + 1);
 }
 
-/** The single allocation seam for optimistic ids. */
+/**
+ * The single allocation seam for optimistic ids, and where the disjointness
+ * invariant is actually ENFORCED. The reseed cannot hold it by itself: it
+ * legitimately places msgCounter AT the ceiling (a stored id one below it is
+ * in range, so max + 1 === OPTIMISTIC_ID_CEILING), and the next allocation
+ * would cross into PB space.
+ *
+ * Saturates instead of crossing. A duplicate optimistic id is a visible glitch
+ * in an already-degenerate state; an id that collides with a PB row is the
+ * overwrite bug this whole scheme exists to prevent.
+ */
 function nextOptimisticId(): number {
-  msgCounter += 1;
+  msgCounter = Math.min(msgCounter + 1, OPTIMISTIC_ID_CEILING);
   return msgCounter;
 }
 
