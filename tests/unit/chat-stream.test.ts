@@ -81,11 +81,18 @@ describe("streamConsuelaChat", () => {
     const routeMessage = "My brain isn't configured yet — add a provider in Settings → AI Models.";
     vi.stubGlobal("fetch", vi.fn(async () =>
       sseResponse(`event: error\ndata: ${JSON.stringify({ message: routeMessage })}\n\n`)));
-    // `name`, not `instanceof`: chat-store mocks this module wholesale, so the
-    // store can only recognize this error by name — and `name` also survives
-    // the serialization any future boundary would put between the two.
+    // The name is what chat-store discriminates on, so the frame's exact text
+    // has to arrive on the very error that carries it.
     await expect(streamConsuelaChat({ message: "hi" }))
       .rejects.toMatchObject({ name: "RouteChatError", message: routeMessage });
+  });
+
+  it("falls back to the generic copy when the error frame's message is not a string", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      sseResponse('event: error\ndata: {"message":{}}\n\n')));
+    const err = await streamConsuelaChat({ message: "hi" }).then(() => null, (e: unknown) => e as Error);
+    // A `String()` coercion would put "[object Object]" in front of the family.
+    expect(err?.message).toBe("Chat failed");
   });
 
   it("falls back to buffered JSON when the route answers non-SSE", async () => {

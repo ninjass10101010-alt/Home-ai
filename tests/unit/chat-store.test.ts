@@ -110,12 +110,14 @@ describe("chat-store core", () => {
     ));
     await ensureHydrated();
     await send("hi", SPEAKER);
-    const msgs = getSnapshot().messages;
-    expect(msgs.some((m) => m.content.includes("add a provider in Settings"))).toBe(true);
-    expect(msgs.some((m) => m.errorFor === "hi")).toBe(true);
+    const routeMsg = "My brain isn't configured yet — add a provider in Settings → AI Models.";
+    const bubble = getSnapshot().messages.find((m) => m.errorFor === "hi");
+    // Exact equality, not `includes`: any prefix or suffix the store added would
+    // still satisfy a clause check, and only the route's own sentence is honest.
+    expect(bubble?.content).toBe(routeMsg);
   });
 
-  it("keeps the offline copy for a real network failure", async () => {
+  it("keeps the server-outage copy for a real network failure", async () => {
     // The route never spoke, so there is no route text to show — the outage
     // copy is the only honest thing available.
     streamMock.fn.mockRejectedValue(new TypeError("Failed to fetch"));
@@ -124,6 +126,22 @@ describe("chat-store core", () => {
     const msgs = getSnapshot().messages;
     expect(msgs.some((m) => m.content.includes("couldn't reach the family server"))).toBe(true);
     expect(msgs.some((m) => m.content.includes("add a provider in Settings"))).toBe(false);
+  });
+
+  it("keeps the offline copy when the browser reports no connection", async () => {
+    // Restored in-test rather than in afterEach: a leak here would silently
+    // flip every later failure in this file to the offline branch.
+    Object.defineProperty(window.navigator, "onLine", { value: false, configurable: true });
+    try {
+      streamMock.fn.mockRejectedValue(new TypeError("Failed to fetch"));
+      await ensureHydrated();
+      await send("hi", SPEAKER);
+      const msgs = getSnapshot().messages;
+      expect(msgs.some((m) => m.content.includes("You're offline — I can't reach the family server"))).toBe(true);
+      expect(msgs.some((m) => m.content.includes("add a provider in Settings"))).toBe(false);
+    } finally {
+      Object.defineProperty(window.navigator, "onLine", { value: true, configurable: true });
+    }
   });
 
   it("startNewConversation appends the reset marker and POSTs the reset", async () => {

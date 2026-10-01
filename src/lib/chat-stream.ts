@@ -178,7 +178,7 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
         } else if (frame.event === "error") {
           try {
             const p = JSON.parse(frame.data);
-            errorMsg = String(p.message || "Chat failed");
+            errorMsg = typeof p.message === "string" && p.message.trim() ? p.message : "Chat failed";
           } catch {
             errorMsg = "Chat failed";
           }
