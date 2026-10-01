@@ -236,9 +236,11 @@ describe("Task 7 — favorites (templates) UI", () => {
     expect(config).toMatchObject({ action: "replace" });
     const items = config!.payload.items as any[];
     expect(items.map((i) => i.id)).toEqual(["tpl-trash"]);
-    // Nothing is deleted locally before the acknowledgment — the durable
-    // command is the only writer.
-    expect(loadTaskTemplates().map((t) => t.id)).toEqual(["tpl-dog", "tpl-trash"]);
+    // The local list adopts the change OPTIMISTICALLY — a queued sibling edit
+    // must compose from the page state, not an ack-only store. The outbox
+    // entry is the durable command; the ack's strictly-newer adoption is the
+    // reconciler.
+    expect(loadTaskTemplates().map((t) => t.id)).toEqual(["tpl-trash"]);
   });
 
   it("5. a template whose assigneeName resolves to a pet leaves the assignee untouched", async () => {
@@ -283,5 +285,70 @@ describe("Task 7 — favorites (templates) UI", () => {
     await act(async () => { selectValue(recurring, "Daily"); });
     await settle();
     expect(dialogAt().querySelector('button[aria-label="Increase Auto-remove if unfinished"]')).toBeNull();
+  });
+
+  it("7. switching Recurring clears a set expiry so the queued add carries null", async () => {
+    await renderParent();
+    await openAdd();
+    const inc = () => dialogAt().querySelector('button[aria-label="Increase Auto-remove if unfinished"]') as HTMLButtonElement;
+    await act(async () => { inc().click(); });
+    await act(async () => { inc().click(); });
+    expect(inc().parentElement?.textContent).toContain("2");
+
+    const recurring = Array.from(dialogAt().querySelectorAll("select")).find(
+      (s) => Array.from((s as HTMLSelectElement).options).some((o) => o.value === "Daily")
+    ) as HTMLSelectElement;
+    await act(async () => { selectValue(recurring, "Daily"); });
+    await act(async () => {
+      typeInto(dialogAt().querySelector('input[placeholder="Task title"]') as HTMLInputElement, "Water plants");
+    });
+    await act(async () => { buttonByText(dialogAt(), "Save").click(); });
+    await settle(160);
+
+    // The server refuses recurring + non-null expiry; the queued add must be
+    // created, with the stale hidden value cleared.
+    const manage = listTaskOutbox().find((e) => e.route === "/api/tasks/manage" && e.action === "add");
+    expect(manage).toBeTruthy();
+    expect((manage!.payload as any).task).toMatchObject({
+      title: "Water plants",
+      recurring: "Daily",
+      expiresAfterDays: null,
+    });
+  });
+
+  it("8. queued favorites compose optimistically: two saves keep both, two deletes drop both", async () => {
+    await renderParent();
+
+    // Save A, then Save B — no ack in between (the fetch stub never succeeds).
+    for (const title of ["Chore A", "Chore B"]) {
+      await openAdd();
+      await act(async () => {
+        typeInto(dialogAt().querySelector('input[placeholder="Task title"]') as HTMLInputElement, title);
+      });
+      await act(async () => {
+        (dialogAt().querySelector('input[type="checkbox"][aria-label="⭐ Save as favorite"]') as HTMLInputElement).click();
+      });
+      await act(async () => { buttonByText(dialogAt(), "Save").click(); });
+      await settle(160);
+    }
+    const configEntries = () => listTaskOutbox().filter((e) => e.route === "/api/tasks/config");
+    const saved = configEntries().at(-1)!.payload.items as any[];
+    expect(saved.map((i) => i.title)).toEqual(["Chore A", "Chore B"]);
+
+    // Delete A, then Delete B — again with no ack in between. The second
+    // replace must not reshape the first deleted row back in.
+    await openAdd();
+    for (const title of ["Chore A", "Chore B"]) {
+      const manageBtn = dialogAt().querySelector(`button[aria-label="Manage ${title}"]`) as HTMLButtonElement;
+      expect(manageBtn).toBeTruthy();
+      await act(async () => { manageBtn.click(); });
+      await settle(160);
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      const sheet = dialogs[dialogs.length - 1] as HTMLElement;
+      await act(async () => { buttonByText(sheet, "Delete favorite").click(); });
+      await settle(160);
+    }
+    const deleted = configEntries().at(-1)!.payload.items as any[];
+    expect(deleted).toEqual([]);
   });
 });

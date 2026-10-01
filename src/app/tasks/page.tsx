@@ -44,7 +44,7 @@ import {
   getPreviousWeekRanks, loadHallOfFame, loadHallOfFameMerged,
   loadPreviousWeekRanksMerged,
   loadWeeklyPrizes,
-  loadTaskTemplates,
+  loadTaskTemplates, saveTaskTemplates,
   applyTaskConfigSnapshotToStores,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
@@ -609,11 +609,18 @@ export default function TasksPage() {
     // so a crew→solo switch must NULL it explicitly — the server refuses a
     // non-crew patch that still names a crew mode, and a stale stored value
     // would otherwise ride the spread into the assigned-task patch.
-    const normalized: Task = isCrewTask(editForm)
+    const modeNormalized: Task = isCrewTask(editForm)
       ? { ...editForm, universal: false, speedBonus: undefined, crewCloseMode: editForm.crewCloseMode ?? "strict", crew: { members: crewMembers(editForm) } }
       : editForm.universal
         ? { ...editForm, crewSize: null, crew: null, crewCloseMode: null, speedBonus: normalizeSpeedBonus(editForm.speedBonus) }
         : { ...editForm, crewSize: null, crew: null, crewCloseMode: null, speedBonus: undefined, universal: false };
+    // A recurring chore never expires (the server refuses recurring + a
+    // non-null expiresAfterDays): the hidden Advanced control must not leak a
+    // stale value even if the row was toggled to Recurring after it was set.
+    const normalized: Task = {
+      ...modeNormalized,
+      ...(editForm.recurring ? { expiresAfterDays: null } : {}),
+    };
     if (isAdding) {
       const temporaryId = uid();
       const added = queueCommand({
@@ -640,8 +647,13 @@ export default function TasksPage() {
         // refuses non-`replace` actions on an absent leg (422
         // invalid_current_config). Save is therefore the full next list,
         // mirroring WeeklyPrizesCard.
-        const existing = loadTaskTemplates();
-        const next = [...existing.filter((t) => t.id !== item.id), item];
+        // Compose from the PAGE state and adopt it optimistically: two
+        // back-to-back saves sit in the outbox window together, and reading
+        // the ack-only store would drop the first favorite from the second
+        // replace. The ack's strictly-newer adoption remains the reconciler.
+        const next = [...templates.filter((t) => t.id !== item.id), item];
+        saveTaskTemplates(next);
+        setTemplates(next);
         // The outbox is keyed by operationId, so the config write deliberately
         // owns its own key: sharing the manage add's operationId would make
         // this enqueue replace that entry and one of the two commands would
@@ -770,14 +782,19 @@ export default function TasksPage() {
   };
 
   // The leg refuses non-`replace` actions while it is absent (422), so a
-  // delete is the full remaining list, exactly like a save.
+  // delete is the full remaining list, exactly like a save. Composed from the
+  // page state and adopted optimistically — a second delete must not read the
+  // ack-only store and resurrect the first deleted row in its replace.
   const deleteTemplate = (template: TaskTemplateConfigItem) => {
+    const next = templates.filter((t) => t.id !== template.id);
+    saveTaskTemplates(next);
+    setTemplates(next);
     void writeTaskConfig({
       operationId: "",
       kind: "task-templates",
       action: "replace",
       updatedAt: new Date().toISOString(),
-      items: loadTaskTemplates().filter((t) => t.id !== template.id),
+      items: next,
     }).catch(() => {});
     setManageTemplate(null);
   };
@@ -2005,7 +2022,12 @@ export default function TasksPage() {
                      </div>
                      <label className="block">
                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Recurring</span>
-                       <select value={editForm.recurring || "None"} onChange={(e) => updateForm("recurring", e.target.value === "None" ? null : e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
+                       <select value={editForm.recurring || "None"} onChange={(e) => {
+                         const recurring = e.target.value === "None" ? null : e.target.value;
+                         updateForm("recurring", recurring);
+                         // A recurring chore never expires — clear the hidden control's value.
+                         if (recurring) updateForm("expiresAfterDays", null);
+                       }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
                          <option value="None">None</option>
                          <option value="Daily">Daily</option>
                          <option value="Weekdays">Weekdays</option>
