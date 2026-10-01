@@ -34,9 +34,13 @@ describe("cullExpiredTasksOnTasks", () => {
     expect(cullExpiredTasksOnTasks([task({ due: null })], TODAY).deletedIds).toEqual([]);
   });
   it("never culls completed, pending-approval, or recurring rows", () => {
-    expect(cullExpiredTasksOnTasks([task({ completed: true })], TODAY).deletedIds).toEqual([]);
-    expect(cullExpiredTasksOnTasks([task({ pendingApproval: { byName: "Alex", at: "t", points: 5 } })], TODAY).deletedIds).toEqual([]);
-    expect(cullExpiredTasksOnTasks([task({ recurring: "daily" })], TODAY).deletedIds).toEqual([]);
+    expect(cullExpiredTasksOnTasks([task({ due: "2026-09-27", completed: true })], TODAY).deletedIds).toEqual([]);
+    expect(cullExpiredTasksOnTasks([task({ due: "2026-09-27", pendingApproval: { byName: "Alex", at: "t", points: 5 } })], TODAY).deletedIds).toEqual([]);
+    expect(cullExpiredTasksOnTasks([task({ due: "2026-09-27", recurring: "daily" })], TODAY).deletedIds).toEqual([]);
+  });
+  it("never culls outside the 1-30 day expiry range", () => {
+    expect(cullExpiredTasksOnTasks([task({ due: "2026-09-27", expiresAfterDays: 0 })], TODAY).deletedIds).toEqual([]);
+    expect(cullExpiredTasksOnTasks([task({ due: "2026-09-27", expiresAfterDays: undefined })], TODAY).deletedIds).toEqual([]);
   });
   it("culls an expired open task and an expired incomplete crew one-off alike", () => {
     const open = task({ id: 301, due: "2026-09-27", universal: true });
