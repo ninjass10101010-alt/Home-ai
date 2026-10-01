@@ -540,6 +540,7 @@ function updateShape(
 ): TaskShapeResult {
   const merged = { ...existing, ...patch };
   if (patch.crewSize === undefined && merged.crewSize === 0) merged.crewSize = null;
+  if (patch.expiresAfterDays === undefined && merged.expiresAfterDays === 0) merged.expiresAfterDays = null;
   return taskShape(merged, members, Number(existing.id), existing);
 }
 

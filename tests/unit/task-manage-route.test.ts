@@ -844,6 +844,25 @@ describe("POST /api/tasks/manage", () => {
     expect((await response.json()).task).toMatchObject({ title: "Legacy update", crewSize: null });
   });
 
+  it("normalizes a stored zero expiresAfterDays during an unrelated update", async () => {
+    const snapshot = {
+      revision: "4",
+      tasks: [{ ...defaultTask(), expiresAfterDays: 0 }],
+      deletedTaskIds: [],
+      weekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+    };
+    const harness = makeHarness({ snapshot, taskRows: [] });
+    const response = await postManage(harness, {
+      action: "update",
+      operationId: "op-legacy-zero-expires",
+      taskId: 77,
+      patch: { title: "Legacy expiry update" },
+    });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).task).toMatchObject({ title: "Legacy expiry update", expiresAfterDays: null });
+  });
+
   it("repairs an update projection with the same operation", async () => {
     const harness = makeHarness();
     harness.failNextTaskWrite();
