@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties }
 import { useRouter } from "next/navigation";
 import { mapTaskIdeas, mapRewardIdeas } from "@/lib/ai-suggestions";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
-import { getDueOptions, getISO } from "@/lib/due-date-utils";
+import { getDueOptions, getISO, previousWeekStartISO } from "@/lib/due-date-utils";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
 import SectionCard from "@/components/patterns/SectionCard";
@@ -33,6 +33,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useWallMode } from "@/hooks/useWallMode";
 import { useWallConfirm } from "@/hooks/useWallConfirm";
 import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, HallOfFameEntry } from "@/types/tasks";
+import type { ArchivedTaskDef } from "@/lib/task-week-rollover";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
   emptyWeekData,
@@ -414,6 +415,15 @@ export default function TasksPage() {
   const [crewCloseTarget, setCrewCloseTarget] = useState<{ taskId: number } | null>(null);
   const [crewClosePin, setCrewClosePin] = useState("");
   const [crewCloseError, setCrewCloseError] = useState("");
+  // Repeat last week (spec §5): the feed is exactly the archived one-off defs
+  // keyed by the previous week's Monday (written by the rollover, adopted from
+  // the sync snapshot). Nothing is created until a parent confirms — the
+  // sheet's rows are a removable draft, and each confirmed row is its own
+  // durable manage add through the existing outbox.
+  const [archivedTasks, setArchivedTasks] = useState<Record<string, ArchivedTaskDef[]>>({});
+  const [repeatOpen, setRepeatOpen] = useState(false);
+  const [repeatRows, setRepeatRows] = useState<ArchivedTaskDef[]>([]);
+  const lastWeekDefs = archivedTasks[previousWeekStartISO()] ?? [];
 
   useEffect(() => { saveRewards(rewards); }, [rewards]);
   useEffect(() => { savePenalties(penalties); }, [penalties]);
@@ -519,6 +529,7 @@ export default function TasksPage() {
   const restoreFromSnapshot = useCallback((data: any) => {
     if (!data?.snapshot) return;
     const snap = data.snapshot;
+    if (snap.archivedTasks && typeof snap.archivedTasks === "object") setArchivedTasks(snap.archivedTasks);
     applyTaskConfigSnapshotToStores(snap);
     adoptStores();
     const { tasks: nextTasks, weekData: nextWeek, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
@@ -797,6 +808,33 @@ export default function TasksPage() {
       items: next,
     }).catch(() => {});
     setManageTemplate(null);
+  };
+
+  // The sheet opens as a DRAFT: state is copied from the feed so per-row
+  // removals are local to this confirmation and nothing is written yet.
+  const openRepeatLastWeek = () => {
+    setRepeatRows(lastWeekDefs);
+    setRepeatOpen(true);
+  };
+
+  // One durable manage `add` per remaining def, each with its own operationId
+  // (queueCommand mints one when none is passed) — partial failures surface
+  // per-row through the existing outbox, never a new mechanism.
+  const confirmRepeatLastWeek = () => {
+    repeatRows.forEach((def) => {
+      const mode = def.crewSize && def.crewSize >= 2 ? "crew" : def.universal ? "open" : "assigned";
+      const roster = membersData.find((m: any) => m.fullName === def.assigneeName);
+      const task = {
+        title: def.title, points: def.points, category: def.category, priority: def.priority,
+        due: getISO.today, recurring: null,
+        universal: mode === "open",
+        ...(mode === "open" ? { assignee: "All", assigneeEmoji: "🤝", speedBonus: 0 } : {}),
+        ...(mode === "assigned" ? { assignee: def.assigneeName ?? "", assigneeEmoji: roster?.emoji ?? "👤" } : {}),
+        ...(mode === "crew" ? { crewSize: def.crewSize, crew: { members: [] }, ...(def.crewCloseMode ? { crewCloseMode: def.crewCloseMode } : {}) } : {}),
+      };
+      queueCommand({ route: "/api/tasks/manage", action: "add", payload: { task }, displayTarget: { kind: "task", title: def.title } });
+    });
+    setRepeatOpen(false);
   };
 
   const generateAiTasks = async () => {
@@ -1863,11 +1901,19 @@ export default function TasksPage() {
         action={
           // P0 safety gate: creating and editing family chores is a parent
           // action — kids get their quest surface on KidHome, guests get the
-          // honest signed-out view.
+          // honest signed-out view. Repeat last week rides beside Add and is
+          // hidden when last week archived nothing (honest-empty contract).
           isParent ? (
-            <IconButton aria-label="Add task" onClick={startAdd}>
-              <span>＋</span>
-            </IconButton>
+            <div className="flex items-center gap-2">
+              {lastWeekDefs.length > 0 && (
+                <SoftButton size="sm" variant="secondary" onClick={openRepeatLastWeek}>
+                  ↻ Repeat last week ({lastWeekDefs.length})
+                </SoftButton>
+              )}
+              <IconButton aria-label="Add task" onClick={startAdd}>
+                <span>＋</span>
+              </IconButton>
+            </div>
           ) : undefined
         }
         icon="✅"
@@ -3095,6 +3141,52 @@ export default function TasksPage() {
           }
         >
           <p className="text-sm text-text-secondary">The chore disappears from every device. Points already earned for it stay earned.</p>
+        </Modal>
+      )}
+
+      {repeatOpen && (
+        <Modal
+          open
+          onClose={() => setRepeatOpen(false)}
+          title="Repeat last week"
+          description={`${repeatRows.length} chore${repeatRows.length !== 1 ? "s" : ""} from last week — added due today and uncompleted.`}
+          footer={
+            <>
+              <SoftButton onClick={confirmRepeatLastWeek} disabled={repeatRows.length === 0} className="flex-1">Confirm</SoftButton>
+              <SoftButton variant="secondary" onClick={() => setRepeatOpen(false)} className="flex-1">Cancel</SoftButton>
+            </>
+          }
+        >
+          <div className="space-y-2">
+            {repeatRows.map((def, idx) => {
+              const modeLabel =
+                def.crewSize && def.crewSize >= 2
+                  ? `🤝 Crew of ${def.crewSize}`
+                  : def.universal
+                    ? "🫳 Open"
+                    : def.assigneeName ?? "Unassigned";
+              return (
+                <div
+                  key={`${def.title}-${idx}`}
+                  className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-text-primary">{def.title}</div>
+                    <div className="truncate text-xs text-text-secondary">+{def.points} pts · {modeLabel}</div>
+                  </div>
+                  <IconButton
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Remove ${def.title}`}
+                    className="hit-44"
+                    onClick={() => setRepeatRows((prev) => prev.filter((_, i) => i !== idx))}
+                  >
+                    ✕
+                  </IconButton>
+                </div>
+              );
+            })}
+          </div>
         </Modal>
       )}
 

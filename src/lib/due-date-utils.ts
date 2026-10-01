@@ -1,4 +1,11 @@
-import { localTodayISO } from "@/lib/local-date";
+import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
+
+/** The Monday of the week before the current one, as a local date. */
+export function previousWeekStartISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  return localWeekStartISO(d);
+}
 
 /**
  * The LOCAL calendar day `days` from today.
