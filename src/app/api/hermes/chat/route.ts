@@ -208,13 +208,24 @@ function extractPointProposal(name: string | undefined, result: string): unknown
 
 // Several OpenAI-compatible gateways emit tool_calls deltas with no `id`, and
 // an empty tool_call_id makes the NEXT round 400 — the turn dies mid-loop and
-// the user watches the dots go nowhere. A provider id always wins; the
-// synthesized one only fills the gap, and its index + random tail keep two
-// calls in the same round distinct.
+// the user watches the dots go nowhere. A provider id is returned verbatim (this
+// helper only fills a gap, it never rewrites what the provider sent); the
+// synthesized one only applies when there is nothing to pass through, and its
+// index + random tail keep two calls in the same round distinct.
 function toolCallIdFor(id: string | undefined, index: number): string {
-  const trimmed = typeof id === "string" ? id.trim() : "";
-  if (trimmed) return trimmed;
+  if (typeof id === "string" && id.trim()) return id;
   return `call_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Strict OpenAI-compatible servers validate a `role:"tool"` message's
+ * tool_call_id against the ids on the PRECEDING assistant entry, so the two must
+ * be normalized together. This is the single place ids are derived: it returns
+ * the very array that gets echoed back on the assistant message, and the tool
+ * replies read their id back off it.
+ */
+function normalizeToolCallIds(tool_calls: ToolCall[]): (ToolCall & { id: string })[] {
+  return tool_calls.map((tc, i) => ({ ...tc, id: toolCallIdFor(tc.id, i) }));
 }
 
 /**
@@ -517,14 +528,15 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
           answeredBy = wrapup ? "wrapup" : "ok";
           break;
         }
-        messages.push({ role: "assistant", content, tool_calls });
-        for (const tc of tool_calls) {
+        const roundToolCalls = normalizeToolCallIds(tool_calls);
+        messages.push({ role: "assistant", content, tool_calls: roundToolCalls });
+        for (const tc of roundToolCalls) {
           write(sseFrame(JSON.stringify({ label: toolStatusLabel(tc.function?.name) }), "status"));
         }
-        const results = await runToolCalls(tool_calls, tools, toolContext);
+        const results = await runToolCalls(roundToolCalls, tools, toolContext);
         results.forEach((result, i) => {
-          messages.push({ role: "tool", tool_call_id: toolCallIdFor(tool_calls[i].id, i), content: result });
-          const proposal = extractPointProposal(tool_calls[i].function?.name, result);
+          messages.push({ role: "tool", tool_call_id: roundToolCalls[i].id, content: result });
+          const proposal = extractPointProposal(roundToolCalls[i].function?.name, result);
           if (proposal) {
             write(sseFrame(JSON.stringify({ label: "Waiting for a parent's PIN to confirm…", proposal }), "status"));
           }
@@ -721,13 +733,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(proposals.length ? { content, proposals } : { content });
       }
 
-      messages.push({ role: "assistant", content, tool_calls });
+      const roundToolCalls = normalizeToolCallIds(tool_calls);
+      messages.push({ role: "assistant", content, tool_calls: roundToolCalls });
 
-      const results = await runToolCalls(tool_calls, tools, toolContext);
+      const results = await runToolCalls(roundToolCalls, tools, toolContext);
       results.forEach((result, i) => {
-        messages.push({ role: "tool", tool_call_id: toolCallIdFor(tool_calls[i].id, i), content: result });
+        messages.push({ role: "tool", tool_call_id: roundToolCalls[i].id, content: result });
         // Buffered sibling of the streamed proposal status frame (Task 15).
-        const proposal = extractPointProposal(tool_calls[i].function?.name, result);
+        const proposal = extractPointProposal(roundToolCalls[i].function?.name, result);
         if (proposal) proposals.push(proposal);
       });
     }

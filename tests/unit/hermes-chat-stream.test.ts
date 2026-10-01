@@ -702,3 +702,114 @@ describe("hermes chat — tool_call_id backfill", () => {
     expect(new Set(ids).size).toBe(2);
   });
 });
+
+// The backfill above only helps LENIENT servers. A strict OpenAI-compatible
+// server validates a tool message's tool_call_id against the ids on the
+// PRECEDING assistant entry, so an id synthesized at the tool push site is
+// useless while the echoed assistant message still carries the provider's empty
+// one. Ids are therefore normalized once — on the assistant message — and the
+// tool replies reuse them.
+describe("hermes chat — tool_call_id agreement with the assistant message", () => {
+  function allowPantryTool() {
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+    ] as any);
+    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
+  }
+  const streamedAnswer = () => sseResponse([token("Pantry looks stocked."), DONE]);
+  const bufferedAnswer = () => new Response(
+    JSON.stringify({ choices: [{ message: { role: "assistant", content: "Pantry looks stocked." } }] }),
+    { status: 200, headers: { "content-type": "application/json" } });
+
+  // The rejection lands on the SECOND provider request — the one carrying the
+  // tool results — so every assertion reads what the provider actually got.
+  function roundTwoMessages(): any[] {
+    const calls = (globalThis.fetch as any).mock.calls;
+    expect(calls.length).toBeGreaterThan(1);
+    return JSON.parse(calls[1][1].body).messages;
+  }
+
+  function toolRound(messages: any[]) {
+    const assistantIds: string[] = [];
+    const callNames: string[] = [];
+    for (const m of messages) {
+      if (m.role !== "assistant" || !Array.isArray(m.tool_calls)) continue;
+      for (const tc of m.tool_calls) {
+        expect(typeof tc.id).toBe("string");
+        expect(tc.id.length).toBeGreaterThan(0);
+        assistantIds.push(tc.id);
+        callNames.push(tc.function?.name);
+      }
+    }
+    const toolMsgs = messages.filter((m: any) => m.role === "tool");
+    expect(assistantIds.length).toBeGreaterThan(0);
+    expect(toolMsgs).toHaveLength(assistantIds.length);
+    return { assistantIds, toolMsgs, callNames };
+  }
+
+  it("replies with the very id the assistant message carries when the provider omits ids", async () => {
+    allowPantryTool();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([toolCallRound(undefined, "get_pantry", "{}")]))
+      .mockImplementationOnce(async () => streamedAnswer()));
+    await (await post({ message: "whats low?", stream: true })).text();
+    const { assistantIds, toolMsgs } = toolRound(roundTwoMessages());
+    expect(assistantIds[0]).toMatch(/^call_\d+_0_/);
+    expect(toolMsgs.map((m: any) => m.tool_call_id)).toEqual(assistantIds);
+  });
+
+  it("keeps a provider-supplied id identical on the assistant and tool entries", async () => {
+    allowPantryTool();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([toolCallRound("call_abc123", "get_pantry", "{}")]))
+      .mockImplementationOnce(async () => streamedAnswer()));
+    await (await post({ message: "whats low?", stream: true })).text();
+    const { assistantIds, toolMsgs } = toolRound(roundTwoMessages());
+    expect(assistantIds).toEqual(["call_abc123"]);
+    expect(toolMsgs.map((m: any) => m.tool_call_id)).toEqual(["call_abc123"]);
+  });
+
+  it("gives two calls in one round distinct ids, each paired with its own result", async () => {
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+      { type: "function", function: { name: "get_grocery_list", parameters: {} } },
+    ] as any);
+    mocks.getTool.mockImplementation((name: string) => ({ handler: vi.fn(async () => `{"tool":"${name}"}`) }));
+    const round = [
+      `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [
+        { index: 0, function: { name: "get_pantry", arguments: "{}" } },
+        { index: 1, function: { name: "get_grocery_list", arguments: "{}" } },
+      ] } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })}\n\n`,
+      DONE,
+    ].join("");
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([round]))
+      .mockImplementationOnce(async () => streamedAnswer()));
+    await (await post({ message: "check both", stream: true })).text();
+    const { assistantIds, toolMsgs, callNames } = toolRound(roundTwoMessages());
+    expect(assistantIds).toHaveLength(2);
+    expect(new Set(assistantIds).size).toBe(2);
+    expect(toolMsgs.map((m: any) => m.tool_call_id)).toEqual(assistantIds);
+    expect(callNames).toEqual(["get_pantry", "get_grocery_list"]);
+    expect(toolMsgs.map((m: any) => m.content)).toEqual(callNames.map((n: string) => `{"tool":"${n}"}`));
+  });
+
+  it("agrees on the ids in buffered mode too", async () => {
+    allowPantryTool();
+    const bufferedToolRound = () => new Response(
+      JSON.stringify({
+        choices: [{ message: { role: "assistant", content: "", tool_calls: [
+          { type: "function", function: { name: "get_pantry", arguments: "{}" } },
+        ] } }],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => bufferedToolRound())
+      .mockImplementationOnce(async () => bufferedAnswer()));
+    await post({ message: "whats low?" });
+    const { assistantIds, toolMsgs } = toolRound(roundTwoMessages());
+    expect(assistantIds[0]).toMatch(/^call_\d+_0_/);
+    expect(toolMsgs.map((m: any) => m.tool_call_id)).toEqual(assistantIds);
+  });
+});
