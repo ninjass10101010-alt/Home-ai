@@ -71,6 +71,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
@@ -513,11 +514,83 @@ describe("hermes chat — point-proposal surfacing", () => {
 
   it("buffered mode without proposals keeps the plain {content} shape", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ choices: [{ message: { role: "assistant", content: "plain" } }] }),
+      JSON.stringify({ choices: [{ message: { content: "plain" } }] }),
       { status: 200, headers: { "content-type": "application/json" } })));
     const res = await post({ message: "hi" });
     const json = await res.json();
     expect(json.content).toBe("plain");
     expect("proposals" in json).toBe(false);
+  });
+});
+
+// Task 4 (spec W4) — a provider can legitimately emit zero bytes for the whole
+// silent think of a long reasoning phase, and any buffering intermediary in the
+// path may hold frames until a buffer fills. A 15s `: ping` comment frame keeps
+// the connection warm; parseSSEFrames drops comment-only frames (it needs a
+// `data:` line), so the heartbeat is invisible to the client contract.
+describe("hermes chat — SSE heartbeat", () => {
+  const HEARTBEAT_MS = 15_000;
+
+  /** Provider that stays silent until the test speaks — a long think. */
+  function silentProvider() {
+    const enc = new TextEncoder();
+    let emit: ((s: string) => void) | null = null;
+    let finish: (() => void) | null = null;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        emit = (s) => controller.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: s } }] })}\n\n`));
+        finish = () => { controller.enqueue(enc.encode("data: [DONE]\n\n")); controller.close(); };
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    })));
+    return { emit: (s: string) => emit!(s), finish: () => finish!() };
+  }
+
+  it("emits a comment frame every 15s during a silent think, and stops with the stream", async () => {
+    vi.useFakeTimers();
+    const provider = silentProvider();
+    const res = await post({ message: "hi", stream: true });
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let seen = "";
+    const pump = (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          seen += decoder.decode(value);
+        }
+      } catch { /* reader cancelled */ }
+    })();
+    const pings = () => seen.split(": ping\n\n").length - 1;
+
+    // Silent for a full heartbeat interval: the only bytes that can appear are
+    // the heartbeat's own.
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+    expect(seen).toContain(": ping");
+    expect(pings()).toBe(1);
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+    expect(pings()).toBe(2);
+
+    provider.emit("Finally.");
+    provider.finish();
+    await vi.advanceTimersByTimeAsync(0);
+    await pump;
+    expect(seen).toContain('data: {"t":"Finally."}');
+    expect(seen).toContain("data: [DONE]");
+    // The interval dies with the stream: no extra frame, nothing left pending.
+    expect(pings()).toBe(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("marks the streamed response as unbuffered", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([token("ok"), DONE])));
+    const res = await post({ message: "hi", stream: true });
+    expect(res.headers.get("x-accel-buffering")).toBe("no");
+    await res.text();
   });
 });

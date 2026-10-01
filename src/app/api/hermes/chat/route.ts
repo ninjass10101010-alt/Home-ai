@@ -47,6 +47,10 @@ async function persistChatPair(request: NextRequest, userMessage: string, assist
 }
 
 const AI_TIMEOUT_MS = 60_000;
+// Comment-frame cadence for the streamed response. Kept comfortably under the
+// idle window of the proxies/tunnels in front of the app, so a silent think
+// never ages the connection out.
+const HEARTBEAT_MS = 15_000;
 // Reasoning models (e.g. glm-5.3-flash) spend the token budget on hidden
 // `reasoning_content` BEFORE any visible content — a 1024 cap gets eaten by
 // thinking alone (verified live: finish_reason=length with zero content).
@@ -434,6 +438,14 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
     });
   };
   const startedAt = Date.now();
+  // A provider can stay silent for the whole reasoning phase of a long think, and
+  // any buffering intermediary in the path may hold frames until a buffer fills
+  // (or the connection closes) — which reads as a dead stream. A comment frame
+  // every 15s keeps the path warm; the client parser drops comment-only frames
+  // (parseSSEFrames needs a `data:` line), so it never enters the contract.
+  const heartbeat = setInterval(() => {
+    if (!clientGone) write(": ping\n\n");
+  }, HEARTBEAT_MS);
 
   (async () => {
     // Health-recorder context hoisted so the catch path records rounds/brain too.
@@ -538,6 +550,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       } catch { /* health recording must never break the stream */ }
       write(sseFrame(JSON.stringify({ message: "Hey, I hit a snag connecting to my brain right now. Give me a moment and try again! 🔧" }), "error"));
     } finally {
+      clearInterval(heartbeat);
       writer.close().catch(() => {});
     }
   })();
@@ -547,6 +560,9 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      // nginx (and every other buffering reverse proxy in the path) must not
+      // accumulate SSE frames before forwarding them.
+      "X-Accel-Buffering": "no",
     },
   });
 }
