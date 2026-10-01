@@ -19,6 +19,7 @@ import Toast from "@/components/ui/Toast";
 import SegmentedControl from "@/components/ui/SegmentedControl";
 import Toggle from "@/components/ui/Toggle";
 import Stepper from "@/components/ui/Stepper";
+import Chip from "@/components/ui/Chip";
 import StatTile from "@/components/patterns/StatTile";
 import ProgressRing from "@/components/ui/ProgressRing";
 import Avatar from "@/components/ui/Avatar";
@@ -43,6 +44,7 @@ import {
   getPreviousWeekRanks, loadHallOfFame, loadHallOfFameMerged,
   loadPreviousWeekRanksMerged,
   loadWeeklyPrizes,
+  loadTaskTemplates,
   applyTaskConfigSnapshotToStores,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
@@ -57,7 +59,7 @@ import {
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import type { TaskOutboxAcknowledgedEvent } from "@/lib/task-operation-outbox";
 import { writeTaskConfig } from "@/lib/task-config-client";
-import type { TaskConfigCommand } from "@/lib/task-config";
+import type { TaskConfigCommand, TaskTemplateConfigItem } from "@/lib/task-config";
 import {
   verifyPinRemote, unreachableCopy,
 } from "@/modes/kid/kid-store";
@@ -339,6 +341,16 @@ export default function TasksPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Task>(() => emptyTask(membersData.find((m: any) => m.role !== "pet")));
   const [isAdding, setIsAdding] = useState(false);
+  // Favorites (task templates) are PREFILL-ONLY: a template never creates a
+  // task on its own. `saveAsFavorite` / `templateId` are sheet-local — they
+  // never ride the task payload.
+  const [templates, setTemplates] = useState<TaskTemplateConfigItem[]>(() => loadTaskTemplates());
+  const [manageTemplate, setManageTemplate] = useState<TaskTemplateConfigItem | null>(null);
+  const [saveAsFavorite, setSaveAsFavorite] = useState(false);
+  const [templateId, setTemplateId] = useState<string | null>(null);
+  // Prefill moves focus back to Title AFTER the state commit (token-keyed).
+  const [focusTitleToken, setFocusTitleToken] = useState(0);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
   const [pinTaskId, setPinTaskId] = useState<number | null>(null);
   // Crew join / check-in is a PIN-gated action like a claim (self-join only).
   const [pinCrewAction, setPinCrewAction] = useState<{ taskId: number; action: "crew-join" | "crew-checkin" } | null>(null);
@@ -426,7 +438,13 @@ export default function TasksPage() {
     setWeekData(loadWeekData());
     setRewards(loadFromStorage(REWARDS_KEY, []));
     setPenalties(loadFromStorage(PENALTIES_KEY, []));
+    setTemplates(loadTaskTemplates());
   }, []);
+
+  useEffect(() => {
+    if (!focusTitleToken) return;
+    titleInputRef.current?.focus();
+  }, [focusTitleToken]);
   // Display-only optimism, keyed by OPERATION ID. A mark is created when a
   // command is queued and released when THAT command leaves the outbox (an
   // acknowledgment, a cancel, or a terminal failure) — never by a global queue
@@ -568,6 +586,8 @@ export default function TasksPage() {
   const startAdd = () => {
     if (!isParent) return; // P0 gate
     setEditingId(null);
+    setSaveAsFavorite(false);
+    setTemplateId(null);
     const firstNonPet = membersData.find((m: any) => m.role !== "pet");
     const defaultMember = isLoggedIn && currentUser
       ? { name: currentUser.name, emoji: currentUser.emoji }
@@ -603,6 +623,39 @@ export default function TasksPage() {
         displayTarget: { kind: "task", temporaryId, title: normalized.title },
       });
       addOptimisticRow(added.operationId, { kind: "add", task: { ...normalized, id: temporaryId } });
+      if (saveAsFavorite) {
+        const item: TaskTemplateConfigItem = {
+          id: templateId ?? `tpl-${added.operationId}`,
+          title: normalized.title,
+          points: normalized.points,
+          category: normalized.category,
+          priority: normalized.priority,
+          mode: normalized.crewSize ? "crew" : normalized.universal ? "open" : "assigned",
+          ...(normalized.crewSize ? { crewSize: normalized.crewSize } : {}),
+          ...(!normalized.crewSize && !normalized.universal ? { assigneeName: normalized.assignee } : {}),
+          ...(normalized.universal && normalized.speedBonus ? { speedBonus: normalized.speedBonus } : {}),
+          ...(normalized.expiresAfterDays ? { expiresAfterDays: normalized.expiresAfterDays } : {}),
+        };
+        // The leg does not exist until first written, and the config seam
+        // refuses non-`replace` actions on an absent leg (422
+        // invalid_current_config). Save is therefore the full next list,
+        // mirroring WeeklyPrizesCard.
+        const existing = loadTaskTemplates();
+        const next = [...existing.filter((t) => t.id !== item.id), item];
+        // The outbox is keyed by operationId, so the config write deliberately
+        // owns its own key: sharing the manage add's operationId would make
+        // this enqueue replace that entry and one of the two commands would
+        // silently never send or retry. The two legs' server receipt maps are
+        // separate, so replay-safety does not depend on the shared key (the
+        // template id still names the manage operation that created it).
+        void writeTaskConfig({
+          operationId: "",
+          kind: "task-templates",
+          action: "replace",
+          updatedAt: new Date().toISOString(),
+          items: next,
+        }).catch(() => {});
+      }
     } else {
       const updated = queueCommand({
         route: "/api/tasks/manage",
@@ -663,6 +716,70 @@ export default function TasksPage() {
       }
       return { ...prev, universal: false, crewSize: null, crew: null, speedBonus: undefined, assignee: prev.assignee === "Open" || prev.assignee === "Crew" ? "" : prev.assignee };
     });
+  };
+
+  // Prefill-only: copy the template onto the form (mode included), resolve a
+  // named assignee against the LIVE roster — a pet (or a name that no longer
+  // resolves) is skipped so the form keeps the current assignee.
+  const prefillFromTemplate = (template: TaskTemplateConfigItem) => {
+    setEditForm((prev) => {
+      const next: Task = {
+        ...prev,
+        title: template.title,
+        points: template.points,
+        category: template.category,
+        priority: template.priority,
+        expiresAfterDays: template.expiresAfterDays ?? null,
+      };
+      if (template.mode === "crew") {
+        next.universal = false;
+        next.crewSize = template.crewSize ?? 2;
+        next.crew = null;
+        next.stealable = false;
+        next.speedBonus = undefined;
+        next.assignee = "Crew";
+        next.assigneeEmoji = "🤝";
+      } else if (template.mode === "open") {
+        next.universal = true;
+        next.crewSize = null;
+        next.crew = null;
+        next.stealable = false;
+        next.speedBonus = template.speedBonus ?? 2;
+        next.assignee = "Open";
+        next.assigneeEmoji = "🤝";
+      } else {
+        next.universal = false;
+        next.crewSize = null;
+        next.crew = null;
+        next.speedBonus = undefined;
+        const member = template.assigneeName
+          ? membersData.find((m: any) =>
+              m.role !== "pet" &&
+              (m.fullName === template.assigneeName || m.name === template.assigneeName)
+            )
+          : undefined;
+        if (member) {
+          next.assignee = member.fullName || member.name;
+          next.assigneeEmoji = member.emoji || "👤";
+        }
+      }
+      return next;
+    });
+    setTemplateId(template.id);
+    setFocusTitleToken((token) => token + 1);
+  };
+
+  // The leg refuses non-`replace` actions while it is absent (422), so a
+  // delete is the full remaining list, exactly like a save.
+  const deleteTemplate = (template: TaskTemplateConfigItem) => {
+    void writeTaskConfig({
+      operationId: "",
+      kind: "task-templates",
+      action: "replace",
+      updatedAt: new Date().toISOString(),
+      items: loadTaskTemplates().filter((t) => t.id !== template.id),
+    }).catch(() => {});
+    setManageTemplate(null);
   };
 
   const generateAiTasks = async () => {
@@ -1832,9 +1949,22 @@ export default function TasksPage() {
                 }
               >
                 <div className="space-y-4">
+                  {isAdding && templates.length > 0 && (
+                    <div>
+                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Favorites</span>
+                      <div className="flex flex-wrap gap-2">
+                        {templates.map((template) => (
+                          <span key={template.id} className="inline-flex items-center gap-1">
+                            <Chip size="sm" tone="accent" onClick={() => prefillFromTemplate(template)}>{template.title}</Chip>
+                            <button type="button" aria-label={`Manage ${template.title}`} onClick={() => setManageTemplate(template)} className="hit-44 tap-sm text-xs text-text-muted">✎</button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Title</span>
-                    <input value={editForm.title} onChange={(e) => updateForm("title", e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none placeholder:text-text-muted" placeholder="Task title" autoFocus />
+                    <input ref={titleInputRef} value={editForm.title} onChange={(e) => updateForm("title", e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none placeholder:text-text-muted" placeholder="Task title" autoFocus />
                   </label>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {formType === "assigned" && (
@@ -1883,6 +2013,14 @@ export default function TasksPage() {
                        </select>
                      </label>
                    </div>
+                  {isAdding && (
+                    <Toggle
+                      checked={saveAsFavorite}
+                      onCheckedChange={setSaveAsFavorite}
+                      label="⭐ Save as favorite"
+                      description="Reuse this chore from the Favorites row next time."
+                    />
+                  )}
                   <div>
                     <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Task type</span>
                     <SegmentedControl
@@ -1951,17 +2089,55 @@ export default function TasksPage() {
                       </>
                     );
                   })()}
-                  {formType === "assigned" && (
+                  {(formType === "assigned" || !editForm.recurring) && (
                     <details className="rounded-2xl border border-white/10 px-3 py-2">
                       <summary className="cursor-pointer text-xs font-semibold text-text-secondary">Advanced</summary>
-                      <div className="mt-2">
-                        <Toggle checked={!!editForm.stealable} onCheckedChange={(checked) => updateForm("stealable", checked)} label="⏰ Up for grabs when late" description="If it's not done after the due date, anyone can grab it for the points." />
+                      <div className="mt-2 space-y-3">
+                        {formType === "assigned" && (
+                          <Toggle checked={!!editForm.stealable} onCheckedChange={(checked) => updateForm("stealable", checked)} label="⏰ Up for grabs when late" description="If it's not done after the due date, anyone can grab it for the points." />
+                        )}
+                        {!editForm.recurring && (
+                          <div>
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Auto-remove if unfinished</span>
+                            <Stepper value={editForm.expiresAfterDays ?? 0} min={0} max={30} onChange={(v) => updateForm("expiresAfterDays", v === 0 ? null : v)} label="Auto-remove if unfinished" />
+                            <span className="mt-1 block text-xs text-text-muted">Removes it N days after the due date if nobody did it.</span>
+                          </div>
+                        )}
                       </div>
                     </details>
                   )}
                 </div>
               </Modal>
              )}
+
+            {manageTemplate && (
+              <Modal
+                open
+                onClose={() => setManageTemplate(null)}
+                title={manageTemplate.title}
+                description={`${manageTemplate.points} points · ${manageTemplate.category}`}
+                footer={
+                  <>
+                    <SoftButton
+                      onClick={() => { prefillFromTemplate(manageTemplate); setManageTemplate(null); }}
+                      className="flex-1"
+                    >
+                      Use
+                    </SoftButton>
+                    <SoftButton variant="danger" onClick={() => deleteTemplate(manageTemplate)} className="flex-1">
+                      Delete favorite
+                    </SoftButton>
+                    <SoftButton variant="secondary" onClick={() => setManageTemplate(null)} className="flex-1">
+                      Cancel
+                    </SoftButton>
+                  </>
+                }
+              >
+                <p className="text-sm text-text-secondary">
+                  Favorites only prefill the Add sheet — they never create a chore on their own.
+                </p>
+              </Modal>
+            )}
 
             <TaskLedgerQuarantineNotice localWeekData={weekData} isParent={isParent} />
 
