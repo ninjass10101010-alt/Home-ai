@@ -123,11 +123,61 @@ describe("chat-store core", () => {
     await ensureHydrated();
     await send("hello", SPEAKER);
     const msgs = getSnapshot().messages;
-    // The reply is its OWN row, and neither stale row was clobbered.
     expect(msgs.filter((m) => m.content === "today's answer")).toHaveLength(1);
     expect(msgs.find((m) => m.id === 101)?.content).toBe("yesterday's answer");
     expect(msgs.find((m) => m.id === 102)?.content).toBe("another stale row");
-    expect(new Set(msgs.map((m) => m.id)).size).toBe(msgs.length); // no duplicate React keys
+    expect(new Set(msgs.map((m) => m.id)).size).toBe(msgs.length);
+  });
+
+  it("keeps optimistic ids strictly below the PB synthetic base after hydration", async () => {
+    vi.stubGlobal("fetch", okFetch([{ role: "assistant", content: "pb", createdAt: "2026-09-20T10:00:00.000Z" }]));
+    streamMock.fn.mockResolvedValue({ content: "ok", streamed: true });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    const pbBase = 2_000_000;
+    const optimistic = getSnapshot().messages.filter((m) => m.id < pbBase && m.id !== 1);
+    expect(optimistic.length).toBeGreaterThan(0);
+    expect(optimistic.every((m) => m.id > 0 && m.id < pbBase)).toBe(true);
+  });
+
+  it("clamps the reseed so a foreign stored id cannot push allocations into PB space", async () => {
+    localStorage.setItem("consuela-chat-messages", JSON.stringify([
+      { id: 1_999_999, role: "assistant", content: "migrated row", timestamp: "Yesterday", at: 1 },
+    ]));
+    streamMock.fn.mockResolvedValue({ content: "ok", streamed: true });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    const fresh = getSnapshot().messages.filter((m) => m.content === "hi" || m.content === "ok");
+    expect(fresh).toHaveLength(2);
+    expect(fresh.every((m) => m.id > 0 && m.id < 2_000_000)).toBe(true);
+    const ids = getSnapshot().messages.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("does not re-issue an id reserved by a send that raced hydration", async () => {
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    let releaseHydrationFetch!: () => void;
+    let rejectStream!: (e: Error) => void;
+    // Hydration's PB read stays in flight across the send, so the reseed
+    // computes its max from a thread that does not yet contain every id the
+    // send handed out. The stream then fails WITHOUT emitting a token, so the
+    // reply id it reserved never materializes as a row.
+    vi.stubGlobal("fetch", vi.fn((url: string) =>
+      String(url).includes("since=")
+        ? Promise.resolve(json({ ok: true, messages: [] }))
+        : new Promise<Response>((res) => { releaseHydrationFetch = () => res(json({ ok: true, messages: [] })); })));
+    streamMock.fn.mockImplementation(() => new Promise((_res, rej) => { rejectStream = rej; }));
+
+    const hydrating = ensureHydrated();
+    const sending = send("hi", SPEAKER);
+    releaseHydrationFetch();
+    await hydrating;
+    rejectStream(new Error("boom"));
+    await sending;
+
+    const ids = getSnapshot().messages.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("persists hydrated history to localStorage without the seed greeting", async () => {

@@ -140,6 +140,15 @@ function todayISO(): string {
  */
 const PB_SYNTHETIC_ID_BASE = 2_000_000;
 
+/**
+ * How much room the reseed leaves above the highest stored id before it gives
+ * up and clamps. Optimistic ids are dense (a few per turn), so this is a
+ * generous ceiling on a single page load's allocations — and staying well
+ * under PB space keeps the two ranges disjoint even if a stored id sits near
+ * the base.
+ */
+const OPTIMISTIC_ID_CEILING = PB_SYNTHETIC_ID_BASE - 1_000;
+
 // Synthetic ids for PB-hydrated rows must be unique ACROSS reconciles, not
 // just within one fetch — a per-fetch index collides and duplicate React keys
 // break list diffing. Monotonic module counter.
@@ -186,14 +195,23 @@ let abortController: AbortController | null = null;
  * `persistHistory()` keeps prior sessions' messages (ids 101, 102, …) while
  * msgCounter starts at 100 every page load — so a fresh reply row could land
  * on a stale row and OVERWRITE it instead of appending. Reseeding above every
- * merged id fixes it; PB ids live at 2_000_000+ and stay disjoint by construction.
+ * merged id fixes it; PB ids live at PB_SYNTHETIC_ID_BASE+ and stay disjoint by
+ * construction.
+ *
+ * Two guards, because rows only exist once they materialize: the reseed is
+ * MONOTONIC (ids already handed out — e.g. a reply row reserved before its
+ * first token — must not be re-issued), and it is CLAMPED so a hand-edited or
+ * migrated localStorage id cannot push the next allocation into PB space.
  */
 function reseedOptimisticCounter(rows: Message[]): void {
   let max = 100;
   for (const m of rows) {
-    if (typeof m.id === "number" && m.id < PB_SYNTHETIC_ID_BASE) max = Math.max(max, m.id);
+    // Anything at or above the ceiling is not an optimistic id we issued, so
+    // it must neither seed the counter nor be walked into by later allocations.
+    if (typeof m.id !== "number" || m.id < 0 || m.id >= OPTIMISTIC_ID_CEILING) continue;
+    max = Math.max(max, m.id);
   }
-  msgCounter = max + 1;
+  msgCounter = Math.max(msgCounter, Math.min(max + 1, OPTIMISTIC_ID_CEILING));
 }
 
 /** The single allocation seam for optimistic ids. */
@@ -273,10 +291,9 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
   // `message`), matching the previous messagesRef.current semantics.
   const modelSource = state.messages;
 
-  const userId = nextOptimisticId();
   const userAt = Date.now();
   const userMsg: Message = {
-    id: userId,
+    id: nextOptimisticId(),
     role: "user",
     content: trimmed,
     timestamp: "Just now",
@@ -436,11 +453,10 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
       const failedContent = offline
         ? "You're offline — I can't reach the family server right now. Check the connection and try again."
         : "I couldn't reach the family server just now. Your message is still here — try again in a moment.";
-      const failedId = nextOptimisticId();
       setMessages((prev) => [
         ...prev,
         {
-          id: failedId,
+          id: nextOptimisticId(),
           role: "assistant",
           content: failedContent,
           timestamp: "Just now",
