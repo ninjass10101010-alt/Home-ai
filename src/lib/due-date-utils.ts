@@ -21,6 +21,16 @@ function isoOffset(days: number): string {
   return localTodayISO(d);
 }
 
+/** `iso` advanced `days` local calendar days, or null for invalid input. */
+export function addDaysISO(iso: string, days: number): string | null {
+  if (typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  if (typeof days !== "number" || !Number.isSafeInteger(days)) return null;
+  const d = new Date(`${iso}T12:00:00`); // local noon — no UTC slicing
+  if (Number.isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + days);
+  return localTodayISO(d);
+}
+
 /** The next occurrence of a `Date#getDay()` weekday, as a local date. */
 function nextWeekdayISO(targetDay: number): string {
   const today = new Date();

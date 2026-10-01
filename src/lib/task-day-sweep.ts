@@ -1,6 +1,7 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import { localTodayISO, localWeekStartISO, weekdayOfISO } from "@/lib/local-date";
+import { addDaysISO } from "@/lib/due-date-utils";
 import {
   liveSnapshotTasks,
   mutateSnapshotWithMeta,
@@ -136,6 +137,36 @@ export function regenerateRecurringOnTasks(
   };
 }
 
+/** Stage: one-time expiry (spec §3). Tombstones incomplete one-time tasks
+ *  whose local day is past due + expiresAfterDays. Completed, pending-approval
+ *  and recurring rows are immune; no due date = never expires. */
+export function cullExpiredTasksOnTasks(
+  tasks: SnapshotTask[],
+  today: string,
+): { tasks: SnapshotTask[]; deletedIds: number[] } {
+  const deletedIds: number[] = [];
+  const kept: SnapshotTask[] = [];
+  for (const task of tasks) {
+    const id = Number(task?.id);
+    const due = typeof task.due === "string" ? task.due : "";
+    const expires = task.expiresAfterDays;
+    const eligible =
+      Number.isSafeInteger(id) && id > 0 &&
+      !task.recurring && task.completed !== true && !task.pendingApproval &&
+      /^\d{4}-\d{2}-\d{2}$/.test(due) &&
+      typeof expires === "number" && Number.isSafeInteger(expires) && expires >= 1 && expires <= 30;
+    if (eligible) {
+      const deadline = addDaysISO(due, expires);
+      if (deadline && today >= deadline) {
+        deletedIds.push(id);
+        continue;
+      }
+    }
+    kept.push(task);
+  }
+  return { tasks: kept, deletedIds };
+}
+
 /** All sweep stages, in order. Plan 2 prepends recurrence + expiry here. */
 function runDaySweepStages(
   tasks: SnapshotTask[],
@@ -145,8 +176,13 @@ function runDaySweepStages(
   issueId: (existing: ReadonlySet<number>) => number,
 ): { tasks: SnapshotTask[]; closedIds: number[]; deletedIds: number[] } {
   const regenerated = regenerateRecurringOnTasks(tasks, today, weekStart, nowIso, issueId);
-  const closed = closeDeadlineCrewsOnTasks(regenerated.tasks, today, weekStart, nowIso);
-  return { tasks: closed.tasks, closedIds: closed.closedIds, deletedIds: regenerated.deletedIds };
+  const culled = cullExpiredTasksOnTasks(regenerated.tasks, today);
+  const closed = closeDeadlineCrewsOnTasks(culled.tasks, today, weekStart, nowIso);
+  return {
+    tasks: closed.tasks,
+    closedIds: closed.closedIds,
+    deletedIds: [...regenerated.deletedIds, ...culled.deletedIds],
+  };
 }
 
 export async function ensureCurrentTaskDay(
