@@ -338,6 +338,7 @@ describe("ensureCurrentTaskWeek", () => {
     const assigned = live.find((task) => task.title === "Dishes")!;
     const open = live.find((task) => task.title === "Yard work")!;
     const crew = live.find((task) => task.title === "Playroom clean")!;
+    const stillOpen = live.find((task) => task.title === "Still open")!;
 
     expect(result.tasksReset).toBe(true);
     expect(assigned).toMatchObject({
@@ -357,11 +358,12 @@ describe("ensureCurrentTaskWeek", () => {
     expect(open).toMatchObject({ universal: true, assignee: "All", assigneeEmoji: "🤝", speedBonus: 3 });
     expect(crew).toMatchObject({ crewSize: 2, speedBonus: 0, crew: { members: [], removed: [] } });
     expect(crew.id).not.toBe(9);
-    expect(live.some((task) => task.id === 1 || task.id === 2 || task.id === 9)).toBe(false);
-    expect(live.some((task) => task.title === "Still open" && task.id === 3)).toBe(true);
+    expect(stillOpen).toMatchObject({ completed: false, due: CURRENT });
+    expect(stillOpen.id).not.toBe(3);
+    expect(live.some((task) => task.id === 1 || task.id === 2 || task.id === 3 || task.id === 9)).toBe(false);
     expect(live.some((task) => task.title === "Done this week" && task.id === 4)).toBe(true);
     expect(live.some((task) => task.title === "Pending prior" && task.id === 5)).toBe(true);
-    expect(harness.snapshotData().deletedTaskIds).toEqual(expect.arrayContaining([1, 2, 9]));
+    expect(harness.snapshotData().deletedTaskIds).toEqual(expect.arrayContaining([1, 2, 3, 9]));
     expect(harness.snapshotData().deletedTaskIds).not.toContain(5);
   });
 
@@ -725,6 +727,43 @@ describe("resetRecurringTasksForWeek", () => {
     const result = resetRecurringTasksForWeek(tasks, CURRENT, () => 22);
     expect(result.tasks[0]).toMatchObject({ id: 22, completed: false, due: CURRENT });
     expect(result.deletedTaskIds).toEqual([7]);
+  });
+});
+
+describe("resetRecurringTasksForWeek — consume missed", () => {
+  it("consumes a missed weekly (incomplete, due last week) and issues one fresh clone", () => {
+    const missed = {
+      id: 501, title: "Vacuum", assignee: "Alex", assigneeEmoji: "🦊",
+      due: "2026-09-22", points: 5, recurring: "weekly", category: "chores",
+      priority: "medium", completed: false,
+    } as any;
+    const result = resetRecurringTasksForWeek([missed], "2026-09-28", () => 900001);
+    expect(result.deletedTaskIds).toEqual([501]);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].due).toBe("2026-09-28");
+    expect(result.tasks[0].completed).toBe(false);
+  });
+
+  it("does not consume an incomplete weekly still due in the current week", () => {
+    const open = { id: 502, title: "Vacuum", assignee: "Alex", assigneeEmoji: "🦊", due: "2026-09-29", points: 5, recurring: "weekly", category: "chores", priority: "medium", completed: false } as any;
+    const result = resetRecurringTasksForWeek([open], "2026-09-28", () => 900002);
+    expect(result.deletedTaskIds).toEqual([]);
+    expect(result.tasks.map((t: any) => t.id)).toEqual([502]);
+  });
+
+  it("a pending-approval instance pauses its lineage", () => {
+    const pending = { id: 503, title: "Vacuum", assignee: "Alex", assigneeEmoji: "🦊", due: "2026-09-22", points: 5, recurring: "weekly", category: "chores", priority: "medium", completed: true, completedInWeek: "2026-09-21", pendingApproval: { byName: "Alex", at: "t", points: 5 } } as any;
+    const result = resetRecurringTasksForWeek([pending], "2026-09-28", () => 900003);
+    expect(result.deletedTaskIds).toEqual([]);
+    expect(result.tasks.map((t: any) => t.id)).toEqual([503]);
+  });
+
+  it("dedupes duplicate stale rows to one clone", () => {
+    const dupA = { id: 504, title: "Vacuum", assignee: "Alex", assigneeEmoji: "🦊", due: "2026-09-15", points: 5, recurring: "weekly", category: "chores", priority: "medium", completed: false } as any;
+    const dupB = { ...dupA, id: 505, due: "2026-09-22" };
+    const result = resetRecurringTasksForWeek([dupA, dupB], "2026-09-28", () => 900004);
+    expect(result.deletedTaskIds.sort()).toEqual([504, 505]);
+    expect(result.tasks).toHaveLength(1);
   });
 });
 

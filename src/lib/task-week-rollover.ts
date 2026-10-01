@@ -300,22 +300,22 @@ export function resetRecurringTasksForWeek(
 ): { tasks: SnapshotTask[]; deletedTaskIds: number[] } {
   const current = normalizeWeekStart(currentWeekStart);
   if (!current || typeof issueId !== "function") throw new TypeError("invalid_recurring_reset");
+  const dueWeekOf = (task: SnapshotTask): string | null => {
+    if (typeof task.due !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(task.due)) return null;
+    return localWeekStartISO(new Date(`${task.due}T12:00:00`));
+  };
   const sourceTasks: SnapshotTask[] = [];
   const consumedIds = new Set<number>();
   for (const task of tasks) {
     const id = Number(task?.id);
     if (!Number.isSafeInteger(id) || id <= 0) continue;
     consumedIds.add(id);
+    if (!task.recurring || task.pendingApproval) continue;
     const completedWeek = validCompletedWeek(task.completedInWeek);
-    if (
-      !task.completed ||
-      !task.recurring ||
-      !completedWeek ||
-      completedWeek >= current ||
-      task.pendingApproval
-    ) {
-      continue;
-    }
+    const completedEarlier = task.completed === true && !!completedWeek && completedWeek < current;
+    const dueWeek = dueWeekOf(task);
+    const missedEarlier = task.completed !== true && !!dueWeek && dueWeek < current;
+    if (!completedEarlier && !missedEarlier) continue;
     sourceTasks.push(task);
   }
 
