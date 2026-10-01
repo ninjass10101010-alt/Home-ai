@@ -64,6 +64,22 @@ export const getISO = {
   get thu() { return nextWeekdayISO(4); },
 };
 
+export function monthLabel(year: number, monthIndex: number): string {
+  return new Date(year, monthIndex, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+/** 6×7 Monday-first grid of local-day ISOs for the month containing the 1st. */
+export function getMonthGrid(year: number, monthIndex: number): { iso: string; day: number; inMonth: boolean }[] {
+  const first = new Date(year, monthIndex, 1);
+  const offset = (first.getDay() + 6) % 7; // Monday = 0
+  const cells: { iso: string; day: number; inMonth: boolean }[] = [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(year, monthIndex, 1 - offset + i);
+    cells.push({ iso: localTodayISO(d), day: d.getDate(), inMonth: d.getMonth() === monthIndex });
+  }
+  return cells;
+}
+
 /** The 31-day due `<select>` list, walking local calendar days from today. */
 export function getDueOptions(): { label: string; value: string }[] {
   const opts: { label: string; value: string }[] = [];

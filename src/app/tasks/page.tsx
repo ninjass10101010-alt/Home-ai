@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties }
 import { useRouter } from "next/navigation";
 import { mapTaskIdeas, mapRewardIdeas } from "@/lib/ai-suggestions";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
-import { getDueOptions, getISO, previousWeekStartISO } from "@/lib/due-date-utils";
+import { getISO, previousWeekStartISO } from "@/lib/due-date-utils";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
 import SectionCard from "@/components/patterns/SectionCard";
@@ -26,6 +26,7 @@ import Avatar from "@/components/ui/Avatar";
 import { textEmojiOrFallback } from "@/components/ui/EmojiText";
 import TasksStats from "@/components/tasks/TasksStats";
 import CrewTasksCard from "@/components/tasks/CrewTasksCard";
+import DueDatePicker from "@/components/tasks/DueDatePicker";
 import TasksArchive from "@/components/tasks/TasksArchive";
 import TasksRewardsPanel from "@/components/tasks/TasksRewardsPanel";
 import { db } from "@/db";
@@ -2038,12 +2039,10 @@ export default function TasksPage() {
                         </select>
                       </label>
                     )}
-                    <label className="block">
+                    <div className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Due</span>
-                      <select value={editForm.due} onChange={(e) => updateForm("due", e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
-                        {getDueOptions().map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-                      </select>
-                    </label>
+                      <DueDatePicker value={editForm.due} onChange={(iso) => updateForm("due", iso)} />
+                    </div>
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Priority</span>
                       <select value={editForm.priority} onChange={(e) => updateForm("priority", e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
