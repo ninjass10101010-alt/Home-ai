@@ -90,6 +90,7 @@ const WRAPUP_NOTE =
 
 interface ToolCall {
   id?: string;
+  type?: string;
   function?: { name?: string; arguments?: string };
 }
 
@@ -210,8 +211,7 @@ function extractPointProposal(name: string | undefined, result: string): unknown
 // an empty tool_call_id makes the NEXT round 400 — the turn dies mid-loop and
 // the user watches the dots go nowhere. A provider id is returned verbatim (this
 // helper only fills a gap, it never rewrites what the provider sent); the
-// synthesized one only applies when there is nothing to pass through, and its
-// index + random tail keep two calls in the same round distinct.
+// synthesized one only applies when there is nothing to pass through.
 function toolCallIdFor(id: string | undefined, index: number): string {
   if (typeof id === "string" && id.trim()) return id;
   return `call_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 10)}`;
@@ -220,12 +220,13 @@ function toolCallIdFor(id: string | undefined, index: number): string {
 /**
  * Strict OpenAI-compatible servers validate a `role:"tool"` message's
  * tool_call_id against the ids on the PRECEDING assistant entry, so the two must
- * be normalized together. This is the single place ids are derived: it returns
- * the very array that gets echoed back on the assistant message, and the tool
- * replies read their id back off it.
+ * be normalized together. This is the single place ids and the `type` beside
+ * them are derived: it returns the very array that gets echoed back on the
+ * assistant message, and the tool replies read their id back off it. Streamed
+ * deltas carry no `type` at all, so it defaults to the only kind OpenAI defines.
  */
-function normalizeToolCallIds(tool_calls: ToolCall[]): (ToolCall & { id: string })[] {
-  return tool_calls.map((tc, i) => ({ ...tc, id: toolCallIdFor(tc.id, i) }));
+function normalizeToolCallIds(tool_calls: ToolCall[]): (ToolCall & { id: string; type: string })[] {
+  return tool_calls.map((tc, i) => ({ ...tc, id: toolCallIdFor(tc.id, i), type: tc.type ?? "function" }));
 }
 
 /**

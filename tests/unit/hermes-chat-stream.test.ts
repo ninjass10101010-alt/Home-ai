@@ -596,120 +596,12 @@ describe("hermes chat — SSE heartbeat", () => {
   });
 });
 
-// Why this exists, see `toolCallIdFor` in route.ts: several OpenAI-compatible
-// gateways emit tool_calls deltas with NO `id`, so the next round would post a
-// `role:"tool"` message with an empty tool_call_id — which most of those
-// servers reject with a 400. The turn then dies mid-loop and the family sees
-// the dots-then-nothing symptom.
-describe("hermes chat — tool_call_id backfill", () => {
-  function allowPantryTool() {
-    mocks.buildToolsForOpenAI.mockReturnValue([
-      { type: "function", function: { name: "get_pantry", parameters: {} } },
-    ] as any);
-    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
-  }
-
-  const streamedPantryRound = (id: string | undefined) => sseResponse([toolCallRound(id, "get_pantry", "{}")]);
-  const streamedAnswer = () => sseResponse([token("Pantry looks stocked."), DONE]);
-  const bufferedPantryRound = () => new Response(
-    JSON.stringify({
-      choices: [{ message: { role: "assistant", content: "", tool_calls: [
-        { type: "function", function: { name: "get_pantry", arguments: "{}" } },
-      ] } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } });
-  const bufferedAnswer = () => new Response(
-    JSON.stringify({ choices: [{ message: { role: "assistant", content: "Pantry looks stocked." } }] }),
-    { status: 200, headers: { "content-type": "application/json" } });
-
-  // The 400 happens on the SECOND provider request — the one that carries the
-  // tool result back — so the assertion is on what the provider actually got.
-  function secondRoundToolMessage(): any {
-    const calls = (globalThis.fetch as any).mock.calls;
-    expect(calls.length).toBeGreaterThan(1);
-    const roundTwo = JSON.parse(calls[1][1].body);
-    return roundTwo.messages.find((m: any) => m.role === "tool");
-  }
-
-  it("synthesizes a tool_call_id when the stream deltas carry none", async () => {
-    allowPantryTool();
-    vi.stubGlobal("fetch", vi.fn()
-      .mockImplementationOnce(async () => streamedPantryRound(undefined))
-      .mockImplementationOnce(async () => streamedAnswer()));
-    await (await post({ message: "whats low?", stream: true })).text();
-    const toolMsg = secondRoundToolMessage();
-    expect(toolMsg.tool_call_id).toBeTruthy();
-    expect(toolMsg.tool_call_id).toMatch(/^call_\d+_0_/);
-  });
-
-  it("keeps a provider-supplied tool_call_id verbatim", async () => {
-    allowPantryTool();
-    vi.stubGlobal("fetch", vi.fn()
-      .mockImplementationOnce(async () => streamedPantryRound("call_abc123"))
-      .mockImplementationOnce(async () => streamedAnswer()));
-    await (await post({ message: "whats low?", stream: true })).text();
-    expect(secondRoundToolMessage().tool_call_id).toBe("call_abc123");
-  });
-
-  it("synthesizes a tool_call_id in buffered mode too", async () => {
-    allowPantryTool();
-    vi.stubGlobal("fetch", vi.fn()
-      .mockImplementationOnce(async () => bufferedPantryRound())
-      .mockImplementationOnce(async () => bufferedAnswer()));
-    await post({ message: "whats low?" });
-    const toolMsg = secondRoundToolMessage();
-    expect(toolMsg.tool_call_id).toBeTruthy();
-    expect(toolMsg.tool_call_id).toMatch(/^call_\d+_0_/);
-  });
-
-  it("keeps a provider-supplied tool_call_id verbatim in buffered mode", async () => {
-    allowPantryTool();
-    vi.stubGlobal("fetch", vi.fn()
-      .mockImplementationOnce(async () => new Response(
-        JSON.stringify({
-          choices: [{ message: { role: "assistant", content: "", tool_calls: [
-            { id: "call_abc123", type: "function", function: { name: "get_pantry", arguments: "{}" } },
-          ] } }],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }))
-      .mockImplementationOnce(async () => bufferedAnswer()));
-    await post({ message: "whats low?" });
-    expect(secondRoundToolMessage().tool_call_id).toBe("call_abc123");
-  });
-
-  it("gives two tool calls in one round different synthesized ids", async () => {
-    mocks.buildToolsForOpenAI.mockReturnValue([
-      { type: "function", function: { name: "get_pantry", parameters: {} } },
-      { type: "function", function: { name: "get_grocery_list", parameters: {} } },
-    ] as any);
-    mocks.getTool.mockImplementation((name: string) =>
-      ({ handler: vi.fn(async () => `{"tool":"${name}"}`) }));
-    const round = [
-      `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [
-        { index: 0, function: { name: "get_pantry", arguments: "{}" } },
-        { index: 1, function: { name: "get_grocery_list", arguments: "{}" } },
-      ] } }] })}\n\n`,
-      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })}\n\n`,
-      DONE,
-    ].join("");
-    vi.stubGlobal("fetch", vi.fn()
-      .mockImplementationOnce(async () => sseResponse([round]))
-      .mockImplementationOnce(async () => streamedAnswer()));
-    await (await post({ message: "check both", stream: true })).text();
-    const roundTwo = JSON.parse((globalThis.fetch as any).mock.calls[1][1].body);
-    const ids = roundTwo.messages.filter((m: any) => m.role === "tool").map((m: any) => m.tool_call_id);
-    expect(ids).toHaveLength(2);
-    expect(new Set(ids).size).toBe(2);
-  });
-});
-
-// The backfill above only helps LENIENT servers. A strict OpenAI-compatible
-// server validates a tool message's tool_call_id against the ids on the
-// PRECEDING assistant entry, so an id synthesized at the tool push site is
-// useless while the echoed assistant message still carries the provider's empty
-// one. Ids are therefore normalized once — on the assistant message — and the
-// tool replies reuse them.
-describe("hermes chat — tool_call_id agreement with the assistant message", () => {
+// Strict OpenAI-compatible servers validate the round-2 request: a
+// `role:"tool"` message's tool_call_id must match an id on the PRECEDING
+// assistant entry, and each assistant `tool_calls[]` entry needs a `type` beside
+// its id. `normalizeToolCallIds` in route.ts is the single site that guarantees
+// both, so these read what the provider actually received.
+describe("hermes chat — tool_calls echoed on the assistant message", () => {
   function allowPantryTool() {
     mocks.buildToolsForOpenAI.mockReturnValue([
       { type: "function", function: { name: "get_pantry", parameters: {} } },
@@ -732,19 +624,22 @@ describe("hermes chat — tool_call_id agreement with the assistant message", ()
   function toolRound(messages: any[]) {
     const assistantIds: string[] = [];
     const callNames: string[] = [];
+    const callTypes: string[] = [];
     for (const m of messages) {
       if (m.role !== "assistant" || !Array.isArray(m.tool_calls)) continue;
       for (const tc of m.tool_calls) {
         expect(typeof tc.id).toBe("string");
         expect(tc.id.length).toBeGreaterThan(0);
+        expect(tc.type).toBe("function");
         assistantIds.push(tc.id);
         callNames.push(tc.function?.name);
+        callTypes.push(tc.type);
       }
     }
     const toolMsgs = messages.filter((m: any) => m.role === "tool");
     expect(assistantIds.length).toBeGreaterThan(0);
     expect(toolMsgs).toHaveLength(assistantIds.length);
-    return { assistantIds, toolMsgs, callNames };
+    return { assistantIds, toolMsgs, callNames, callTypes };
   }
 
   it("replies with the very id the assistant message carries when the provider omits ids", async () => {
@@ -811,5 +706,39 @@ describe("hermes chat — tool_call_id agreement with the assistant message", ()
     const { assistantIds, toolMsgs } = toolRound(roundTwoMessages());
     expect(assistantIds[0]).toMatch(/^call_\d+_0_/);
     expect(toolMsgs.map((m: any) => m.tool_call_id)).toEqual(assistantIds);
+  });
+
+  it("forwards a buffered provider tool_call verbatim", async () => {
+    allowPantryTool();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "", tool_calls: [
+            { id: "call_abc123", type: "function", function: { name: "get_pantry", arguments: "{}" } },
+          ] } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }))
+      .mockImplementationOnce(async () => bufferedAnswer()));
+    await post({ message: "whats low?" });
+    const { assistantIds, toolMsgs, callTypes } = toolRound(roundTwoMessages());
+    expect(assistantIds).toEqual(["call_abc123"]);
+    expect(toolMsgs.map((m: any) => m.tool_call_id)).toEqual(["call_abc123"]);
+    expect(callTypes).toEqual(["function"]);
+  });
+
+  it("passes a provider-supplied tool_call type through unchanged", async () => {
+    allowPantryTool();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "", tool_calls: [
+            { id: "call_abc123", type: "provider_type", function: { name: "get_pantry", arguments: "{}" } },
+          ] } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }))
+      .mockImplementationOnce(async () => bufferedAnswer()));
+    await post({ message: "whats low?" });
+    const assistant = roundTwoMessages().find((m: any) => m.role === "assistant" && Array.isArray(m.tool_calls));
+    expect(assistant.tool_calls[0].type).toBe("provider_type");
   });
 });
