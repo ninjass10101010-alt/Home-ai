@@ -14,8 +14,14 @@ import {
   startNewConversation,
   OPTIMISTIC_ID_CEILING,
 } from "@/lib/chat-store";
+import { SEED_GREETING_ID } from "@/lib/chat-thread";
 
 const SPEAKER = { name: "Rebecca", emoji: "🐱" };
+
+/** Only the rows a reply creates — the seed greeting is an assistant row too. */
+function assistantBubbles() {
+  return getSnapshot().messages.filter((m) => m.role === "assistant" && m.id !== SEED_GREETING_ID);
+}
 
 function okFetch(messages: any[] = []) {
   return vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ ok: true, messages }), {
@@ -88,6 +94,48 @@ describe("chat-store core", () => {
     expect(msgs.some((m) => m.content.trim() === "partial")).toBe(true);
     expect(msgs.some((m) => m.errorFor)).toBe(false);
     expect(getSnapshot().streaming).toBe(false);
+  });
+
+  it("renders only the answering attempt's text after a mid-round failover", async () => {
+    // The store's accumulator reset and its rendered bubble are two different
+    // things: a bubble left showing a dead target's words is what the family
+    // actually sees while the next attempt thinks, so the snapshot is read
+    // INSIDE the stream — after the second attempt frame, before its first token.
+    const atFirstAttempt: number[] = [];
+    const atSecondAttempt: string[] = [];
+    streamMock.fn.mockImplementation(async ({ onToken, onAttempt }: any) => {
+      onAttempt?.({ round: 1, target: "t0" });
+      // Pre-first-token state stays owned by `isTyping`: an attempt must never
+      // leave an empty bubble behind as a hole in the thread.
+      atFirstAttempt.push(assistantBubbles().length);
+      onToken("orphaned half", "orphaned half");
+      onAttempt?.({ round: 1, target: "t1" });
+      atSecondAttempt.push(assistantBubbles().at(-1)!.content);
+      onToken("Final answer.", "Final answer.");
+      return { content: "Final answer.", streamed: true };
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(atFirstAttempt).toEqual([0]);
+    expect(atSecondAttempt).toEqual([""]);
+    const msgs = getSnapshot().messages;
+    expect(assistantBubbles().at(-1)!.content).toBe("Final answer.");
+    expect(msgs.some((m) => m.content.includes("orphaned half"))).toBe(false);
+  });
+
+  it("leaves no orphan text in the thread when the stream fails after a failover", async () => {
+    streamMock.fn.mockImplementation(async ({ onToken, onAttempt }: any) => {
+      onAttempt?.({ round: 1, target: "t0" });
+      onToken("orphaned half", "orphaned half");
+      onAttempt?.({ round: 1, target: "t1" });
+      throw new Error("boom");
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    const msgs = getSnapshot().messages;
+    expect(msgs.some((m) => m.content.includes("orphaned half"))).toBe(false);
+    // The honest failure copy still lands, with its retry affordance.
+    expect(msgs.some((m) => m.errorFor === "hi")).toBe(true);
   });
 
   it("writes an honest error bubble with errorFor when the stream fails", async () => {

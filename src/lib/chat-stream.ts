@@ -2,11 +2,9 @@
  * Shared client for the streaming Ask Consuela endpoint.
  *
  * SSE protocol (produced by /api/hermes/chat when body.stream === true):
- *   event: attempt\ndata: {"round":N,"target":"<model>"}
- *                                                   — a (round × target)
- *                                                     provider call starts;
- *                                                     earlier tokens are
- *                                                     superseded
+ *   event: attempt\ndata: {"round":N,"target":"tN"}
+ *                                                  — new provider call; earlier
+ *                                                    tokens are superseded
  *   data: {"t":"<delta>"}                          — content token
  *   event: status\ndata: {"label":"<text>"}        — tool activity line
  *   event: error\ndata: {"message":"<text>"}       — terminal failure

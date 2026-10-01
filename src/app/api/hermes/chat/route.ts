@@ -492,7 +492,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         let content = "";
         let tool_calls: ToolCall[] | undefined;
         let lastErr: unknown = null;
-        for (const target of targets) {
+        for (const [targetIndex, target] of targets.entries()) {
           const callStarted = Date.now();
           try {
             // One attempt = one (round × target) provider call. Token frames are
@@ -500,7 +500,11 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
             // already in the client's bubble and cannot be retracted. Announcing
             // the attempt lets the client reset, which is what keeps
             // displayed === persisted: only the answering round is stored.
-            write(sseFrame(JSON.stringify({ round: round + 1, target: target.model }), "attempt"));
+            // `target` is the CHAIN INDEX, never the model: this route sits on
+            // the middleware API_EXEMPT list and answers with no session at all,
+            // while the model id is parent-gated everywhere else it surfaces
+            // (providers GET, health ring via ctx.brain).
+            write(sseFrame(JSON.stringify({ round: round + 1, target: `t${targetIndex}` }), "attempt"));
             ({ content, tool_calls } = await callAiStream(
               wrapup ? [...messages, { role: "system", content: WRAPUP_NOTE }] : messages,
               wrapup ? { target } : { tools, target },

@@ -780,9 +780,27 @@ describe("hermes chat — attempt frames", () => {
     vi.stubGlobal("fetch", vi.fn(async () => sseResponse([token("Hello"), DONE])));
     const body = await (await post({ message: "hi", stream: true })).text();
     expect(attemptFrames(body).map((f) => JSON.parse(f.data)))
-      .toEqual([{ round: 1, target: "test-model" }]);
+      .toEqual([{ round: 1, target: "t0" }]);
     // Announced before its own tokens, or the reset arrives too late to matter.
-    expect(shape(body)).toEqual(["attempt:test-model", "frame", "frame"]);
+    expect(shape(body)).toEqual(["attempt:t0", "frame", "frame"]);
+  });
+
+  // `/api/hermes/` is on the middleware API_EXEMPT list, so this route answers
+  // with no session at all — for a child or a guest as much as for a parent.
+  // The model id is parent-gated everywhere else it surfaces (providers GET,
+  // health ring), so the frame carries a chain INDEX and never the model: the
+  // index is all the client does with it, and a self-hosted model name can
+  // leak an internal-looking string.
+  it("identifies the target by chain index, never by model name", async () => {
+    mocks.resolveChatTargets.mockResolvedValue([
+      { url: "http://brain.local", key: "k1", model: "internal-llm-v3-pro", provider: "p1", fallback: false },
+    ]);
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([token("Hello"), DONE])));
+    const body = await (await post({ message: "hi", stream: true })).text();
+    expect(attemptFrames(body).map((f) => JSON.parse(f.data).target)).toEqual(["t0"]);
+    expect(body).not.toContain("internal-llm-v3-pro");
+    // Whatever a parent typed into Settings must not ride a pre-auth surface.
+    expect(body).not.toContain("test-model");
   });
 
   it("emits a second attempt frame when a target dies mid-round and the next answers", async () => {
@@ -814,12 +832,12 @@ describe("hermes chat — attempt frames", () => {
       .mockImplementationOnce(async () => sseResponse([token("Backup answer."), DONE])));
     const body = await (await post({ message: "hi", stream: true })).text();
     expect(attemptFrames(body).map((f) => JSON.parse(f.data))).toEqual([
-      { round: 1, target: "first" },
-      { round: 1, target: "second" },
+      { round: 1, target: "t0" },
+      { round: 1, target: "t1" },
     ]);
     // The orphaned tokens land BETWEEN the two attempt frames, so the second
     // reset can retract them before the answering attempt's tokens arrive.
-    expect(shape(body)).toEqual(["attempt:first", "frame", "attempt:second", "frame", "frame"]);
+    expect(shape(body)).toEqual(["attempt:t0", "frame", "attempt:t1", "frame", "frame"]);
   });
 
   it("announces the exhaustion answer as its own attempt, before the text", async () => {
@@ -834,12 +852,12 @@ describe("hermes chat — attempt frames", () => {
     expect(exhaustionIdx).toBeGreaterThan(-1);
     // One per provider call, plus the synthesized answer's own attempt.
     expect(attemptFrames(body).map((f) => JSON.parse(f.data))).toEqual([
-      { round: 1, target: "test-model" },
-      { round: 2, target: "test-model" },
-      { round: 3, target: "test-model" },
-      { round: 4, target: "test-model" },
-      { round: 5, target: "test-model" },
-      { round: 6, target: "test-model" },
+      { round: 1, target: "t0" },
+      { round: 2, target: "t0" },
+      { round: 3, target: "t0" },
+      { round: 4, target: "t0" },
+      { round: 5, target: "t0" },
+      { round: 6, target: "t0" },
       { round: 6, target: "exhausted" },
     ]);
     // Without this the fallback is appended to whatever the tool rounds already
@@ -870,8 +888,10 @@ describe("hermes chat — attempt frames", () => {
     expect(res.headers.get("content-type")).toContain("application/json");
     const body = await res.text();
     // Nothing streams here, so there is no orphaned token to retract and an
-    // attempt frame would have nothing to reset.
-    expect(body).not.toContain("event:");
-    expect(body).not.toContain("data: [DONE]");
+    // attempt frame would have nothing to reset. Asserting the PARSED shape —
+    // not the absence of the string "event:" — is what also proves the body is
+    // the parseable JSON chat-stream.ts reads `content` off, which a bare
+    // `data: {...}` token frame would silently break.
+    expect(Object.keys(JSON.parse(body))).toEqual(["content"]);
   });
 });

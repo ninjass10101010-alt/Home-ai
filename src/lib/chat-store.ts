@@ -368,6 +368,19 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
         setState({ statusLine: label });
         attachProposal(data?.proposal);
       },
+      // The stream resets its OWN accumulator on an attempt frame, but the
+      // bubble renders only from onToken — so without this the dead target's
+      // words stay on screen through the next attempt's silent reasoning phase,
+      // and survive a failure as an orphan (nothing is persisted on that path).
+      // Gated on bubbleOpen: before the first token the reply is still owned by
+      // `isTyping`, and clearing here would leave an empty bubble as a hole.
+      onAttempt: () => {
+        streamedSoFar = "";
+        if (!bubbleOpen) return;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === streamId ? { ...m, content: "" } : m)),
+        );
+      },
       onToken: (full: string) => {
         streamedSoFar = full;
         if (!bubbleOpen) {
