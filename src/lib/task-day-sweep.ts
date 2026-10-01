@@ -72,6 +72,10 @@ export function closeDeadlineCrewsOnTasks(
       completedBy: "Crew",
       completedInWeek: weekStart,
       pendingApproval: { byName: "Crew", at: nowIso, points: task.points ?? 0, crew: awardList },
+      // A prior Send back leaves sentBackAt set; closing here must clear it
+      // exactly like the claim path's completedFields (task-claim.ts) or the
+      // fresh approve 409s `operation_conflict` forever.
+      sentBackAt: null,
     };
   });
   return { tasks: next, closedIds };

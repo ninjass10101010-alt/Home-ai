@@ -81,6 +81,21 @@ describe("closeDeadlineCrewsOnTasks", () => {
     expect(closeDeadlineCrewsOnTasks([crew({ completed: true })] as any, DAY, WEEK, NOW).closedIds).toEqual([]);
     expect(closeDeadlineCrewsOnTasks([crew({ crewSize: null, crew: null })] as any, DAY, WEEK, NOW).closedIds).toEqual([]);
   });
+
+  it("clears a stale sentBackAt when the sweep closes the task (C1)", () => {
+    // send-back → partial re-check-in → next day's sweep. If the close leaves
+    // sentBackAt set, the fresh approve 409s `operation_conflict` forever
+    // (task-approval.ts send-back/approve gates) — the row is unrecoverable.
+    const t = crew({ sentBackAt: "2026-09-28T12:00:00.000Z" });
+    const { tasks, closedIds } = closeDeadlineCrewsOnTasks([t] as any, DAY, WEEK, NOW);
+    expect(closedIds).toEqual([11]);
+    const closed = tasks[0] as any;
+    expect(closed.completed).toBe(true);
+    expect(closed.sentBackAt).toBeNull();
+    expect(closed.pendingApproval).toEqual({
+      byName: "Crew", at: NOW, points: 15, crew: ["Caspian Garcia"],
+    });
+  });
 });
 
 const store = vi.hoisted(() => ({
@@ -137,5 +152,18 @@ describe("ensureCurrentTaskDay", () => {
     expect(second.reconciled).toBe(true);
     expect(second.failed).toEqual([]);
     expect(store.data.lastDaySweep.day).toBe(localTodayISO());
+  });
+
+  it("closes a previously sent-back crew with sentBackAt cleared end-to-end (C1)", async () => {
+    store.data.tasks = [
+      crew({ due: localPreviousDayISO(localTodayISO()), sentBackAt: "2026-09-28T12:00:00.000Z" }),
+    ];
+    const result = await ensureCurrentTaskDay();
+    expect(result.closedTaskIds).toEqual([11]);
+    expect(result.reconciled).toBe(true);
+    const closed = store.data.tasks[0] as any;
+    expect(closed.completed).toBe(true);
+    expect(closed.sentBackAt).toBeNull();
+    expect(closed.pendingApproval).toMatchObject({ byName: "Crew", crew: ["Caspian Garcia"] });
   });
 });
