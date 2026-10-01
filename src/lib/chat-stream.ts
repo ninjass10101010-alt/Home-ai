@@ -59,6 +59,24 @@ export function parseSSEFrames(buffer: string): { frames: SSEFrame[]; rest: stri
 }
 
 /**
+ * The route's own terminal failure — it reached the model layer and answered
+ * with something specific ("My brain isn't configured yet — add a provider in
+ * Settings → AI Models.", "I hit a snag doing that"). chat-store renders this
+ * message verbatim; covering it with offline copy would replace an actionable
+ * sentence with a useless one.
+ *
+ * Discriminated by `name`, never by `instanceof`: chat-store's suite mocks this
+ * whole module, and any future serialization boundary would break the
+ * prototype chain while preserving the name.
+ */
+export class RouteChatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RouteChatError";
+  }
+}
+
+/**
  * The caller's stop and the watchdog are one event once composed into a single
  * signal, so only the caller's own signal can tell them apart — and the
  * distinction is load-bearing: chat-store renders "Stopped." whenever the
@@ -179,7 +197,7 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
       }
     }
 
-    if (errorMsg) throw new Error(errorMsg);
+    if (errorMsg) throw new RouteChatError(errorMsg);
     return { content, streamed: true };
   } catch (err) {
     if (failSignal.aborted) {

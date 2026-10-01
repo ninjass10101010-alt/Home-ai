@@ -77,6 +77,17 @@ describe("streamConsuelaChat", () => {
     expect(seen).toEqual(["par", "partial"]);
   });
 
+  it("marks the route's own error frame with a distinguishable name", async () => {
+    const routeMessage = "My brain isn't configured yet — add a provider in Settings → AI Models.";
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      sseResponse(`event: error\ndata: ${JSON.stringify({ message: routeMessage })}\n\n`)));
+    // `name`, not `instanceof`: chat-store mocks this module wholesale, so the
+    // store can only recognize this error by name — and `name` also survives
+    // the serialization any future boundary would put between the two.
+    await expect(streamConsuelaChat({ message: "hi" }))
+      .rejects.toMatchObject({ name: "RouteChatError", message: routeMessage });
+  });
+
   it("falls back to buffered JSON when the route answers non-SSE", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({ content: "buffered" }), { status: 200, headers: { "content-type": "application/json" } })));

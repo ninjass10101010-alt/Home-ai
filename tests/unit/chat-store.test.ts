@@ -100,6 +100,32 @@ describe("chat-store core", () => {
     expect(err!.content).toContain("family server");
   });
 
+  it("renders the route's own error text and still offers a retry", async () => {
+    // Built by NAME, not as an instance of the class chat-stream exports: this
+    // file mocks that module wholesale, so the store can only recognize the
+    // route's failure by `name` — which is exactly what must keep working.
+    streamMock.fn.mockRejectedValue(Object.assign(
+      new Error("My brain isn't configured yet — add a provider in Settings → AI Models."),
+      { name: "RouteChatError" },
+    ));
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    const msgs = getSnapshot().messages;
+    expect(msgs.some((m) => m.content.includes("add a provider in Settings"))).toBe(true);
+    expect(msgs.some((m) => m.errorFor === "hi")).toBe(true);
+  });
+
+  it("keeps the offline copy for a real network failure", async () => {
+    // The route never spoke, so there is no route text to show — the outage
+    // copy is the only honest thing available.
+    streamMock.fn.mockRejectedValue(new TypeError("Failed to fetch"));
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    const msgs = getSnapshot().messages;
+    expect(msgs.some((m) => m.content.includes("couldn't reach the family server"))).toBe(true);
+    expect(msgs.some((m) => m.content.includes("add a provider in Settings"))).toBe(false);
+  });
+
   it("startNewConversation appends the reset marker and POSTs the reset", async () => {
     const fetchMock = okFetch();
     vi.stubGlobal("fetch", fetchMock);

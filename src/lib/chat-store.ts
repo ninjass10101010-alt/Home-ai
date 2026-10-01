@@ -465,6 +465,23 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
               },
             ],
       );
+    } else if (error instanceof Error && error.name === "RouteChatError") {
+      // The route got far enough to answer with something specific ("My brain
+      // isn't configured yet — add a provider in Settings → AI Models.").
+      // Showing outage copy over it would bury the one actionable sentence.
+      // errorFor is kept so "Try again" still works: retrying is the right move
+      // after the parent configures a provider.
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextOptimisticId(),
+          role: "assistant",
+          content: error.message,
+          timestamp: "Just now",
+          at: Date.now(),
+          errorFor: trimmed,
+        },
+      ]);
     } else {
       // Honest failure: name the problem (offline vs server) and the recovery.
       const offline = typeof navigator !== "undefined" && !navigator.onLine;
@@ -483,7 +500,6 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
         },
       ]);
     }
-    void error;
   } finally {
     abortController = null;
     streamInFlight = false;
