@@ -2,6 +2,11 @@
  * Shared client for the streaming Ask Consuela endpoint.
  *
  * SSE protocol (produced by /api/hermes/chat when body.stream === true):
+ *   event: attempt\ndata: {"round":N,"target":"<model>"}
+ *                                                   — a (round × target)
+ *                                                     provider call starts;
+ *                                                     earlier tokens are
+ *                                                     superseded
  *   data: {"t":"<delta>"}                          — content token
  *   event: status\ndata: {"label":"<text>"}        — tool activity line
  *   event: error\ndata: {"message":"<text>"}       — terminal failure
@@ -24,6 +29,10 @@ export interface StreamConsuelaChatOptions {
    *  chat page renders the parent-PIN confirm chip from it). The second
    *  argument is optional, so existing (label) callers keep compiling. */
   onStatus?: (label: string, data?: Record<string, unknown>) => void;
+  /** Called when the route announces a new (round × target) provider call. The
+   *  tokens received so far are superseded — the accumulator has been reset, so
+   *  the next `onToken` reports only the new attempt's content. */
+  onAttempt?: (meta: { round: number; target: string }) => void;
 }
 
 export interface StreamConsuelaChatResult {
@@ -185,6 +194,18 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
           break outer;
         } else if (frame.data === "[DONE]") {
           break outer;
+        } else if (frame.event === "attempt") {
+          // The route persists ONLY the answering round, so this attempt's tokens
+          // replace the previous one's rather than continuing them. Resetting
+          // here is what keeps displayed === finalContent === persisted on the
+          // preamble round, the mid-round target failover and the exhaustion
+          // fallback alike. The reset stands even if the payload is malformed:
+          // leaving a superseded attempt's tokens on screen is the worse failure.
+          content = "";
+          try {
+            const p = JSON.parse(frame.data);
+            opts.onAttempt?.({ round: Number(p.round) || 0, target: String(p.target || "") });
+          } catch { /* malformed attempt frame — the reset above still stands */ }
         } else {
           try {
             const p = JSON.parse(frame.data);

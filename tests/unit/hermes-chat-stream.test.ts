@@ -26,6 +26,7 @@ vi.mock("@/db", () => ({ db: { insertChatMessage: mocks.insertChatMessage } }));
 vi.mock("@/lib/ai/health", () => ({ recordChatOutcome: mocks.recordChatOutcome }));
 
 import { POST, resetAiChatForTests } from "@/app/api/hermes/chat/route";
+import { parseSSEFrames, type SSEFrame } from "@/lib/chat-stream";
 
 function sseResponse(chunks: string[]) {
   const stream = new ReadableStream<Uint8Array>({
@@ -417,8 +418,17 @@ describe("hermes chat — health outcome recording", () => {
     const reader = res.body!.getReader();
     const firstFrame = (async () => {
       emitNext!("Hel");
-      const { value } = await reader.read();
-      return new TextDecoder().decode(value);
+      const decoder = new TextDecoder();
+      let seen = "";
+      // Frames arrive one per write(), and the attempt frame is announced before
+      // this turn's first token — read until the token itself lands.
+      const deadline = Date.now() + 1000;
+      while (!seen.includes('"t":"Hel"') && Date.now() < deadline) {
+        const { value } = await reader.read();
+        if (!value) break;
+        seen += decoder.decode(value);
+      }
+      return seen;
     })();
     expect(await firstFrame).toContain('"t":"Hel"');
     await reader.cancel(); // client is gone
@@ -740,5 +750,128 @@ describe("hermes chat — tool_calls echoed on the assistant message", () => {
     await post({ message: "whats low?" });
     const assistant = roundTwoMessages().find((m: any) => m.role === "assistant" && Array.isArray(m.tool_calls));
     expect(assistant.tool_calls[0].type).toBe("provider_type");
+  });
+});
+
+// Token frames are written from INSIDE callAiStream, so a superseded attempt's
+// tokens are already in the client's bubble and cannot be retracted — while the
+// route persists only the answering round. An `attempt` frame announced before
+// every provider call (round × target) is what lets the client drop them, and
+// it is the only signal that covers a mid-round target failover, where no round
+// boundary exists at all. See the protocol block in src/lib/chat-stream.ts.
+describe("hermes chat — attempt frames", () => {
+  function frames(body: string): SSEFrame[] {
+    return parseSSEFrames(body).frames;
+  }
+  function attemptFrames(body: string): SSEFrame[] {
+    return frames(body).filter((f) => f.event === "attempt");
+  }
+  function attemptPositions(body: string): number[] {
+    return frames(body).map((f, i) => (f.event === "attempt" ? i : -1)).filter((i) => i >= 0);
+  }
+  // `attempt:<target>` for attempt frames, `frame` for everything else — the
+  // whole wire protocol as the client sees it, in order.
+  function shape(body: string): string[] {
+    return frames(body).map((f) =>
+      f.event === "attempt" ? `attempt:${JSON.parse(f.data).target}` : "frame");
+  }
+
+  it("emits an attempt frame before each provider call", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([token("Hello"), DONE])));
+    const body = await (await post({ message: "hi", stream: true })).text();
+    expect(attemptFrames(body).map((f) => JSON.parse(f.data)))
+      .toEqual([{ round: 1, target: "test-model" }]);
+    // Announced before its own tokens, or the reset arrives too late to matter.
+    expect(shape(body)).toEqual(["attempt:test-model", "frame", "frame"]);
+  });
+
+  it("emits a second attempt frame when a target dies mid-round and the next answers", async () => {
+    let reads = 0;
+    mocks.resolveChatTargets.mockResolvedValue([
+      { url: "http://brain.local", key: "k1", model: "first", provider: "p1", fallback: false },
+      { url: "http://backup.local", key: "k2", model: "second", provider: "p2", fallback: false },
+    ]);
+    // Target 1 streams a partial answer and then the socket dies. Nothing marks
+    // a round boundary between the two targets, so round numbers alone cannot
+    // express this — both attempts are round 1.
+    const dying = () => new Response(
+      new ReadableStream<Uint8Array>({
+        // Error on the SECOND pull: enqueue-then-error() clears the queued
+        // chunk, so the orphaned token would never reach the route at all.
+        pull(c) {
+          reads += 1;
+          if (reads === 1) {
+            c.enqueue(new TextEncoder().encode(token("orphaned half")));
+            return;
+          }
+          c.error(new Error("socket died"));
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } });
+    resetAiChatForTests();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => dying())
+      .mockImplementationOnce(async () => sseResponse([token("Backup answer."), DONE])));
+    const body = await (await post({ message: "hi", stream: true })).text();
+    expect(attemptFrames(body).map((f) => JSON.parse(f.data))).toEqual([
+      { round: 1, target: "first" },
+      { round: 1, target: "second" },
+    ]);
+    // The orphaned tokens land BETWEEN the two attempt frames, so the second
+    // reset can retract them before the answering attempt's tokens arrive.
+    expect(shape(body)).toEqual(["attempt:first", "frame", "attempt:second", "frame", "frame"]);
+  });
+
+  it("announces the exhaustion answer as its own attempt, before the text", async () => {
+    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+    ] as any);
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")])));
+    const body = await (await post({ message: "keep going", stream: true })).text();
+    const positions = attemptPositions(body);
+    const exhaustionIdx = frames(body).findIndex((f) => f.data.includes("ran out of steps"));
+    expect(exhaustionIdx).toBeGreaterThan(-1);
+    // One per provider call, plus the synthesized answer's own attempt.
+    expect(attemptFrames(body).map((f) => JSON.parse(f.data))).toEqual([
+      { round: 1, target: "test-model" },
+      { round: 2, target: "test-model" },
+      { round: 3, target: "test-model" },
+      { round: 4, target: "test-model" },
+      { round: 5, target: "test-model" },
+      { round: 6, target: "test-model" },
+      { round: 6, target: "exhausted" },
+    ]);
+    // Without this the fallback is appended to whatever the tool rounds already
+    // rendered and the bubble stops matching the persisted row.
+    expect(positions[6]).toBeLessThan(exhaustionIdx);
+  });
+
+  it("numbers one attempt per round so the answering wrap-up is identifiable", async () => {
+    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+    ] as any);
+    const fetchMock = vi.fn();
+    for (let i = 0; i < 5; i++) {
+      fetchMock.mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")]));
+    }
+    fetchMock.mockImplementationOnce(async () => sseResponse([token("Rundown."), DONE]));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = await (await post({ message: "dig into everything", stream: true })).text();
+    expect(attemptFrames(body).map((f) => JSON.parse(f.data).round)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("keeps the buffered path free of SSE frames entirely", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "plain" } }] }),
+      { status: 200, headers: { "content-type": "application/json" } })));
+    const res = await post({ message: "hi" });
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = await res.text();
+    // Nothing streams here, so there is no orphaned token to retract and an
+    // attempt frame would have nothing to reset.
+    expect(body).not.toContain("event:");
+    expect(body).not.toContain("data: [DONE]");
   });
 });

@@ -495,6 +495,12 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         for (const target of targets) {
           const callStarted = Date.now();
           try {
+            // One attempt = one (round × target) provider call. Token frames are
+            // written INSIDE callAiStream, so a failed-over target's tokens are
+            // already in the client's bubble and cannot be retracted. Announcing
+            // the attempt lets the client reset, which is what keeps
+            // displayed === persisted: only the answering round is stored.
+            write(sseFrame(JSON.stringify({ round: round + 1, target: target.model }), "attempt"));
             ({ content, tool_calls } = await callAiStream(
               wrapup ? [...messages, { role: "system", content: WRAPUP_NOTE }] : messages,
               wrapup ? { target } : { tools, target },
@@ -546,7 +552,11 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       if (!finalContent) {
         answeredBy = "exhausted";
         finalContent = "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧";
-        // Streamed clients must see exactly what gets persisted.
+        // Streamed clients must see exactly what gets persisted — including this
+        // synthesized fallback, which is written as an ordinary token frame. Its
+        // own attempt frame clears the tool rounds' tokens first, so it replaces
+        // them instead of being appended to them.
+        write(sseFrame(JSON.stringify({ round: ctx.rounds, target: "exhausted" }), "attempt"));
         write(sseFrame(JSON.stringify({ t: finalContent })));
       }
       recordChatOutcome({

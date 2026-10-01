@@ -170,6 +170,96 @@ describe("streamConsuelaChat", () => {
   });
 });
 
+// The route writes token frames from inside the provider call, so a superseded
+// attempt's tokens are already on screen — but only the answering round is
+// persisted. `attempt` is announced before every provider call (round × target)
+// so the accumulator can drop the orphan. Three paths diverge without it: a
+// preamble round superseded by an answer, a mid-round target failover (no round
+// boundary between the targets), and the exhaustion fallback.
+describe("streamConsuelaChat — attempt frames", () => {
+  function stream(...frames: string[]) {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse(frames.join(""))));
+  }
+
+  it("replaces a superseded attempt's tokens instead of concatenating them", async () => {
+    stream(
+      'event: attempt\ndata: {"round":1,"target":"first"}\n\n',
+      'data: {"t":"first attempt text"}\n\n',
+      'event: attempt\ndata: {"round":1,"target":"second"}\n\n',
+      'data: {"t":"second attempt"}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const seen: string[] = [];
+    const res = await streamConsuelaChat({ message: "hi", onToken: (full) => seen.push(full) });
+    // What the bubble ends up holding must be exactly what the route persists.
+    expect(res.content).toBe("second attempt");
+    expect(seen).toEqual(["first attempt text", "second attempt"]);
+    expect(seen).not.toContain("first attempt textsecond attempt");
+  });
+
+  it("replaces the tool rounds' tokens with the exhaustion fallback", async () => {
+    stream(
+      'event: attempt\ndata: {"round":1,"target":"brain"}\n\n',
+      'data: {"t":"Let me check"}\n\n',
+      'event: attempt\ndata: {"round":2,"target":"brain"}\n\n',
+      'data: {"t":"Let me check on that too"}\n\n',
+      'event: attempt\ndata: {"round":2,"target":"exhausted"}\n\n',
+      'data: {"t":"I ran out of steps"}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const res = await streamConsuelaChat({ message: "hi" });
+    expect(res.content).toBe("I ran out of steps");
+  });
+
+  it("reports every attempt's round and target to onAttempt", async () => {
+    stream(
+      'event: attempt\ndata: {"round":1,"target":"first"}\n\n',
+      'data: {"t":"partial"}\n\n',
+      'event: attempt\ndata: {"round":1,"target":"second"}\n\n',
+      'data: {"t":"answer"}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const attempts: Array<{ round: number; target: string }> = [];
+    await streamConsuelaChat({ message: "hi", onAttempt: (meta) => attempts.push(meta) });
+    // Two targets in ONE round — the round number alone could not tell them apart.
+    expect(attempts).toEqual([
+      { round: 1, target: "first" },
+      { round: 1, target: "second" },
+    ]);
+  });
+
+  it("still drops the orphan when the attempt frame's data is malformed", async () => {
+    // The reset is the load-bearing part: a parse failure must not leave the
+    // superseded attempt's tokens on screen.
+    stream(
+      'event: attempt\ndata: {"round":1,"target":"first"}\n\n',
+      'data: {"t":"first attempt text"}\n\n',
+      "event: attempt\ndata: not-json\n\n",
+      'data: {"t":"second attempt"}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const seen: string[] = [];
+    const res = await streamConsuelaChat({
+      message: "hi",
+      onToken: (full) => seen.push(full),
+      onAttempt: () => { throw new Error("onAttempt must not run on a malformed frame"); },
+    });
+    expect(res.content).toBe("second attempt");
+    expect(seen).not.toContain("first attempt textsecond attempt");
+  });
+
+  it("coerces a missing round to 0 rather than reporting NaN", async () => {
+    stream(
+      'event: attempt\ndata: {"target":"only"}\n\n',
+      'data: {"t":"ok"}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const attempts: Array<{ round: number; target: string }> = [];
+    await streamConsuelaChat({ message: "hi", onAttempt: (meta) => attempts.push(meta) });
+    expect(attempts).toEqual([{ round: 0, target: "only" }]);
+  });
+});
+
 describe("streamConsuelaChat watchdog", () => {
   // A wedged intermediary: one frame lands, then the body never resolves and
   // never closes. Fetch has already resolved here, so only a watchdog raced
