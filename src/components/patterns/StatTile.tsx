@@ -26,19 +26,29 @@ export default function StatTile({ label, value, detail, icon, tone = "accent", 
   return (
     <WidgetCard
       tone={toneHex[tone]}
-      className={`relative min-w-0 flex-1 overflow-hidden lg:flex lg:flex-col lg:items-center ${compact ? "p-3 lg:justify-center" : "p-4 lg:aspect-square lg:justify-center"}`}
+      className={`relative min-w-0 flex-1 overflow-hidden ${compact ? "p-3.5" : "p-4 lg:aspect-square lg:justify-center lg:items-center"} flex flex-col`}
     >
-      <div className={`grid place-items-center rounded-2xl bg-white/10 ${compact ? "mb-2 h-8 w-8 text-base" : "mb-3 h-9 w-9 text-lg"}`} style={{ color: `color-mix(in srgb, var(--widget-tone) 85%, white)` }}>
-        {icon}
+      <div className="flex items-start justify-between gap-2">
+        <div
+          className={`grid place-items-center rounded-xl bg-white/[0.07] ring-1 ring-white/[0.06] ${compact ? "h-7 w-7 text-sm" : "h-8 w-8 text-base"}`}
+          style={{ color: `color-mix(in srgb, var(--widget-tone) 82%, white)` }}
+        >
+          {icon}
+        </div>
+        {clamped !== null && (
+          <span className="text-eyebrow !tracking-[0.08em] opacity-60">
+            {Math.round(clamped * 100)}%
+          </span>
+        )}
       </div>
-      <div className={`font-bold tracking-tight text-text-primary display-numeral ${compact ? "text-xl" : "text-2xl"}`}>{value}</div>
-      <div className={`mt-1 font-medium text-text-secondary ${compact ? "text-xs" : "text-xs"}`}>{label}</div>
-      {detail && <div className="mt-1 text-xs text-text-muted">{detail}</div>}
+      <div className={`mt-3 font-bold tracking-tight text-text-primary text-numeral-hero leading-none ${compact ? "text-[1.7rem]" : "text-2xl"}`}>{value}</div>
+      <div className="mt-1 text-xs font-medium text-text-secondary">{label}</div>
+      {detail && <div className="mt-0.5 text-xs text-text-muted">{detail}</div>}
       {clamped !== null && (
-        <div className="absolute inset-x-0 bottom-0 h-[2px] bg-white/8">
+        <div className="mt-3 h-[3px] rounded-full bg-white/[0.07] overflow-hidden">
           <div
-            className="h-full rounded-r-full transition-[width] duration-1000"
-            style={{ width: `${clamped * 100}%`, background: `color-mix(in srgb, var(--widget-tone) 70%, transparent)` }}
+            className="h-full rounded-full transition-[width] duration-1000"
+            style={{ width: `${clamped * 100}%`, background: `color-mix(in srgb, var(--widget-tone) 72%, white 8%)` }}
           />
         </div>
       )}

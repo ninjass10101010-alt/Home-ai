@@ -520,10 +520,11 @@ export default function HomePage() {
             {/* pr-16 clears the fixed top-right Emergency shield (right-4 + 40px) */}
             <div className="flex items-start justify-between gap-3 pr-16">
               <div className="min-w-0 flex-1">
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-text-primary break-words">
-                  Good {timeOfDay}, <span className="text-[var(--color-accent-selected)]">{familyName}</span>
+                <p className="text-eyebrow mb-1.5">{season.emoji} {season.name} · {dateInfo.dayOfWeek}, {dateInfo.dayMonth} — {timeStr}</p>
+                <h1 className="text-display text-[2rem] sm:text-[2.6rem] text-text-primary break-words">
+                  Good {timeOfDay},<br />
+                  <span className="text-[var(--color-accent-selected)]">{familyName}</span>
                 </h1>
-                <p className="mt-1 text-sm text-text-secondary">{season.emoji} {season.name} · {dateInfo.dayOfWeek}, {dateInfo.dayMonth} · {timeStr}</p>
               </div>
               {wall ? (
                 <WallMemberRail
@@ -622,7 +623,8 @@ export default function HomePage() {
           </div>
 
           <div className="px-4 space-y-6 relative z-10">
-            <div className="grid grid-cols-3 gap-3">
+            {/* Editorial stat strip — generous gap, asymmetrical rhythm via varied tones */}
+            <div className="grid grid-cols-3 gap-3 sm:gap-4">
               <StatTile label={todayEvents.length === 1 ? "Event" : "Events"} value={todayEvents.length} detail="Today" icon={<HomeWidgetIcon variant="events" size="sm" />} tone={todayEvents.length > 0 ? "warning" : "accent"} compact progress={dayFraction} />
               <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon={<HomeWidgetIcon variant="tasks" size="sm" />} tone={pendingTasks.length > 0 ? "danger" : "success"} compact />
               <StatTile label="Week" value={weekPlannedDays === null ? "—" : weekPlannedDays} detail="Days planned" icon={<HomeWidgetIcon variant="week" size="sm" />} tone="accent" compact progress={weekPlannedDays === null ? null : weekPlannedDays / 7} />

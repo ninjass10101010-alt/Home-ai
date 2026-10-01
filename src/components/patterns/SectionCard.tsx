@@ -47,7 +47,6 @@ export default function SectionCard({
     );
   }
 
-  // Default path: unchanged from today (icon passes through to WidgetCard's protruding slot).
   return (
     <WidgetCard tone={tone} icon={icon} className={className}>
       <div className={`flex items-start justify-between gap-4 border-b border-white/10 ${compact ? "p-4 pl-[72px]" : "p-5 pl-[72px]"}`}>
