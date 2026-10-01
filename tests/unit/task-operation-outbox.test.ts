@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
-import { act } from "react";
+import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-import { loadTasks } from "@/lib/task-utils";
+import { loadDeletedTaskIds, loadTasks, saveTasks } from "@/lib/task-utils";
 import type { SnapshotData } from "@/lib/snapshot-tasks";
 import {
   TASK_OUTBOX_BASE_BACKOFF_MS,
@@ -16,6 +16,7 @@ import {
   TASK_OUTBOX_REQUEST_TIMEOUT_MS,
   TASK_OUTBOX_STORAGE_KEY,
   __resetTaskOutboxForTests,
+  adoptTaskOutboxAcknowledgement,
   buildTaskOperationRequestBody,
   cancelTaskOutboxEntry,
   createTaskOperationId,
@@ -1797,6 +1798,27 @@ describe("crew-close rides the claim seam", () => {
     expect(withCredential).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
     expect(listTaskOutbox()).toHaveLength(0);
   });
+
+  it("tombstones a deleted task locally the moment its delete is acknowledged", async () => {
+    saveTasks([canonicalTask() as never]);
+    enqueueTaskOperation({
+      operationId: "op-manage-delete-ack",
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: 42 },
+      displayTarget: { taskId: 42, title: "Dishes", kind: "task" },
+    });
+
+    const result = await flushTaskOutbox({
+      onAcknowledged: adoptTaskOutboxAcknowledgement,
+      adoptSnapshot: ADOPT_NOOP,
+      send: respond(200, ack("op-manage-delete-ack", { deleted: true })) as never,
+    });
+
+    expect(result).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(loadTasks().some((task) => task.id === 42)).toBe(false);
+    expect(loadDeletedTaskIds()).toContain(42);
+  });
 });
 
 describe("useTaskOperationOutbox", () => {
@@ -1804,7 +1826,10 @@ describe("useTaskOperationOutbox", () => {
   let latest: UseTaskOperationOutboxResult | null = null;
 
   function Probe(props: { options?: Parameters<typeof useTaskOperationOutbox>[0] }) {
-    latest = useTaskOperationOutbox(props.options);
+    const result = useTaskOperationOutbox(props.options);
+    useEffect(() => {
+      latest = result;
+    });
     return null;
   }
 

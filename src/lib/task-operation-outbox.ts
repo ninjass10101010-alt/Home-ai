@@ -79,6 +79,8 @@ export interface TaskOutboxAcknowledgement {
   operationId: string;
   weekData?: WeekData;
   task?: Task;
+  /** The tombstoned task on a delete ack (attached by `acknowledge()`). */
+  taskId?: number;
   revision?: SnapshotRevision;
   paid?: number;
   cleared?: number;
@@ -1187,8 +1189,16 @@ async function acknowledge(
   options: FlushTaskOutboxOptions,
 ): Promise<FlushTaskOutboxResult> {
   if (!options.onAcknowledged) return markReconciling(entry, "adoption_unavailable");
+  // A landed delete names its tombstone: the server ack says `deleted: true`
+  // but carries no id, so adoption cannot drop the row — and releasing the
+  // optimistic hide without that put the deleted row back on screen until the
+  // next 60s pull (the "the task will not delete" re-click loop).
+  const acknowledgement: TaskOutboxAcknowledgement =
+    entry.action === "delete" && typeof entry.payload.taskId === "number"
+      ? { ...body, taskId: entry.payload.taskId, deleted: true }
+      : body;
   try {
-    await options.onAcknowledged(body);
+    await options.onAcknowledged(acknowledgement);
   } catch {
     return markRetryable(entry, "projection", "adoption_failed");
   }
@@ -1685,6 +1695,20 @@ export async function adoptTaskOutboxAcknowledgement(
   acknowledgement: TaskOutboxAcknowledgement,
 ): Promise<void> {
   await adoptConfigAcknowledgement(acknowledgement);
+  // A delete ack names the tombstoned row (`acknowledge()` attaches the
+  // entry's taskId). Apply it locally NOW so the row is gone the moment its
+  // optimistic hide is released — never resurrected by a later add-only merge.
+  if (acknowledgement.deleted === true && typeof acknowledgement.taskId === "number") {
+    const stores = await import("@/lib/task-utils");
+    const tombstoned = stores.loadDeletedTaskIds();
+    if (!tombstoned.includes(acknowledgement.taskId)) {
+      stores.saveDeletedTaskIds([...tombstoned, acknowledgement.taskId]);
+    }
+    const rows = stores.loadTasks();
+    const remaining = rows.filter((task) => Number(task.id) !== acknowledgement.taskId);
+    if (remaining.length !== rows.length) stores.saveTasks(remaining);
+    return;
+  }
   if (!acknowledgement.task && !acknowledgement.weekData) return;
   const stores = await import("@/lib/task-utils");
   if (acknowledgement.task) {
