@@ -707,6 +707,7 @@ function snapshotTaskFromCollection(record: Record<string, any>): SnapshotTask |
     completedInWeek: record.completedInWeek ?? null,
     pendingApproval: parseJSON<SnapshotTask["pendingApproval"]>(record.pendingApproval, null),
     sentBackAt: record.sentBackAt ?? null,
+    crewCloseMode: record.crewCloseMode ?? null,
   };
 }
 

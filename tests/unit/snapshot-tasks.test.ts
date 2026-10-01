@@ -10,6 +10,7 @@ import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
 import {
   liveSnapshotTasks,
   findSnapshotTask,
+  findCanonicalTask,
   deleteSnapshotTask,
   upsertSnapshotTask,
   readSnapshotWithRevision,
@@ -719,5 +720,36 @@ describe("ledger repair markers survive the sanitizer and the mutation boundary"
 
     const markers = harness.data().pendingProjectionRepairs;
     expect(markers.map((m: any) => m.operationId).sort()).toEqual(["op-approve-1", "op-pen-mixed"]);
+  });
+});
+
+describe("PB-source fallback (findCanonicalTask)", () => {
+  it("carries crewCloseMode through the collection-row read (M2)", async () => {
+    const pb = {
+      collection: (name: string) => {
+        if (name === "consuela_data_snapshots") {
+          return {
+            getFullList: async () => [{
+              id: "snap-1",
+              key: "tasks-snapshot",
+              data: JSON.stringify({ revision: "7", tasks: [], deletedTaskIds: [] }),
+            }],
+          };
+        }
+        if (name === "tasks") {
+          return {
+            getFullList: async () => [{
+              id: "pb-1", taskId: 77, title: "Garage reset", points: 15,
+              crewSize: 3, crewCloseMode: "deadline", completed: true,
+            }],
+          };
+        }
+        return { getFullList: async () => [] };
+      },
+    } as any;
+
+    const found = await findCanonicalTask(pb, 77);
+    expect(found.source).toBe("pb");
+    expect(found.task?.crewCloseMode).toBe("deadline");
   });
 });
