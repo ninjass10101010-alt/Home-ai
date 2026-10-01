@@ -68,7 +68,7 @@ describe("nav manifest — primary items", () => {
 });
 
 describe("nav manifest — secondary items", () => {
-  it("surfaces all six formerly orphaned routes for a parent", () => {
+  it("surfaces every formerly orphaned route plus Photos for a parent", () => {
     expect(moreNavItemsForRole("parent").map((item) => item.path)).toEqual([
       "/grocery",
       "/skill-tree",
@@ -76,10 +76,13 @@ describe("nav manifest — secondary items", () => {
       "/analytics",
       "/money-mountain",
       "/memory",
+      "/photos",
     ]);
   });
 
   it("withholds the parent-only and off-wall destinations per role", () => {
+    // Photos needs a session to upload into, so it appears for a signed-in
+    // child but never for a guest — the signed-out wall cannot push pictures.
     const child = moreNavItemsForRole("child").map((item) => item.path);
     expect(child).toEqual([
       "/grocery",
@@ -87,6 +90,7 @@ describe("nav manifest — secondary items", () => {
       "/time-capsule",
       "/analytics",
       "/money-mountain",
+      "/photos",
     ]);
 
     const guest = moreNavItemsForRole("guest").map((item) => item.path);

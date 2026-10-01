@@ -6,6 +6,7 @@ import {
   DEFAULT_LAYOUT,
   FIRST_FOLD_WIDGETS,
   PHONE_WIDGET_FOLD,
+  WIDGET_TIERS,
 } from "@/lib/layout-config";
 
 /**
@@ -31,8 +32,22 @@ describe("home first-fold ranking (audit 4.5)", () => {
     expect(PHONE_WIDGET_FOLD).toBe(FIRST_FOLD_WIDGETS.length);
   });
 
-  it("tablet inherits the ranked phone order", () => {
-    expect(DEFAULT_LAYOUT.tablet.widgets).toEqual(phone);
+  it("tablet (the wall) fills exactly its 12 grid cells — no 5th row, no page overflow", () => {
+    const { widgets, hidden } = DEFAULT_LAYOUT.tablet;
+    const visible = widgets.filter((id) => !hidden.includes(id));
+    // Measured on the panel: 3 columns × 4 rows. Anything past 12 cells forces a
+    // 5th row and ~118px of overflow on a surface that must not scroll.
+    const cells = visible.reduce(
+      (total, id) => total + (WIDGET_TIERS[id].tablet.includes("row-span-2") ? 2 : 1),
+      0,
+    );
+    expect(visible).toContain("photos");
+    expect(cells).toBe(12);
+  });
+
+  it("photos is a display surface, so it does not displace a phone's actionable first fold", () => {
+    expect(FIRST_FOLD_WIDGETS).not.toContain("photos");
+    expect(phone.indexOf("photos")).toBe(FIRST_FOLD_WIDGETS.length);
   });
 
   it("home folds behind the More… sheet on stacked layouts and budgets motion", () => {

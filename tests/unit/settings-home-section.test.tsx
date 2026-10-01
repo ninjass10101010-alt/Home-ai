@@ -219,7 +219,9 @@ describe("HomeSettingsSection", () => {
     expect(radioByText(host, "🖥️ Desktop").getAttribute("aria-checked")).toBe("false");
     expect(host.querySelector('[role="radiogroup"][aria-label="Wall display (ApoloSign)"]')).toBeTruthy();
     expect(rowIds(host)).toEqual(config.phone.widgets);
-    expect(host.textContent).toContain("12 on Home");
+    // "N on Home" counts what the selected layout actually shows, so derive it
+    // rather than hard-coding a widget count the next manifest edit would break.
+    expect(host.textContent).toContain(`${config.phone.widgets.length - config.phone.hidden.length} on Home`);
   });
 
   it("keeps phone, tablet, and desktop order and hidden rows independent", async () => {
@@ -286,7 +288,9 @@ describe("HomeSettingsSection", () => {
     const { host } = await renderView();
     const rows = Array.from(host.querySelectorAll<HTMLElement>("[data-widget-id]"));
     expect(rows.every((row) => !row.hasAttribute("draggable"))).toBe(true);
-    expect(host.querySelectorAll('[draggable="true"]')).toHaveLength(13);
+    // One dedicated handle per row: the count is the rendered row count, not a
+    // literal, so adding a widget to the manifest cannot silently invalidate it.
+    expect(host.querySelectorAll('[draggable="true"]')).toHaveLength(rows.length);
 
     const handle = rowById(host, "weather").querySelector<HTMLElement>('[data-widget-drag-handle="true"]')!;
     const target = rowById(host, "tasks");

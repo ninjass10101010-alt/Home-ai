@@ -2907,6 +2907,89 @@ html[data-wall="true"] .wall-widget-grid [data-empty-state] > div:first-child {
 html[data-wall="true"] .wall-widget-grid [data-empty-state] > p {
   display: none;
 }
+/* ─── Wall photo tile ────────────────────────────────────────────────────────
+   Full-bleed on purpose: no WidgetCard chrome, no corner icon, no
+   weatherGlowPulse halo. A photograph brings its own frame, and an icon in the
+   corner would compete with it. `object-fit: cover` is the structural reason
+   this tile can't repeat the clipping bug that hit the text widgets — an image
+   is cropped by its box instead of pushing content past it, whatever the
+   picture's aspect ratio.
+   The only motion here is a single opacity crossfade per photo change: an event
+   roughly every 75 seconds, not a loop. It is deliberately outside the motion
+   suspension below, which cancels infinite `animation` only. */
+.wall-photo-tile {
+  height: 100%;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-0);
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+.wall-photo-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+.wall-photo-incoming {
+  opacity: 0;
+  transition: opacity var(--motion-glide) var(--ease-standard);
+}
+.wall-photo-incoming.is-armed {
+  opacity: 1;
+}
+/* Reduced motion swaps with no transition at all. A hard cut carries no motion,
+   and the photo still changes — which is the burn-in requirement. */
+.wall-photo-incoming.is-instant {
+  transition: none;
+}
+.wall-photo-scrim {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 34%;
+  /* Captions sit over arbitrary pixels; the scrim is what keeps them legible
+     against a snow scene or a white wall. */
+  background: linear-gradient(to top, rgb(0 0 0 / 0.66), rgb(0 0 0 / 0));
+  pointer-events: none;
+}
+.wall-photo-caption {
+  position: absolute;
+  inset-inline: 1rem;
+  bottom: 0.85rem;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #fff;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.55);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Deliberately no shimmer: a shimmer is an infinite animation, and if the photo
+   library is unreachable this tile would keep shimmering on an always-on panel.
+   A static fill is honest about waiting without animating the wait. */
+.wall-photo-skeleton {
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--color-surface-0) 70%, transparent),
+    color-mix(in srgb, var(--color-surface-1) 55%, transparent)
+  );
+}
+html[data-wall="true"] .wall-photo-tile {
+  /* The wall reads images edge to edge; the hairline border only adds noise at
+     three metres and is the one piece of chrome the tile drops. */
+  border: 0;
+}
+html[data-wall="true"] .wall-photo-caption {
+  font-size: 1.05rem;
+  bottom: 1.1rem;
+  inset-inline: 1.25rem;
+}
+
+
 
 /* ─── Wall motion budget (RK3576 Mali-G52, 4GB RAM, 24/7 duty) ───────────────
    60 elements ran infinite animations on the wall canvas. Twelve were

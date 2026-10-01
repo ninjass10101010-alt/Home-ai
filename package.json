@@ -32,7 +32,8 @@
     "pocketbase": "^0.27.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "three": "^0.184.0"
+    "three": "^0.184.0",
+    "youtubei.js": "^18.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

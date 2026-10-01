@@ -19,7 +19,9 @@ export type WidgetId =
   | "homeSecurity"
   | "homeClimate"
   | "homeLights"
-  | "financeLedger";
+  | "financeLedger"
+  | "music"
+  | "photos";
 
 /** Layout mode bucket. "phone"/"tablet" require portrait aspect + width bands;
  * everything else (landscape, or portrait >= 1280px) is "desktop". */
@@ -94,12 +96,20 @@ export const ALL_WIDGETS: WidgetDef[] = [
   { id: "homeClimate", label: "Home Climate",   emoji: "🌡️", description: "Indoor temperature and thermostat" },
   { id: "homeLights",  label: "Home Lights",    emoji: "💡", description: "Quick light toggles and scenes" },
   { id: "financeLedger", label: "The Ledger", emoji: "📒", description: "Parents only — family balances & budget (Alex)" },
+  { id: "music", label: "Music", emoji: "🎵", description: "Now playing with transport controls — opens the full player" },
+  { id: "photos", label: "Photos", emoji: "📸", description: "A rotating stream of family photos from the shared library" },
 ];
 
 /**
- * Per-widget tier spans per layout mode. Weather is the only enlarged
- * widget (2×2 hero on tablet + desktop); everything else is 1×1.
+ * Per-widget tier spans per layout mode. Weather and Photos are the two
+ * enlarged widgets; everything else is 1×1.
  * Phone always returns "" (single-column stack).
+ *
+ * `photos` is row-span-2 (a tall portrait tile), not col-span-2: the wall grid
+ * is 3 columns × 4 rows = 12 cells and a photo earns two of them. A 333×514
+ * portrait crop reads across a room; a 333×249 crop does not. That is why
+ * DEFAULT_LAYOUT.tablet hides two widgets — 10 single-cell widgets plus this
+ * 2-cell hero is exactly the 12 cells the wall has.
  */
 export const WIDGET_TIERS: Record<WidgetId, { phone: string; tablet: string; desktop: string }> = {
   morningBriefing: { phone: "", tablet: "col-span-1", desktop: "" },
@@ -119,6 +129,8 @@ export const WIDGET_TIERS: Record<WidgetId, { phone: string; tablet: string; des
   homeClimate: { phone: "", tablet: "col-span-1", desktop: "" },
   homeLights: { phone: "", tablet: "col-span-1", desktop: "" },
   financeLedger: { phone: "", tablet: "col-span-1", desktop: "" },
+  music: { phone: "", tablet: "col-span-1", desktop: "" },
+  photos: { phone: "", tablet: "row-span-2", desktop: "row-span-2" },
 };
 
 export interface OrientationLayout {
@@ -166,15 +178,54 @@ export const PHONE_WIDGET_FOLD = 4;
 const PHONE_DEFAULT_WIDGETS: WidgetId[] = [
   // First fold, ranked: morningBriefing, todayEvents, weather, tasks.
   "morningBriefing", "todayEvents", "weather", "tasks",
+  // Photos sits just past the fold on a phone: it is a display surface, and a
+  // phone's Home is for acting, not looking. The wall and desktop give it the
+  // hero slot it was designed for.
+  "photos",
   // Folded behind More…: ask/meal/schedule next, ambient and integration
   // widgets after, finance (parents only) last.
-  "aiQuickAsk", "currentMeal", "schedule", "leaderboard", "consuelaSuggestions", "homeSecurity", "homeClimate", "homeLights", "financeLedger",
+  "aiQuickAsk", "currentMeal", "schedule", "leaderboard", "consuelaSuggestions", "homeSecurity", "homeClimate", "homeLights", "music", "financeLedger",
+];
+
+/**
+ * Tablet / wall default order. `widgets` is the full ordered list including
+ * hidden ids; `hidden` is what Home doesn't render.
+ *
+ * The wall (1080×1920 portrait) is measured at 3 columns × 4 rows = 12 cells:
+ * chrome takes 493px, the grid gets 1046px, each row resolves to ~249px, and
+ * the 220px floor means a 13th cell would force a 5th row and ~118px of page
+ * overflow on a surface meant not to scroll. So the visible set here is exactly
+ * 12 cells: ten 1×1 widgets plus the 2-cell photos hero.
+ *
+ * Four widgets are hidden by default to pay for the hero. Each still has its
+ * own page in the dock and can be switched back on in Home settings:
+ *  - schedule: overlaps Today's Events (both are "what's happening today").
+ *  - financeLedger: parents-only, and /money-mountain covers it.
+ *  - consuelaSuggestions: ambient; the Ask tab is where suggestions get acted on.
+ *  - music: a wall panel is a glanceable board with no search and no queue, so
+ *    a transport widget there is three dead buttons. It is ambient too, and the
+ *    wall already spends its cells on the things a family reads from across the
+ *    room. Hidden, not dropped: it stays switchable in Home settings.
+ */
+const TABLET_DEFAULT_WIDGETS: WidgetId[] = [
+  "photos",
+  "morningBriefing", "weather", "todayEvents", "tasks",
+  "currentMeal", "aiQuickAsk", "leaderboard",
+  "homeSecurity", "homeClimate", "homeLights",
+  "schedule", "consuelaSuggestions", "music", "financeLedger",
+];
+
+const TABLET_HIDDEN_WIDGETS: WidgetId[] = [
+  "schedule",
+  "consuelaSuggestions",
+  "music",
+  "financeLedger",
 ];
 
 export const DEFAULT_LAYOUT: HomeLayoutConfig = {
   phone: { widgets: [...PHONE_DEFAULT_WIDGETS], hidden: [] },
-  tablet: { widgets: [...PHONE_DEFAULT_WIDGETS], hidden: [] },
-  desktop: { widgets: ["morningBriefing", "aiQuickAsk", "leaderboard", "weather", "consuelaSuggestions", "currentMeal", "schedule", "tasks", "todayEvents", "homeSecurity", "homeClimate", "homeLights", "financeLedger"], hidden: [] },
+  tablet: { widgets: [...TABLET_DEFAULT_WIDGETS], hidden: [...TABLET_HIDDEN_WIDGETS] },
+  desktop: { widgets: ["morningBriefing", "aiQuickAsk", "leaderboard", "weather", "photos", "consuelaSuggestions", "currentMeal", "schedule", "tasks", "todayEvents", "homeSecurity", "homeClimate", "homeLights", "music", "financeLedger"], hidden: [] },
 };
 
 /**
@@ -197,6 +248,10 @@ export const WIDGET_SPANS: Record<WidgetId, string> = {
   homeClimate: "col-span-1",
   homeLights: "col-span-1",
   financeLedger: "col-span-1",
+  music: "col-span-1",
+  // Pre-mount the wall/tablet hero is uniform like everything else; the
+  // row-span only applies once the layout hook has resolved the mode.
+  photos: "col-span-1",
 };
 
 /**
@@ -257,10 +312,14 @@ export const LAYOUT_STORAGE_KEY = "consuela-home-layout";
 const VALID_IDS = new Set<WidgetId>(ALL_WIDGETS.map((w) => w.id));
 
 export function cloneDefaultLayout(): HomeLayoutConfig {
+  // Clone each mode's own hidden list. It used to be `hidden: []` for all
+  // three, which was harmless while no default hid anything — now the tablet
+  // (wall) default hides three widgets to pay for the photos hero, and a
+  // first-run panel has to come up at 12 cells instead of overflowing to 15.
   return {
-    phone: { widgets: [...DEFAULT_LAYOUT.phone.widgets], hidden: [] },
-    tablet: { widgets: [...DEFAULT_LAYOUT.tablet.widgets], hidden: [] },
-    desktop: { widgets: [...DEFAULT_LAYOUT.desktop.widgets], hidden: [] },
+    phone: { widgets: [...DEFAULT_LAYOUT.phone.widgets], hidden: [...DEFAULT_LAYOUT.phone.hidden] },
+    tablet: { widgets: [...DEFAULT_LAYOUT.tablet.widgets], hidden: [...DEFAULT_LAYOUT.tablet.hidden] },
+    desktop: { widgets: [...DEFAULT_LAYOUT.desktop.widgets], hidden: [...DEFAULT_LAYOUT.desktop.hidden] },
   };
 }
 

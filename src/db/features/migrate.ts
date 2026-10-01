@@ -25,6 +25,10 @@ interface PocketBaseField {
   collectionId?: string;
   maxSelect?: number | null;
   cascadeDelete?: boolean;
+  /** File fields: byte ceiling. Defaults to 5MB when unset. */
+  maxSize?: number;
+  /** File fields: accepted MIME types. Empty means "any". */
+  mimeTypes?: string[];
 }
 
 interface PocketBaseSchema {
@@ -123,8 +127,8 @@ function buildPBField(field: PocketBaseField): Record<string, any> {
 
   if (field.type === 'file') {
     options.maxSelect = 1;
-    options.maxSize = 5242880; // 5MB
-    options.mimeTypes = [];
+    options.maxSize = field.maxSize ?? 5242880; // 5MB unless the schema says otherwise
+    options.mimeTypes = field.mimeTypes ?? [];
     options.thumbs = [];
     options.protected = false;
   }
@@ -255,6 +259,10 @@ function getOrderedSchemas(): typeof ALL_FEATURE_SCHEMAS {
     'conversation_messages',
     'conversation_feedback',
     'proactive_suggestions',
+
+    // Photos has no foreign-key dependencies, but it is listed explicitly so
+    // the creation order stays deterministic.
+    'photos',
   ];
 
   const schemaMap = new Map(ALL_FEATURE_SCHEMAS.map(s => [s.name, s]));

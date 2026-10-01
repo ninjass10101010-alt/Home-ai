@@ -48,6 +48,7 @@ export const NAV_ICON_KEYS = [
   "analytics",
   "mountain",
   "memory",
+  "photos",
 ] as const;
 
 export type NavIconKey = (typeof NAV_ICON_KEYS)[number];
@@ -151,6 +152,17 @@ export const NAV_ITEMS: readonly NavItemDefinition[] = [
     group: "more",
     wall: false,
   },
+  {
+    path: "/photos",
+    label: "Photos",
+    iconKey: "photos",
+    description: "Add pictures and choose what the wall shows",
+    // Uploading needs a session, so a signed-out wall or a guest device never
+    // sees this row; the wall itself only ever displays.
+    roles: SIGNED_IN_ROLES,
+    group: "more",
+    wall: false,
+  },
 ];
 
 /**
@@ -218,6 +230,7 @@ export const EXEMPT_ROUTES: Readonly<Record<string, string>> = {
   "/emergency":
     "Reference page reached from Settings → Safety and the wall Emergency action; not a dock cap.",
   "/ledger": "Parent-only finance iframe, reached from the Settings ledger widget.",
+  "/player": "Reached from Home's Music widget (\"Open the full player\"); the dock is capped at seven caps and a widget drill-down is not one.",
   "/screensaver": "Typed wall URL only — CacheRefresher special-cases it so the wall can sleep.",
   "/suggestions": "Reached from Home's Suggestions widget (\"See all →\").",
 };

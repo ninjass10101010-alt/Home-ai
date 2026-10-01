@@ -126,6 +126,13 @@ export const NAV_ICON_PATHS: Record<NavIconKey, ReactNode> = {
       <path d="M10 11h5" />
     </>
   ),
+  photos: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <path d="m5 17 4.2-5.6 2.8 3.4 2.6-3.2L19 15.5" />
+      <circle cx="9" cy="9" r="1.1" />
+    </>
+  ),
 };
 
 interface NavIconProps {

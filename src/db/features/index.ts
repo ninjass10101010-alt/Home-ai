@@ -47,6 +47,7 @@ import {
   aiPreferencesSchema,
   conversationFeedbackSchema,
 } from './family-ai';
+import { photosSchema } from './photos';
 
 export const ALL_FEATURE_SCHEMAS = [
   // Time Capsule
@@ -77,6 +78,9 @@ export const ALL_FEATURE_SCHEMAS = [
   proactiveSuggestionsSchema,
   aiPreferencesSchema,
   conversationFeedbackSchema,
+
+  // Photos (wall photo stream)
+  photosSchema,
 ] as const;
 
 export type FeatureSchema = typeof ALL_FEATURE_SCHEMAS[number];

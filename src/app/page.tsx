@@ -22,6 +22,7 @@ import { AnimationBudgetProvider } from "@/components/providers/AnimationBudgetP
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
 import WallPinPad from "@/components/wall/WallPinPad";
+import PhotosWidget from "@/components/photos/PhotosWidget";
 import WallMemberRail from "@/components/wall/WallMemberRail";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
 import SoftButton from "@/components/ui/SoftButton";
@@ -45,6 +46,7 @@ import HomeSecurityWidget from "@/components/ha/HomeSecurityWidget";
 import HomeClimateWidget from "@/components/ha/HomeClimateWidget";
 import HomeLightsWidget from "@/components/ha/HomeLightsWidget";
 import LedgerWidget from "@/components/finance/LedgerWidget";
+import MusicWidget from "@/components/music/MusicWidget";
 import { useMorningBriefing, briefingShowsCard } from "@/components/briefing/hooks/useMorningBriefing";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
@@ -867,6 +869,17 @@ export default function HomePage() {
 
                 case "financeLedger":
                   return <div key="financeLedger" className={span}><LedgerWidget className="h-full" /></div>;
+
+                case "music":
+                  // Hidden on the wall by default (layout-config's tablet
+                  // hidden list); when switched on it renders like any other
+                  // 1x1 card.
+                  return <div key="music" className={span}><MusicWidget /></div>;
+
+                case "photos":
+                  // Full-bleed tile: no WidgetCard wrapper, because the photo is
+                  // the card. On the wall the span resolves to row-span-2.
+                  return <div key="photos" className={span}><PhotosWidget className="h-full" /></div>;
 
                 default:
                   return null;

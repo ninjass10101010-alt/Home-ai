@@ -76,7 +76,7 @@ describe("MoreSheet", () => {
     expect(document.querySelectorAll('[data-more-sheet] a').length).toBeGreaterThan(0);
   });
 
-  it("gives a parent every formerly orphaned destination, with real copy", () => {
+  it("gives a parent every formerly orphaned destination plus Photos, with real copy", () => {
     render(<MoreSheet open onClose={() => {}} />);
     expect(hrefs()).toEqual([
       "/grocery",
@@ -85,6 +85,7 @@ describe("MoreSheet", () => {
       "/analytics",
       "/money-mountain",
       "/memory",
+      "/photos",
     ]);
     expect(titles()).toEqual([
       "Grocery",
@@ -93,6 +94,7 @@ describe("MoreSheet", () => {
       "Insights",
       "Money Mountain",
       "Family Memory",
+      "Photos",
     ]);
     const rows = Array.from(document.querySelectorAll("[data-more-sheet] a"));
     for (const row of rows) {
