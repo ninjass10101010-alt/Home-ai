@@ -362,61 +362,6 @@ export function calculateRealStreak(
   return streak;
 }
 
-export function regenerateRecurringTasks(tasks: Task[]): Task[] {
-  // Local calendar day — the UTC date rolled the clone due to "tomorrow"
-  // when regen ran in the evening (8pm–midnight Detroit).
-  const now = localTodayISO();
-  const monday = localWeekStartISO();
-
-  // Clone sources: recurring tasks completed in a PRIOR week (or with no
-  // completedInWeek recorded). Tasks completed THIS week are left untouched —
-  // they regen next week.
-  const sources = tasks.filter(
-    (t) => t.completed && t.recurring && t.completedInWeek !== monday && !isPendingApproval(t)
-  );
-
-  // Dedupe by lineage so duplicate completed rows never compound into
-  // multiple clones — keep only the first source per lineage.
-  const seenLineages = new Set<string>();
-  const lineageSources: Task[] = [];
-  for (const t of sources) {
-    const lineage = `${t.title}|${t.recurring}|${t.universal ? "universal" : t.assignee}`;
-    if (seenLineages.has(lineage)) continue;
-    seenLineages.add(lineage);
-    lineageSources.push(t);
-  }
-
-  // The consumed completed sources are removed — their completion record
-  // lives in week_data history/archives. Keeping them would re-clone them
-  // every week (1→2→4 growth).
-  const consumedIds = new Set(sources.map((t) => t.id));
-  const remaining = tasks.filter((t) => !consumedIds.has(t.id));
-
-  const clones = lineageSources.map((t) => {
-    const cloneId = Date.now() + Math.floor(Math.random() * 100000);
-    return {
-      ...t,
-      id: cloneId,
-      completed: false,
-      completedBy: undefined,
-      completedAt: undefined,
-      completedInWeek: undefined,
-      // A regenerated clone starts clean — no stale approval/send-back state.
-      pendingApproval: undefined,
-      sentBackAt: undefined,
-      // Crew tasks come back with an empty crew (nobody joined this week yet),
-      // size + speed bonus preserved (spec §3).
-      crew: isCrewTask(t) ? { members: [] } : t.crew,
-      // Universal recurring tasks come back unclaimed — no ghost assignee from last week
-      assignee: t.universal ? "All" : t.assignee,
-      assigneeEmoji: t.universal ? "🤝" : t.assigneeEmoji,
-      due: now,
-    };
-  });
-
-  return [...remaining, ...clones];
-}
-
 export function getThisWeeksCompletedDates(tasks: Task[], memberName?: string, today: string = localTodayISO()): string[] {
   // `monday` is the Monday of the LOCAL week containing `today`, from the
   // canonical helper (a date-only string never round-trips through new Date(),

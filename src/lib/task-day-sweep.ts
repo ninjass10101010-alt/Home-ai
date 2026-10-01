@@ -1,12 +1,14 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
-import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
+import { localTodayISO, localWeekStartISO, weekdayOfISO } from "@/lib/local-date";
 import {
   liveSnapshotTasks,
   mutateSnapshotWithMeta,
   readSnapshotWithRevision,
   type SnapshotTask,
 } from "@/lib/snapshot-tasks";
+import { isDailyRecurrence, isWeekdayRecurrence, recurringClone, recurringLineage } from "@/lib/task-recurrence";
+import { issueServerTaskId } from "@/lib/task-week-rollover";
 import { crewCloseModeOf } from "@/lib/task-utils";
 
 /**
@@ -81,14 +83,67 @@ export function closeDeadlineCrewsOnTasks(
   return { tasks: next, closedIds };
 }
 
+/** Stage: real daily/weekday recurrence (spec §2). Consume every non-pending
+ *  stale instance of a daily lineage (completed or merely missed — the day is
+ *  the unit), then spawn exactly one clone due today. Pending-approval rows are
+ *  immune; a lineage that already has a row due today never spawns twice. */
+export function regenerateRecurringOnTasks(
+  tasks: SnapshotTask[],
+  today: string,
+  _weekStart: string,
+  _nowIso: string,
+  issueId: (existing: ReadonlySet<number>) => number,
+): { tasks: SnapshotTask[]; deletedIds: number[] } {
+  const groups = new Map<string, SnapshotTask[]>();
+  for (const task of tasks) {
+    const id = Number(task?.id);
+    if (!Number.isSafeInteger(id) || id <= 0) continue;
+    if (!isDailyRecurrence(task.recurring) && !isWeekdayRecurrence(task.recurring)) continue;
+    const key = recurringLineage(task);
+    groups.set(key, [...(groups.get(key) ?? []), task]);
+  }
+  const deletedIds: number[] = [];
+  const removed = new Set<number>();
+  const added: SnapshotTask[] = [];
+  const existing = new Set(tasks.map((task) => Number(task.id)));
+  const weekday = weekdayOfISO(today);
+  for (const group of groups.values()) {
+    if (group.some((task) => task.due === today)) continue;
+    if (group.some((task) => !task.pendingApproval && typeof task.due === "string" && task.due > today)) continue;
+    for (const task of group) {
+      if (task.pendingApproval) continue;
+      if (typeof task.due !== "string" || task.due >= today) continue;
+      removed.add(Number(task.id));
+      deletedIds.push(Number(task.id));
+    }
+    // Pending-approval rows are immune from consumption but still seed today's
+    // instance (spec §2: left alone, not a lineage pause — the day is the unit).
+    const source =
+      group.find((task) => !task.pendingApproval && typeof task.due === "string" && task.due < today) ??
+      group.find((task) => typeof task.due === "string" && task.due < today);
+    if (!source) continue;
+    if (isWeekdayRecurrence(source.recurring) && (weekday === "Sat" || weekday === "Sun")) continue;
+    const id = issueId(existing);
+    existing.add(id);
+    added.push(recurringClone(source, id, today));
+  }
+  return {
+    tasks: [...tasks.filter((task) => !removed.has(Number(task.id))), ...added],
+    deletedIds,
+  };
+}
+
 /** All sweep stages, in order. Plan 2 prepends recurrence + expiry here. */
 function runDaySweepStages(
   tasks: SnapshotTask[],
   today: string,
   weekStart: string,
   nowIso: string,
-): { tasks: SnapshotTask[]; closedIds: number[] } {
-  return closeDeadlineCrewsOnTasks(tasks, today, weekStart, nowIso);
+  issueId: (existing: ReadonlySet<number>) => number,
+): { tasks: SnapshotTask[]; closedIds: number[]; deletedIds: number[] } {
+  const regenerated = regenerateRecurringOnTasks(tasks, today, weekStart, nowIso, issueId);
+  const closed = closeDeadlineCrewsOnTasks(regenerated.tasks, today, weekStart, nowIso);
+  return { tasks: closed.tasks, closedIds: closed.closedIds, deletedIds: regenerated.deletedIds };
 }
 
 export async function ensureCurrentTaskDay(
@@ -109,15 +164,24 @@ export async function ensureCurrentTaskDay(
         return { day: today, swept: false, closedTaskIds: [], reconciled: true, failed: [], revision: initial.revision.revision };
       }
       const mutation = await mutateSnapshotWithMeta((data) => {
-        const applied = runDaySweepStages(liveSnapshotTasks(data), today, weekStart, nowIso);
+        const live = liveSnapshotTasks(data);
+        const tombstoned = Array.isArray(data.deletedTaskIds) ? data.deletedTaskIds.map(Number) : [];
+        const allocated: number[] = [];
+        const applied = runDaySweepStages(live, today, weekStart, nowIso, (existing) => {
+          const reserved = new Set([...existing, ...tombstoned, ...allocated]);
+          const id = issueServerTaskId(reserved, Date.now());
+          allocated.push(id);
+          return id;
+        });
+        const deletedTaskIds = [...new Set([...tombstoned, ...applied.deletedIds])];
         return {
           data: {
             ...data,
             tasks: applied.tasks,
-            deletedTaskIds: Array.isArray(data.deletedTaskIds) ? data.deletedTaskIds : [],
+            deletedTaskIds,
             lastDaySweep: { day: today, at: nowIso },
           },
-          result: { closedIds: applied.closedIds },
+          result: { closedIds: applied.closedIds, deletedIds: applied.deletedIds },
         };
       }, pb);
       const verified = await readSnapshotWithRevision();
@@ -128,7 +192,10 @@ export async function ensureCurrentTaskDay(
         return !!row && row.completed === true && !!row.pendingApproval
           && Array.isArray(row.pendingApproval.crew);
       });
-      const reconciled = !!verifiedMarker && verifiedMarker.day === today && closedOk;
+      const deletedOk = mutation.result.deletedIds.every((id) =>
+        (verified.data.deletedTaskIds ?? []).map(Number).includes(id),
+      );
+      const reconciled = !!verifiedMarker && verifiedMarker.day === today && closedOk && deletedOk;
       return {
         day: today,
         swept: true,

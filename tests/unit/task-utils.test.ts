@@ -23,7 +23,6 @@ import {
   getThisWeeksCompletedDates,
   loadTasks,
   loadWeekData,
-  regenerateRecurringTasks,
   todayISO,
 } from "@/lib/task-utils";
 import type { Task } from "@/types/tasks";
@@ -152,109 +151,6 @@ describe("calculateRealStreak", () => {
     const samStreak = calculateRealStreak("Sam", week, getThisWeeksCompletedDates(tasks, "Sam"));
     expect(alexStreak).toBe(3);
     expect(samStreak).toBe(1);
-  });
-});
-
-describe("regenerateRecurringTasks", () => {
-  it("clones a prior-week completed recurring task once and removes the old completed row", () => {
-    const prevMonday = addDays(localWeekStartISO(), -7);
-    const tasks = [
-      makeTask({
-        id: 1,
-        recurring: "Daily",
-        completed: true,
-        completedBy: "Alex",
-        completedAt: `${prevMonday}T10:00:00.000Z`,
-        completedInWeek: prevMonday,
-      }),
-    ];
-
-    const result = regenerateRecurringTasks(tasks);
-
-    expect(result).toHaveLength(1);
-    const clone = result[0];
-    expect(clone.id).not.toBe(1);
-    expect(clone.completed).toBe(false);
-    expect(clone.completedBy).toBeUndefined();
-    expect(clone.completedAt).toBeUndefined();
-    expect(clone.completedInWeek).toBeUndefined();
-    expect(clone.due).toBe(todayISO());
-    expect(clone.recurring).toBe("Daily");
-  });
-
-  it("does not clone a task completed THIS week", () => {
-    const tasks = [
-      makeTask({
-        id: 1,
-        recurring: "Weekly",
-        completed: true,
-        completedBy: "Alex",
-        completedAt: `${todayISO()}T09:00:00.000Z`,
-        completedInWeek: localWeekStartISO(),
-      }),
-    ];
-
-    const result = regenerateRecurringTasks(tasks);
-
-    expect(result).toEqual(tasks);
-    expect(result).toHaveLength(1);
-    expect(result[0].completed).toBe(true);
-  });
-
-  it("produces only ONE clone for duplicate completed rows of the same lineage (no compounding)", () => {
-    const prevMonday = addDays(localWeekStartISO(), -7);
-    const dupA = makeTask({ id: 1, title: "Trash", recurring: "Weekly", completed: true, completedInWeek: prevMonday });
-    const dupB = makeTask({ id: 2, title: "Trash", recurring: "Weekly", completed: true, completedInWeek: prevMonday });
-
-    const result = regenerateRecurringTasks([dupA, dupB]);
-
-    const clones = result.filter((t) => !t.completed);
-    expect(clones).toHaveLength(1);
-    expect(clones[0].title).toBe("Trash");
-    // Both stale completed rows are consumed.
-    expect(result.filter((t) => t.completed)).toHaveLength(0);
-
-    // The following week, the completed clone regenerates into exactly one
-    // fresh pending instance — the lineage never compounds.
-    const thisMonday = localWeekStartISO();
-    localStorage.clear();
-    vi.setSystemTime(new Date(`${addDays(thisMonday, 7)}T12:00:00Z`));
-    const completedClone = {
-      ...clones[0],
-      completed: true,
-      completedBy: "Alex",
-      completedAt: `${addDays(thisMonday, 8)}T10:00:00.000Z`,
-      completedInWeek: thisMonday,
-    };
-    const nextWeek = regenerateRecurringTasks([completedClone]);
-    expect(nextWeek.filter((t) => !t.completed)).toHaveLength(1);
-    expect(nextWeek.filter((t) => t.completed)).toHaveLength(0);
-  });
-
-  it("regenerates universal tasks as assignee All / 🤝", () => {
-    const prevMonday = addDays(localWeekStartISO(), -7);
-    const tasks = [
-      makeTask({
-        id: 3,
-        title: "Yard work",
-        recurring: "Weekly",
-        universal: true,
-        assignee: "Alex",
-        assigneeEmoji: "🦊",
-        completed: true,
-        completedBy: "Alex",
-        completedInWeek: prevMonday,
-      }),
-    ];
-
-    const result = regenerateRecurringTasks(tasks);
-
-    expect(result).toHaveLength(1);
-    const clone = result[0];
-    expect(clone.universal).toBe(true);
-    expect(clone.assignee).toBe("All");
-    expect(clone.assigneeEmoji).toBe("🤝");
-    expect(clone.completed).toBe(false);
   });
 });
 

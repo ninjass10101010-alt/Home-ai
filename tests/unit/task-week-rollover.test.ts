@@ -355,7 +355,7 @@ describe("ensureCurrentTaskWeek", () => {
     expect(assigned.pendingApproval).toBeUndefined();
     expect(assigned.sentBackAt).toBeUndefined();
     expect(open).toMatchObject({ universal: true, assignee: "All", assigneeEmoji: "🤝", speedBonus: 3 });
-    expect(crew).toMatchObject({ crewSize: 2, speedBonus: 4, crew: { members: [], removed: [] } });
+    expect(crew).toMatchObject({ crewSize: 2, speedBonus: 0, crew: { members: [], removed: [] } });
     expect(crew.id).not.toBe(9);
     expect(live.some((task) => task.id === 1 || task.id === 2 || task.id === 9)).toBe(false);
     expect(live.some((task) => task.title === "Still open" && task.id === 3)).toBe(true);

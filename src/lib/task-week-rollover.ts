@@ -1,6 +1,7 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { localWeekStartISO } from "@/lib/local-date";
 import { ensureArchivedWeeksEnshrined } from "@/lib/hall-of-fame-backfill";
+import { recurringClone, recurringLineage } from "@/lib/task-recurrence";
 import {
   mergeCanonicalTransactions,
   parseCanonicalTransactions,
@@ -287,19 +288,6 @@ async function archiveCanonicalWeek(
   return { week: prior.week, changed: group.needsRepair };
 }
 
-function taskIsCrew(task: SnapshotTask): boolean {
-  return typeof task.crewSize === "number" && task.crewSize >= 2;
-}
-
-function recurringLineage(task: SnapshotTask): string {
-  const owner = task.universal
-    ? "universal"
-    : taskIsCrew(task)
-      ? `crew:${task.crewSize}`
-      : `assigned:${String(task.assignee ?? "")}`;
-  return [String(task.title ?? ""), String(task.recurring ?? ""), owner].join("\u0000");
-}
-
 function validCompletedWeek(value: unknown): string | null {
   const week = typeof value === "string" ? value.trim() : "";
   return normalizeWeekStart(week);
@@ -350,21 +338,7 @@ export function resetRecurringTasksForWeek(
       id = Number(issueId(existing));
     }
     existing.add(id);
-    return {
-      ...task,
-      id,
-      completed: false,
-      status: "pending",
-      completedBy: undefined,
-      completedAt: undefined,
-      completedInWeek: undefined,
-      pendingApproval: undefined,
-      sentBackAt: undefined,
-      crew: taskIsCrew(task) ? { members: [], removed: [] } : task.crew,
-      assignee: task.universal ? "All" : task.assignee,
-      assigneeEmoji: task.universal ? "🤝" : task.assigneeEmoji,
-      due: current,
-    } as SnapshotTask;
+    return recurringClone(task, id, current);
   });
 
   return {
@@ -373,7 +347,7 @@ export function resetRecurringTasksForWeek(
   };
 }
 
-function issueServerTaskId(existing: ReadonlySet<number>, nowMs: number): number {
+export function issueServerTaskId(existing: ReadonlySet<number>, nowMs: number): number {
   let candidate = nowMs;
   for (const id of existing) {
     if (id >= candidate) candidate = id + 1;

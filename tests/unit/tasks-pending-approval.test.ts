@@ -154,34 +154,6 @@ describe("pendingApproval persistence — the server task projection", () => {
   });
 });
 
-describe("regenerateRecurringTasks with pending rows", () => {
-  it("leaves pending rows untouched: no consume, no clone", async () => {
-    const { regenerateRecurringTasks } = await import("@/lib/task-utils");
-    const pending = t({
-      id: 9, title: "Take out trash", recurring: "weekly",
-      completed: true, completedBy: "Jasmine", completedAt: "2026-08-26T12:00:00.000Z",
-      completedInWeek: "2026-08-25",
-      pendingApproval: { byName: "Jasmine", at: "2026-08-26T12:00:00.000Z", points: 5 },
-    });
-    const out = regenerateRecurringTasks([pending]);
-    expect(out).toHaveLength(1);
-    expect(out[0].pendingApproval).toEqual({ byName: "Jasmine", at: "2026-08-26T12:00:00.000Z", points: 5 });
-    expect(out[0].completed).toBe(true);
-  });
-
-  it("control: the same row without pending is consumed and cloned", async () => {
-    const { regenerateRecurringTasks } = await import("@/lib/task-utils");
-    const done = t({
-      id: 9, title: "Take out trash", recurring: "weekly",
-      completed: true, completedBy: "Jasmine", completedAt: "2026-08-26T12:00:00.000Z",
-      completedInWeek: "2026-08-25",
-    });
-    const out = regenerateRecurringTasks([done]);
-    expect(out.some((r) => r.id === 9)).toBe(false);
-    expect(out.some((r) => r.title === "Take out trash" && !r.completed)).toBe(true);
-  });
-});
-
 describe("adoptAuthoritativeWeekData (Task 10 \u2014 outbox/snapshot adoption, no history heuristic)", () => {
   const offlineTx = {
     id: 1, timestamp: "2026-09-22T10:00:00.000Z", member: "Jasmine Rose",

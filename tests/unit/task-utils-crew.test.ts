@@ -197,7 +197,7 @@ describe("Crew helpers", () => {
 });
 
 describe("Recurring crew regeneration", () => {
-  it("clones a recurring crew task with an empty crew and preserved size/bonus", async () => {
+  it("clones a recurring crew task with an empty crew, preserved size, scrubbed bonus", async () => {
     localStorage.clear();
     const { resetRecurringTasksForWeek } = await import("@/lib/task-week-rollover");
     const completed = makeTask({
@@ -217,7 +217,7 @@ describe("Recurring crew regeneration", () => {
     expect(clone).toBeTruthy();
     expect(clone!.completed).toBe(false);
     expect(clone!.crewSize).toBe(3);
-    expect(clone!.speedBonus).toBe(4);
+    expect(clone!.speedBonus).toBe(0);
     expect(clone!.crew).toEqual({ members: [], removed: [] });
     expect(regen.deletedTaskIds).toEqual([30]);
     expect(regen.tasks.some((t) => t.id === 30)).toBe(false);
