@@ -132,10 +132,18 @@ function todayISO(): string {
   return new Date().toISOString().split("T")[0];
 }
 
+/**
+ * Floor of the PocketBase synthetic-id space. Optimistic ids stay STRICTLY
+ * BELOW it so the two spaces are disjoint by construction — `reseedOptimisticCounter`
+ * filters against this constant, not against the live counter (which has
+ * already advanced past the ids it just handed out).
+ */
+const PB_SYNTHETIC_ID_BASE = 2_000_000;
+
 // Synthetic ids for PB-hydrated rows must be unique ACROSS reconciles, not
 // just within one fetch — a per-fetch index collides and duplicate React keys
 // break list diffing. Monotonic module counter.
-let pbSyntheticIdCounter = 2_000_000;
+let pbSyntheticIdCounter = PB_SYNTHETIC_ID_BASE;
 
 async function fetchPBThread(
   sinceISO?: string,
@@ -173,6 +181,27 @@ let lastPBCreated: string | null = null;
 let streamInFlight = false;
 let abortController: AbortController | null = null;
 
+/**
+ * Optimistic ids must never collide with rows rehydrated from localStorage.
+ * `persistHistory()` keeps prior sessions' messages (ids 101, 102, …) while
+ * msgCounter starts at 100 every page load — so a fresh reply row could land
+ * on a stale row and OVERWRITE it instead of appending. Reseeding above every
+ * merged id fixes it; PB ids live at 2_000_000+ and stay disjoint by construction.
+ */
+function reseedOptimisticCounter(rows: Message[]): void {
+  let max = 100;
+  for (const m of rows) {
+    if (typeof m.id === "number" && m.id < PB_SYNTHETIC_ID_BASE) max = Math.max(max, m.id);
+  }
+  msgCounter = max + 1;
+}
+
+/** The single allocation seam for optimistic ids. */
+function nextOptimisticId(): number {
+  msgCounter += 1;
+  return msgCounter;
+}
+
 /** Re-read 10 min behind the watermark so backdated Telegram rows still land. */
 function safetySince(): string | undefined {
   return lastPBCreated
@@ -209,6 +238,7 @@ export async function ensureHydrated(): Promise<void> {
     const { messages: pbMsgs, latest } = await fetchPBThread();
     if (latest) lastPBCreated = latest;
     setMessages((prev) => mergeThread(prev, pbMsgs.length > 0 ? pbMsgs : loadChatHistory()));
+    reseedOptimisticCounter(state.messages);
     setState({ hydrated: true });
     return;
   }
@@ -243,10 +273,10 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
   // `message`), matching the previous messagesRef.current semantics.
   const modelSource = state.messages;
 
-  msgCounter += 1;
+  const userId = nextOptimisticId();
   const userAt = Date.now();
   const userMsg: Message = {
-    id: msgCounter,
+    id: userId,
     role: "user",
     content: trimmed,
     timestamp: "Just now",
@@ -257,8 +287,7 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
   setMessages((prev) => [...prev, userMsg]);
   setState({ isTyping: true, statusLine: null });
 
-  msgCounter += 1;
-  const streamId = msgCounter;
+  const streamId = nextOptimisticId();
   // +1 so the reply sorts after its request even if both land in the same ms.
   const streamAt = userAt + 1;
   let bubbleOpen = false;
@@ -407,11 +436,11 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
       const failedContent = offline
         ? "You're offline — I can't reach the family server right now. Check the connection and try again."
         : "I couldn't reach the family server just now. Your message is still here — try again in a moment.";
-      msgCounter += 1;
+      const failedId = nextOptimisticId();
       setMessages((prev) => [
         ...prev,
         {
-          id: msgCounter,
+          id: failedId,
           role: "assistant",
           content: failedContent,
           timestamp: "Just now",
@@ -438,9 +467,8 @@ export function stop(): void {
  * Guests 401 here — the local divider still shows, honestly.
  */
 export async function startNewConversation(): Promise<void> {
-  msgCounter += 1;
   const marker: Message = {
-    id: msgCounter,
+    id: nextOptimisticId(),
     role: "system",
     content: "New conversation",
     timestamp: "Just now",
@@ -470,7 +498,7 @@ export function __resetChatStoreForTests(): void {
   state = freshState();
   hydratedOnce = false;
   msgCounter = 100;
-  pbSyntheticIdCounter = 2_000_000;
+  pbSyntheticIdCounter = PB_SYNTHETIC_ID_BASE;
   lastPBCreated = null;
   streamInFlight = false;
   abortController = null;

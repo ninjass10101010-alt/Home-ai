@@ -111,6 +111,25 @@ describe("chat-store core", () => {
     expect(posted).toBe(true);
   });
 
+  it("appends the reply instead of overwriting a stale localStorage row", async () => {
+    localStorage.setItem("consuela-chat-messages", JSON.stringify([
+      { id: 101, role: "assistant", content: "yesterday's answer", timestamp: "Yesterday", at: 1 },
+      { id: 102, role: "assistant", content: "another stale row", timestamp: "Yesterday", at: 2 },
+    ]));
+    streamMock.fn.mockImplementation(async ({ onToken }: any) => {
+      onToken("today's answer", "today's answer");
+      return { content: "today's answer", streamed: true };
+    });
+    await ensureHydrated();
+    await send("hello", SPEAKER);
+    const msgs = getSnapshot().messages;
+    // The reply is its OWN row, and neither stale row was clobbered.
+    expect(msgs.filter((m) => m.content === "today's answer")).toHaveLength(1);
+    expect(msgs.find((m) => m.id === 101)?.content).toBe("yesterday's answer");
+    expect(msgs.find((m) => m.id === 102)?.content).toBe("another stale row");
+    expect(new Set(msgs.map((m) => m.id)).size).toBe(msgs.length); // no duplicate React keys
+  });
+
   it("persists hydrated history to localStorage without the seed greeting", async () => {
     streamMock.fn.mockResolvedValue({ content: "saved-reply", streamed: true });
     await ensureHydrated();
