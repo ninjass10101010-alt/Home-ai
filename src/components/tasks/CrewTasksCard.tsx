@@ -1,5 +1,6 @@
 import SectionCard from "@/components/patterns/SectionCard";
 import SoftButton from "@/components/ui/SoftButton";
+import { EmojiText } from "@/components/ui/EmojiText";
 import { crewCloseModeOf, crewMemberCount, crewMembers, isCrewTask } from "@/lib/task-utils";
 import type { Task } from "@/types/tasks";
 
@@ -31,7 +32,7 @@ export default function CrewTasksCard({ tasks, visible, onRemoveMember, onCloseC
                     <div className="mt-2 flex flex-wrap gap-2">
                       {crewMembers(task).map((m) => (
                         <span key={m.name} className="inline-flex items-center gap-1.5 rounded-full glass-subtle px-2 py-1 text-xs text-text-primary">
-                          {m.emoji || "👤"} {m.name.split(" ")[0]}
+                          <EmojiText emoji={m.emoji || "👤"} alt={m.name} /> {m.name.split(" ")[0]}
                           {m.checkedInAt ? (
                             <span className="text-[var(--color-accent-mint)]">✓ done</span>
                           ) : (

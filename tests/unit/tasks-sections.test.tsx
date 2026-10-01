@@ -98,6 +98,27 @@ describe("tasks sections (audit 5.7)", () => {
     expect(shown.textContent).toContain("Alex");
   });
 
+  it("CrewTasksCard renders a photo avatar as an image, never as base64 text", () => {
+    const PHOTO = "data:image/webp;base64,UklGRlkyAABXRUJQVlA4WAoAAAAQ";
+    const crewTask = {
+      id: 10,
+      title: "Bake cookies",
+      points: 5,
+      crew: { members: [{ name: "Emily Garcia", emoji: PHOTO, joinedAt: "2026-09-24T10:00:00.000Z", checkedInAt: "2026-09-24T11:00:00.000Z" }] },
+      crewSize: 2,
+      completed: false,
+      pendingApproval: false,
+    } as never;
+    const host = render(createElement(CrewTasksCard, { tasks: [crewTask], visible: true, onRemoveMember: vi.fn(), onCloseCrew: vi.fn() }));
+    const img = host.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toBe(PHOTO);
+    expect(host.textContent).not.toContain("data:image");
+    expect(host.textContent).not.toContain("base64");
+    expect(host.textContent).toContain("Emily");
+    expect(host.textContent).toContain("done");
+  });
+
   it("the page keeps the data flow and no longer carries the moved markup", () => {
     const page = readFileSync(join(process.cwd(), "src/app/tasks/page.tsx"), "utf8");
     expect(page, "state stays in the page").toContain("const [editingId, setEditingId]");
