@@ -2973,6 +2973,101 @@ const TOOLS: Tool[] = [
       }
     },
   },
+  {
+    definition: {
+      name: "propose_reward_redemption",
+      description:
+        "PROPOSE redeeming one reward from the kids' shop for one family member. " +
+        "This NEVER spends points or redeems anything by itself — it only validates and returns an " +
+        "inert proposal that the member must confirm with their PIN on the chat screen. " +
+        "Pass the reward exactly as get_rewards lists it, and quote the price the tool returns. " +
+        "Use when someone asks to spend points on a reward (e.g. 'Emily wants movie night'). " +
+        "Say the redemption awaits confirmation — never claim it happened.",
+      parameters: {
+        type: "object",
+        properties: {
+          member: { type: "string", description: "Family member earning the reward — exact or start of their name" },
+          reward: { type: "string", description: "Reward exactly as get_rewards lists it (e.g. 'Movie night')" },
+          reason: { type: "string", description: "Why, shown verbatim on the confirm chip (max 200 chars)" },
+        },
+        required: ["member", "reward", "reason"],
+      },
+    },
+    handler: async (args: any) => {
+      // VALIDATE ONLY — nothing is written here, the same contract as
+      // propose_point_adjustment. /api/rewards/redeem is the ONLY path that
+      // spends the points, and it re-verifies the PIN server-side. No caller
+      // gate on purpose: the tool moves no points, so the route behind the PIN
+      // chip is what re-checks who is allowed to spend them.
+      const rawMember = String(args.member ?? "").trim();
+      const rawReward = String(args.reward ?? "").trim();
+      const reason = String(args.reason ?? "").trim();
+      if (!rawMember) {
+        return summarize({ ok: false, error: "a family member name is required — call get_family_members to see the roster" });
+      }
+      if (!rawReward) {
+        return summarize({ ok: false, error: "a reward is required — call get_rewards to see what's actually redeemable" });
+      }
+      if (!reason) {
+        return summarize({ ok: false, error: "a reason is required (e.g. 'she earned it all week')" });
+      }
+      if (reason.length > 200) {
+        return summarize({ ok: false, error: "reason must be 200 characters or fewer" });
+      }
+      const rewards = await liveRewards();
+      if (rewards === null) {
+        return summarize({ ok: false, error: "reward data unavailable — do not guess the shop, retry later" });
+      }
+      const members = await liveMembers();
+      if (members === null) {
+        return summarize({ ok: false, error: "member data unavailable — call get_family_members first" });
+      }
+      const memberSearch = rawMember.toLowerCase();
+      const member = members.find((m: any) => {
+        const name = String(m.fullName || m.name || "").toLowerCase();
+        return name === memberSearch || name.startsWith(memberSearch);
+      });
+      if (!member) {
+        return summarize({
+          ok: false,
+          error: `unknown member "${rawMember}" — call get_family_members to see the roster, then retry`,
+        });
+      }
+      const memberName = String(member.fullName || member.name);
+      const titleOf = (r: any) => String(r.title || r.name || "");
+      // Exact normalized match, like the removal tools: a redemption is a real
+      // deduction, so a near-miss must refuse and name the reader instead of
+      // spending points on whatever the closest title happened to be.
+      const wanted = normalizeGroceryName(rawReward);
+      const matches = rewards.filter((r: any) => normalizeGroceryName(titleOf(r)) === wanted);
+      if (matches.length === 0) {
+        return summarize({
+          ok: false,
+          error: `"${rawReward}" is not in the reward shop — call get_rewards to see what's really redeemable`,
+        });
+      }
+      if (matches.length > 1) {
+        return summarize({
+          ok: false,
+          error: `${matches.length} rewards are named "${rawReward}" — a parent should remove the duplicate in Settings → Rewards first`,
+        });
+      }
+      const reward = matches[0];
+      // The same `cost ?? points ?? 0` fallback get_rewards quotes, so the price
+      // on the chip cannot disagree with the cost the redeem route charges off
+      // the stored row.
+      const cost = reward.cost ?? reward.points ?? 0;
+      return summarize({
+        ok: true,
+        proposal: {
+          tool: "redeem_reward",
+          operationId: createTaskOperationId(),
+          args: { member: memberName, rewardId: String(reward.id ?? ""), reward: titleOf(reward), cost, reason },
+        },
+        message: `Ask ${memberName.split(" ")[0]} to confirm this redemption with their PIN on the chat screen (${titleOf(reward)} costs ${cost} pts). The reward has NOT been redeemed and the points have NOT been spent yet — never state the redemption as done.`,
+      });
+    },
+  },
 ];
 
 const HA_ALLOWED_DOMAINS = new Set(["light", "switch", "scene", "climate", "media_player", "vacuum"]);

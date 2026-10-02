@@ -196,23 +196,34 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   recall_memories: "Checking my memory…",
   forget_memory: "Letting that memory go…",
   propose_point_adjustment: "Preparing that point adjustment…",
+  propose_reward_redemption: "Preparing that redemption…",
 };
 function toolStatusLabel(name?: string): string {
   return (name && TOOL_STATUS_LABELS[name]) || "Working on it…";
 }
 
-// Task 15 — chat never moves points. A successful propose_point_adjustment
-// round yields an INERT proposal ({tool:"adjust_points", args}); the loop
-// surfaces it to the client (streamed: extra `status` frame; buffered:
-// top-level `proposals` array) so the chat page can render the parent-PIN
-// confirm chip. Refusals (ok:false / no proposal) surface nothing extra.
-const PROPOSAL_TOOL = "propose_point_adjustment";
-function extractPointProposal(name: string | undefined, result: string): unknown | null {
-  if (name !== PROPOSAL_TOOL) return null;
+// Chat never moves points or redeems a reward. A successful proposal tool
+// round yields an INERT proposal; the loop surfaces it to the client
+// (streamed: extra `status` frame; buffered: top-level `proposals` array) so the
+// chat page can render the parent-PIN confirm chip. Refusals (ok:false / no
+// proposal) surface nothing extra.
+//
+// One map is the whole registry: a tool name declares the inner
+// `proposal.tool` it may produce and the label its chip frame carries, so a
+// second proposal type adds a row instead of a fourth hardcoding. A proposal
+// tool NEVER writes; the PIN-gated server route is the only path that moves
+// points or redeems a reward.
+const PROPOSAL_TOOLS: Record<string, { expectTool: string; label: string }> = {
+  propose_point_adjustment: { expectTool: "adjust_points", label: "Waiting for a parent's PIN to confirm…" },
+  propose_reward_redemption: { expectTool: "redeem_reward", label: "Waiting for a parent's PIN to confirm…" },
+};
+function extractProposal(name: string | undefined, result: string): { proposal: unknown; label: string } | null {
+  const entry = name ? PROPOSAL_TOOLS[name] : undefined;
+  if (!entry) return null;
   try {
     const p = JSON.parse(result);
-    if (p?.ok === true && p.proposal?.tool === "adjust_points" && p.proposal.args) {
-      return p.proposal;
+    if (p?.ok === true && p.proposal?.tool === entry.expectTool && p.proposal.args) {
+      return { proposal: p.proposal, label: entry.label };
     }
   } catch { /* malformed tool result — nothing to surface */ }
   return null;
@@ -589,9 +600,9 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
             state: toolResultFailed(result) ? "error" : "ok",
           }), "tool"));
           messages.push({ role: "tool", tool_call_id: roundToolCalls[i].id, content: result });
-          const proposal = extractPointProposal(roundToolCalls[i].function?.name, result);
-          if (proposal) {
-            write(sseFrame(JSON.stringify({ label: "Waiting for a parent's PIN to confirm…", proposal }), "status"));
+          const extracted = extractProposal(roundToolCalls[i].function?.name, result);
+          if (extracted) {
+            write(sseFrame(JSON.stringify({ label: extracted.label, proposal: extracted.proposal }), "status"));
           }
         });
       }
@@ -830,8 +841,8 @@ export async function POST(request: NextRequest) {
       results.forEach((result, i) => {
         messages.push({ role: "tool", tool_call_id: roundToolCalls[i].id, content: result });
         // Buffered sibling of the streamed proposal status frame (Task 15).
-        const proposal = extractPointProposal(roundToolCalls[i].function?.name, result);
-        if (proposal) proposals.push(proposal);
+        const extracted = extractProposal(roundToolCalls[i].function?.name, result);
+        if (extracted) proposals.push(extracted.proposal);
       });
     }
 
@@ -846,6 +857,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       content:
         "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧",
+      // A turn that ran out of rounds can still have earned a proposal on the
+      // way there; dropping it here threw away a PIN chip the family was shown.
+      ...(proposals.length ? { proposals } : {}),
     });
   } catch (error: any) {
     console.error("Consuela agent error:", error?.message || error);

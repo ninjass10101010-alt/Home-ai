@@ -484,6 +484,8 @@ describe("hermes chat — point-proposal surfacing", () => {
       tool: "adjust_points",
       args: { member: "Emily G", delta: 10, reason: "helped" },
     });
+    // The PIN-waiting label the point chip has always carried.
+    expect(JSON.parse(frameData).label).toBe("Waiting for a parent's PIN to confirm…");
   });
 
   it("refusals (ok:false / no proposal) never grow a proposal frame", async () => {
@@ -533,6 +535,137 @@ describe("hermes chat — point-proposal surfacing", () => {
     const json = await res.json();
     expect(json.content).toBe("plain");
     expect("proposals" in json).toBe(false);
+  });
+});
+
+// The proposal registry is ONE map keyed by tool name: every entry carries the
+// inner discriminator it expects and the label its chip frame carries, so a
+// second proposal type can never fork the extraction into a fourth hardcoding.
+describe("hermes chat — the PROPOSAL_TOOLS map serves every proposal type", () => {
+  const REDEEM_ARGS = {
+    member: "Emily G",
+    rewardId: "7",
+    reward: "Movie night",
+    cost: 25,
+    reason: "great week",
+  };
+  const redeemJson = (proposal: unknown) =>
+    JSON.stringify({ ok: true, proposal, message: "The reward has NOT been redeemed yet." });
+
+  function proposalFramesOf(body: string): Array<{ label: string; proposal: any }> {
+    return body
+      .split("event: status")
+      .slice(1)
+      .filter((chunk) => chunk.includes('"proposal"'))
+      .map((chunk) => JSON.parse(/data: (\{[^\n]*\})/.exec(chunk)![1]));
+  }
+
+  it("streams a redemption proposal frame with its own PIN-waiting label", async () => {
+    mocks.getTool.mockImplementation((name: string) =>
+      name === "propose_reward_redemption"
+        ? { handler: vi.fn(async () => redeemJson({ tool: "redeem_reward", operationId: "task-op-abc", args: REDEEM_ARGS })) }
+        : undefined);
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "propose_reward_redemption", parameters: {} } },
+    ] as any);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([toolCallRound(
+        "c1", "propose_reward_redemption", '{"member":"Emily","reward":"Movie night","reason":"great week"}')]))
+      .mockImplementationOnce(async () => sseResponse([token("Tap Confirm below."), DONE])));
+
+    const res = await post({ message: "redeem movie night for Emily", stream: true });
+    const frames = proposalFramesOf(await res.text());
+
+    expect(frames.length).toBe(1);
+    expect(frames[0].proposal.tool).toBe("redeem_reward");
+    expect(frames[0].proposal.args).toEqual(REDEEM_ARGS);
+    expect(frames[0].label).toBe("Waiting for a parent's PIN to confirm…");
+  });
+
+  it("buffered mode carries a redemption proposal in the same top-level array", async () => {
+    mocks.getTool.mockImplementation((name: string) =>
+      name === "propose_reward_redemption"
+        ? { handler: vi.fn(async () => redeemJson({ tool: "redeem_reward", operationId: "task-op-abc", args: REDEEM_ARGS })) }
+        : undefined);
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "propose_reward_redemption", parameters: {} } },
+    ] as any);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "", tool_calls: [
+            { id: "c1", type: "function", function: { name: "propose_reward_redemption", arguments: '{"member":"Emily"}' } },
+          ] } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }))
+      .mockImplementationOnce(async () => new Response(
+        JSON.stringify({ choices: [{ message: { role: "assistant", content: "A parent can confirm below." } }] }),
+        { status: 200, headers: { "content-type": "application/json" } })));
+
+    const res = await post({ message: "redeem movie night for Emily" });
+    const json = await res.json();
+
+    expect(json.content).toBe("A parent can confirm below.");
+    expect(json.proposals).toEqual([
+      { tool: "redeem_reward", operationId: "task-op-abc", args: REDEEM_ARGS },
+    ]);
+  });
+
+  // The inner discriminator is what stops one proposal type's payload from
+  // riding another type's chip — each map entry expects exactly its own tool.
+  it("never surfaces a payload whose inner tool belongs to the OTHER proposal type", async () => {
+    for (const [name, wrong] of [
+      ["propose_reward_redemption", { tool: "adjust_points", args: { member: "Emily", delta: 10, reason: "x" } }],
+      ["propose_point_adjustment", { tool: "redeem_reward", args: REDEEM_ARGS }],
+    ] as const) {
+      mocks.getTool.mockReset().mockImplementation((toolName: string) =>
+        toolName === name ? { handler: vi.fn(async () => redeemJson(wrong)) } : undefined);
+      mocks.buildToolsForOpenAI.mockReset().mockReturnValue([
+        { type: "function", function: { name, parameters: {} } },
+      ] as any);
+      vi.stubGlobal("fetch", vi.fn()
+        .mockImplementationOnce(async () => sseResponse([toolCallRound("c1", name, "{}")]))
+        .mockImplementationOnce(async () => sseResponse([token("ok"), DONE])));
+
+      const res = await post({ message: "do the thing", stream: true });
+      expect(proposalFramesOf(await res.text()).length).toBe(0);
+    }
+  });
+
+  // A turn that burns every round on tool calls ends on the exhaustion response.
+  // Dropping `proposals` there silently threw away a PIN chip the family had
+  // already been shown.
+  it("buffered exhaustion still hands back the proposals collected on the way there", async () => {
+    mocks.getTool.mockImplementation((name: string) =>
+      name === "propose_point_adjustment"
+        ? { handler: vi.fn(async () => JSON.stringify({
+            ok: true,
+            proposal: { tool: "adjust_points", args: { member: "Emily G", delta: 10, reason: "helped" } },
+          })) }
+        : undefined);
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "propose_point_adjustment", parameters: {} } },
+    ] as any);
+    const bufferedToolRound = () => new Response(
+      JSON.stringify({
+        choices: [{ message: { role: "assistant", content: "", tool_calls: [
+          { id: "c1", type: "function", function: { name: "propose_point_adjustment", arguments: '{"member":"Emily"}' } },
+        ] } }],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    // Every round — the tool-free wrap-up included — comes back demanding a tool,
+    // so the loop runs out of rounds instead of answering.
+    vi.stubGlobal("fetch", vi.fn(async () => bufferedToolRound()));
+
+    const res = await post({ message: "add points, then look something up, then…" });
+    const json = await res.json();
+
+    expect(json.content).toMatch(/ran out of steps/);
+    expect(json.proposals).toHaveLength(5);
+    expect(json.proposals[0]).toEqual({
+      tool: "adjust_points",
+      args: { member: "Emily G", delta: 10, reason: "helped" },
+    });
   });
 });
 

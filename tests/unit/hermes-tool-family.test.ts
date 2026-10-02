@@ -599,3 +599,143 @@ describe("kid tool surface", () => {
     );
   });
 });
+
+// A redemption is a point DEDUCTION, so the tool that proposes one must be as
+// inert as propose_point_adjustment: it reads the live shop, prices the chip,
+// and returns a proposal — /api/rewards/redeem is the only thing that spends
+// points, and it re-verifies the PIN itself. `h.writes` records every PocketBase
+// create/update/delete, so "writes nothing" is asserted, not assumed.
+describe("propose_reward_redemption", () => {
+  const seedReward = (over: Record<string, any> = {}) => {
+    h.rows.rewards = [{ id: "7", name: "Movie night", cost: 25, emoji: "🎬", ...over }];
+    return h.rows.rewards[0];
+  };
+  const seedMember = () => {
+    h.rows.members = [{ id: "m1", fullName: "Emily G", name: "Emily", role: "child" }];
+  };
+  const propose = (args: Record<string, any>, context: any = PARENT) =>
+    runTool("propose_reward_redemption", args, context);
+
+  beforeEach(() => {
+    seedMember();
+  });
+
+  it("validates only and returns an inert, operation-keyed proposal — nothing is written", async () => {
+    seedReward();
+
+    const res = await propose({ member: "Emily", reward: "Movie night", reason: "helped all week" });
+
+    expect(res.ok).toBe(true);
+    expect(res.proposal.tool).toBe("redeem_reward");
+    // The operation id IS the retry identity the redeem route validates first —
+    // without it a retry redeems twice.
+    expect(res.proposal.operationId).toMatch(/^task-op-/);
+    expect(res.proposal.args).toMatchObject({
+      member: "Emily G",
+      reward: "Movie night",
+      rewardId: "7",
+      cost: 25,
+      reason: "helped all week",
+    });
+    // The copy is load-bearing: the model must say this is PENDING.
+    expect(res.message).toMatch(/NOT been redeemed/);
+    expect(res.message).toMatch(/PIN/);
+    expect(res.message).toMatch(/never state the redemption as done/);
+    expect(h.writes).toEqual([]);
+    expect(h.rows.rewards).toHaveLength(1);
+  });
+
+  it("leaves PocketBase untouched even when the caller is a grown-up with a real session", async () => {
+    seedReward();
+
+    await propose({ member: "Emily", reward: "Movie night", reason: "great week" }, PARENT);
+
+    expect(h.writes).toEqual([]);
+  });
+
+  it("prices the chip exactly as get_rewards quotes the same row", async () => {
+    // A legacy row with no `cost` is why the fallback exists at all.
+    seedReward({ name: "Ice cream", cost: undefined, points: 15 });
+
+    const res = await propose({ member: "Emily", reward: "ice cream", reason: "hot day" });
+    const shop = await runTool("get_rewards", {}, PARENT);
+    const listed = shop.rewards.find((r: any) => r.title === "Ice cream");
+
+    expect(res.proposal.args.cost).toBe(15);
+    expect(res.proposal.args.cost).toBe(listed.cost);
+  });
+
+  it("refuses an unknown reward and names the tool that lists the real set", async () => {
+    seedReward();
+
+    const res = await propose({ member: "Emily", reward: "Private jet", reason: "x" });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/get_rewards/);
+    expect(res.proposal).toBeUndefined();
+    expect(h.writes).toEqual([]);
+  });
+
+  it("refuses an unknown member instead of guessing who earns the reward", async () => {
+    seedReward();
+
+    const res = await propose({ member: "Zoe", reward: "Movie night", reason: "x" });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/get_family_members/);
+    expect(res.proposal).toBeUndefined();
+  });
+
+  it("reports a failed catalog read instead of proposing a redemption it cannot price", async () => {
+    seedReward();
+    h.failReads.add("rewards");
+
+    const res = await propose({ member: "Emily", reward: "Movie night", reason: "great week" });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/do not guess/i);
+    expect(res.proposal).toBeUndefined();
+    expect(h.writes).toEqual([]);
+  });
+
+  it("requires a member, a reward and a reason before it touches anything", async () => {
+    seedReward();
+
+    const missingMember = await propose({ reward: "Movie night", reason: "x" });
+    const missingReward = await propose({ member: "Emily", reason: "x" });
+    const missingReason = await propose({ member: "Emily", reward: "Movie night" });
+    const longReason = await propose({ member: "Emily", reward: "Movie night", reason: "x".repeat(201) });
+
+    expect(missingMember.error).toMatch(/get_family_members/);
+    expect(missingReward.error).toMatch(/get_rewards/);
+    expect(missingReason.error).toMatch(/reason is required/i);
+    expect(longReason.error).toMatch(/200 characters or fewer/);
+    for (const res of [missingMember, missingReward, missingReason, longReason]) {
+      expect(res.proposal).toBeUndefined();
+    }
+    expect(h.writes).toEqual([]);
+  });
+
+  it("refuses to guess when two shop entries share the name", async () => {
+    h.rows.rewards = [
+      { id: "7", name: "Movie night", cost: 25 },
+      { id: "8", name: "Movie night", cost: 40 },
+    ];
+
+    const res = await propose({ member: "Emily", reward: "Movie night", reason: "x" });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/2 rewards/);
+    expect(res.proposal).toBeUndefined();
+  });
+
+  // The handler takes NO caller gate (deliberately — it moves no points), so the
+  // tool list is the only thing keeping it out of a child's hands.
+  it("is offered to a parent and never to a child", () => {
+    const parent = buildToolsForOpenAI({ role: "parent" }).map((t) => t.function.name);
+    const kid = buildToolsForOpenAI({ role: "child" }).map((t) => t.function.name);
+
+    expect(parent).toContain("propose_reward_redemption");
+    expect(kid).not.toContain("propose_reward_redemption");
+  });
+});
