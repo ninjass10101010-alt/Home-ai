@@ -6,9 +6,18 @@
  *   "exhausted" (not a chain index) marks the       — earlier tokens are
  *   synthesized fallback answer                     — superseded
  *   data: {"t":"<delta>"}                           — content token
+ *   event: reasoning\ndata: {"r":"<delta>"}          — model's reasoning
+ *   event: tool\ndata: {"name","state"}            — tool activity chip,
+ *   "state" is "running" | "ok" | "error"             one per call, `running`
+ *                                                    emitted before any call runs
  *   event: status\ndata: {"label":"<text>"}         — tool activity line
  *   event: error\ndata: {"message":"<text>"}        — terminal failure
  *   data: [DONE]                                    — terminator
+ *
+ * `reasoning` and `tool` are DISPLAY-ONLY (spec §8): unlike `t` they never
+ * belong to the answer, so nothing derived from them may be persisted or sent
+ * back as history. They are also distinct from `attempt`, which is the only
+ * frame that resets what the user is looking at.
  */
 
 export interface StreamConsuelaChatOptions {

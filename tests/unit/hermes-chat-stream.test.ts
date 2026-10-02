@@ -1148,3 +1148,154 @@ describe("hermes chat — per-call timeout budgets", () => {
     expect((await (await pending).json()).content).toContain("hit a snag");
   });
 });
+
+// Two holes in what the user can see, one cause: the route knows both of these
+// things and shows neither. A reasoning model streams `reasoning_content` deltas
+// for the whole think and the route counted their characters and threw the text
+// away — the one-shot "Thinking deeply…" status label was all that survived —
+// and a failing tool was fed back to the model as JSON `{"error":…}` while
+// surfacing to the user as nothing. That silence is most of what "if I had a
+// tool call error, I do not get a response back" felt like.
+//
+// Both frame types are DISPLAY-ONLY (spec §4.2 / §8): they go to the client and
+// nowhere else — never into `messages` (the array the provider sees) and never
+// into PocketBase. `event: reasoning` and `event: tool` are a different frame
+// kind from `event: attempt`: they must never reset the content accumulator, or
+// displayed would stop equalling persisted.
+describe("hermes chat — reasoning + tool activity frames", () => {
+  /** Parsed payloads of one event kind; unparseable data (the `data: [DONE]`
+   *  terminator and the bare token frames) is skipped, never thrown on. */
+  function payloads(body: string, event: string): any[] {
+    return parseSSEFrames(body).frames
+      .filter((f) => f.event === event)
+      .flatMap((f) => { try { return [JSON.parse(f.data)]; } catch { return []; } });
+  }
+  /** The tools the session may see — the route only executes an allowlisted call. */
+  function allowlist(...names: string[]) {
+    mocks.buildToolsForOpenAI.mockReturnValue(
+      names.map((n) => ({ type: "function", function: { name: n, parameters: {} } })) as any,
+    );
+  }
+  /** `runToolCalls` wraps a thrown handler as {"error":…}, so a throw is the
+   *  real shape of a tool call error, not a JSON a handler chose to return. */
+  const throwsWith = (message: string) => async () => { throw new Error(message); };
+  function assistantRow(): any {
+    return mocks.insertChatMessage.mock.calls.map((c: any[]) => c[0]).find((r: any) => r.role === "assistant");
+  }
+
+  it("forwards reasoning deltas as reasoning frames, once announced, and off the provider payload", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      reasoningToken("Let me check "),
+      reasoningToken("the calendar."),
+      token("You have soccer."),
+      DONE,
+    ])));
+    const body = await (await post({ message: "when is soccer", stream: true })).text();
+    expect(payloads(body, "reasoning").map((p) => p.r).join("")).toBe("Let me check the calendar.");
+    // The one-shot dots-phase label is kept, and still fires exactly once.
+    expect(payloads(body, "status")).toHaveLength(1);
+    expect(payloads(body, "status")[0].label).toMatch(/Thinking deeply/);
+    // DISPLAY-ONLY: the think never rides `messages` back to the provider…
+    expect(JSON.stringify(JSON.parse((globalThis.fetch as any).mock.calls[0][1].body).messages))
+      .not.toContain("Let me check");
+    // …and never reaches PocketBase, so it cannot reappear from the thread.
+    expect(assistantRow()?.content).toBe("You have soccer.");
+  });
+
+  it("emits every running frame before either tool executes, then one result frame each in call order", async () => {
+    allowlist("get_pantry", "get_grocery_list");
+    // The FIRST call finishes LAST, so results completing in reverse order is the
+    // shape that catches a frame emitted per-completion instead of per-call-index.
+    mocks.getTool.mockImplementation((name: string) =>
+      name === "get_pantry"
+        ? { handler: async () => { await new Promise((r) => setTimeout(r, 25)); throw new Error("pantry unavailable"); } }
+        : { handler: async () => '{"ok":true}' });
+    const round =
+      `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [
+        { index: 0, id: "c1", function: { name: "get_pantry", arguments: "{}" } },
+        { index: 1, id: "c2", function: { name: "get_grocery_list", arguments: "{}" } },
+      ] } }] })}\n\n` +
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })}\n\n` + DONE;
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([round]))
+      .mockImplementationOnce(async () => sseResponse([token("Milk and pasta."), DONE])));
+    const body = await (await post({ message: "what's in the pantry", stream: true })).text();
+    expect(payloads(body, "tool")).toEqual([
+      { name: "get_pantry", state: "running" },
+      { name: "get_grocery_list", state: "running" },
+      { name: "get_pantry", state: "error" },
+      { name: "get_grocery_list", state: "ok" },
+    ]);
+    // Tool frames are a DIFFERENT frame kind from `attempt`: they must not reset
+    // the content accumulator, or what the bubble shows stops being what the
+    // thread persists.
+    expect(payloads(body, "message").map((p) => p.t).join("")).toBe("Milk and pasta.");
+    expect(assistantRow()?.content).toBe("Milk and pasta.");
+  });
+
+  it("marks a thrown tool handler as an error frame while still feeding the result to the model", async () => {
+    allowlist("get_pantry");
+    mocks.getTool.mockReturnValue({ handler: throwsWith("pantry unavailable") });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")]))
+      .mockImplementationOnce(async () => sseResponse([token("I couldn't reach the pantry."), DONE])));
+    const body = await (await post({ message: "what's in the pantry", stream: true })).text();
+    expect(payloads(body, "tool").map((p) => p.state)).toEqual(["running", "error"]);
+    // The failure still goes back to the model — the round can recover — so the
+    // `{error}` JSON remains on `messages`; only its VISIBILITY is new.
+    const messages = JSON.parse((globalThis.fetch as any).mock.calls[1][1].body).messages;
+    expect(messages.at(-1)).toMatchObject({ role: "tool", content: '{"error":"pantry unavailable"}' });
+  });
+
+  it("marks a result that carries an error field as failed, and a clean one as ok", async () => {
+    allowlist("get_pantry");
+    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":false,"error":"pantry unavailable"}') });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")]))
+      .mockImplementationOnce(async () => sseResponse([token("Sorry."), DONE])));
+    const body = await (await post({ message: "what's in the pantry", stream: true })).text();
+    expect(payloads(body, "tool").map((p) => p.state)).toEqual(["running", "error"]);
+  });
+
+  it("reads a result that is not JSON as a success, not a failure", async () => {
+    allowlist("get_pantry");
+    // A handler may answer with prose; only a parsed `error` field is a failure,
+    // so an unparseable result must not paint the chip red.
+    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => "8 items, all in date") });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")]))
+      .mockImplementationOnce(async () => sseResponse([token("Plenty."), DONE])));
+    const body = await (await post({ message: "what's in the pantry", stream: true })).text();
+    expect(payloads(body, "tool").map((p) => p.state)).toEqual(["running", "ok"]);
+  });
+
+  // Fallback providers answer a stream:true request with one buffered JSON body
+  // (see `aiStreamingSupported`). That branch writes the content as a single
+  // token frame so the client's contract holds either way — the reasoning in the
+  // same body was being dropped exactly like the streamed deltas were.
+  it("forwards a buffered provider's reasoning as one reasoning frame", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "Done.", reasoning_content: "thought about it" } }] }),
+      { status: 200, headers: { "content-type": "application/json" } })));
+    const body = await (await post({ message: "hi", stream: true })).text();
+    expect(payloads(body, "reasoning").map((p) => p.r)).toEqual(["thought about it"]);
+    expect(payloads(body, "message").map((p) => p.t)).toEqual(["Done."]);
+  });
+
+  // `callAi` (the non-streaming call behind the buffered POST) read only
+  // `content` and `tool_calls`, so it could not tell a round whose reasoning ate
+  // the token budget from a dead provider. The buffered path has no frames to
+  // forward, so the reasoning rides the response body the client renders from —
+  // the sibling of the `proposals` array — and, like every reasoning string here,
+  // stays out of the persisted pair.
+  it("reports buffered-path reasoning on the response body, never in the persisted pair", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "Done.", reasoning_content: "thought about it" } }] }),
+      { status: 200, headers: { "content-type": "application/json" } })));
+    const res = await post({ message: "hi" });
+    const json = await res.json();
+    expect(json.reasoning).toBe("thought about it");
+    expect(assistantRow()?.content).toBe("Done.");
+    expect(JSON.stringify(mocks.insertChatMessage.mock.calls)).not.toContain("thought about it");
+  });
+});

@@ -121,7 +121,7 @@ function parseToolArgs(raw: string | undefined): Record<string, any> {
 async function callAi(
   messages: ChatMessage[],
   opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none"; target: AiTarget },
-): Promise<{ content: string; tool_calls?: ToolCall[] }> {
+): Promise<{ content: string; reasoning: string; tool_calls?: ToolCall[] }> {
   const target = opts.target;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (target.key) headers.Authorization = `Bearer ${target.key}`;
@@ -153,6 +153,10 @@ async function callAi(
   const data = await res.json();
   return {
     content: data.choices?.[0]?.message?.content || "",
+    // A non-streaming call has no delta loop to count, so this read is the only
+    // way the caller can tell a round whose reasoning ate the token budget from a
+    // provider that simply never answered.
+    reasoning: data.choices?.[0]?.message?.reasoning_content || "",
     tool_calls: data.choices?.[0]?.message?.tool_calls,
   };
 }
@@ -278,8 +282,11 @@ async function callAiStream(
     if (wantStream && !ctype.includes("text/event-stream")) aiStreamingSupported = false;
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content || "";
+    const reasoning = data.choices?.[0]?.message?.reasoning_content || "";
     // Buffered answer — surface it downstream as one token frame so the
-    // client's SSE contract holds either way.
+    // client's SSE contract holds either way. Its reasoning arrives whole, so
+    // it rides one frame the same way.
+    if (reasoning) write(sseFrame(JSON.stringify({ r: reasoning }), "reasoning"));
     if (content) write(sseFrame(JSON.stringify({ t: content })));
     return {
       content,
@@ -313,10 +320,14 @@ async function callAiStream(
       try { parsed = JSON.parse(payload); } catch { continue; }
       const delta = parsed.choices?.[0]?.delta;
       if (!delta) continue;
-      // Reasoning models think out loud before answering. Announce once so
-      // the client's status line replaces the dead typing dots.
+      // Reasoning models think out loud before answering. Forward the text so
+      // the user can watch the think instead of staring at a label that never
+      // changes. DISPLAY-ONLY (spec §8): it goes to the client and nowhere else
+      // — never onto `content`, so the persisted answer stays the answer.
       if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+        write(sseFrame(JSON.stringify({ r: delta.reasoning_content }), "reasoning"));
         reasoningChars += delta.reasoning_content.length;
+        // The status line still replaces the dead typing dots, once per call.
         if (!reasoningAnnounced) {
           reasoningAnnounced = true;
           write(sseFrame(JSON.stringify({ label: REASONING_STATUS }), "status"));
@@ -366,6 +377,22 @@ async function runToolCalls(
       return JSON.stringify({ error: e?.message || "Tool failed" });
     }
   }));
+}
+
+/**
+ * Did this tool round fail? `runToolCalls` answers a thrown handler with
+ * `{"error":…}` and a call outside the session allowlist with the same shape,
+ * and a handler may return its own `{"error":…}` of its own accord — so one
+ * rule covers every failure the route can see. A result that is not JSON is
+ * treated as a success: refusing to guess is what keeps a working tool from
+ * being painted as broken.
+ */
+function toolResultFailed(result: string): boolean {
+  try {
+    return (JSON.parse(result) as any)?.error !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 interface ChatRequestBody {
@@ -548,11 +575,19 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         }
         const roundToolCalls = normalizeToolCallIds(tool_calls);
         messages.push({ role: "assistant", content, tool_calls: roundToolCalls });
+        // Every call is announced BEFORE any of them runs (they execute
+        // concurrently below), so the full list of what Consuela is reaching for
+        // shows up at once instead of trickling in as each one lands.
         for (const tc of roundToolCalls) {
           write(sseFrame(JSON.stringify({ label: toolStatusLabel(tc.function?.name) }), "status"));
+          write(sseFrame(JSON.stringify({ name: tc.function?.name || "tool", state: "running" }), "tool"));
         }
         const results = await runToolCalls(roundToolCalls, tools, toolContext);
         results.forEach((result, i) => {
+          write(sseFrame(JSON.stringify({
+            name: roundToolCalls[i].function?.name || "tool",
+            state: toolResultFailed(result) ? "error" : "ok",
+          }), "tool"));
           messages.push({ role: "tool", tool_call_id: roundToolCalls[i].id, content: result });
           const proposal = extractPointProposal(roundToolCalls[i].function?.name, result);
           if (proposal) {
@@ -740,11 +775,12 @@ export async function POST(request: NextRequest) {
       // Final round = forced tool-free wrap-up (mirrors the streamed path).
       const wrapup = round === MAX_ROUNDS - 1;
       let content = "";
+      let reasoning = "";
       let tool_calls: ToolCall[] | undefined;
       for (const target of targets) {
         const callStarted = Date.now();
         try {
-          ({ content, tool_calls } = await callAi(
+          ({ content, reasoning, tool_calls } = await callAi(
             wrapup ? [...messages, { role: "system", content: WRAPUP_NOTE }] : messages,
             wrapup ? { target } : { tools, toolChoice: "auto", target },
           ));
@@ -776,7 +812,15 @@ export async function POST(request: NextRequest) {
           brain: ctx.brain,
           targets: ctx.targets,
         });
-        return NextResponse.json(proposals.length ? { content, proposals } : { content });
+        // The answering round's reasoning, if the model thought before replying —
+        // the buffered sibling of the streamed `reasoning` frame, and the sibling
+        // of `proposals`. Both keys stay absent when there is nothing to show, so
+        // the plain `{content}` shape is unchanged for a non-reasoning provider.
+        const display = {
+          ...(reasoning ? { reasoning } : {}),
+          ...(proposals.length ? { proposals } : {}),
+        };
+        return NextResponse.json({ content, ...display });
       }
 
       const roundToolCalls = normalizeToolCallIds(tool_calls);
