@@ -503,6 +503,34 @@ describe("chat-store core", () => {
     expect(getSnapshot().streaming).toBe(false);
   });
 
+  it("an allocation that beats hydration does not land on an unread stored id", async () => {
+    // The window the previous wave closed sits INSIDE `ensureHydrated`, so the
+    // gap before it is still open: `ensureHydrated` runs as an async function in
+    // the page's mount effect, while the composer is enabled from the first
+    // render. A send in that gap allocates straight from the reset counter onto
+    // ids this load has not looked at yet — and the stale rows only reach the
+    // thread later, when hydration's merge puts two rows on the same id.
+    localStorage.setItem("consuela-chat-messages", JSON.stringify([
+      { id: 101, role: "assistant", content: "yesterday's answer", timestamp: "Yesterday", at: 1 },
+      { id: 102, role: "assistant", content: "another stale row", timestamp: "Yesterday", at: 2 },
+    ]));
+    streamMock.fn.mockImplementation(async ({ onToken }: any) => {
+      onToken("today's answer", "today's answer");
+      return { content: "today's answer", streamed: true };
+    });
+
+    // Deliberately NOT awaiting ensureHydrated first: the send must beat it.
+    await send("hello", SPEAKER);
+    await ensureHydrated();
+
+    const msgs = getSnapshot().messages;
+    expect(msgs.find((m) => m.id === 101)?.content).toBe("yesterday's answer");
+    expect(msgs.find((m) => m.id === 102)?.content).toBe("another stale row");
+    expect(msgs.filter((m) => m.content === "today's answer")).toHaveLength(1);
+    const ids = msgs.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it("persists hydrated history to localStorage without the seed greeting", async () => {
     streamMock.fn.mockResolvedValue({ content: "saved-reply", streamed: true });
     await ensureHydrated();
@@ -604,6 +632,31 @@ describe("chat-store — live thinking + tool activity state", () => {
     expect(getSnapshot().messages.find((m) => m.content === "Rain.")?.toolEvents).toEqual([
       { name: "get_weather", state: "ok" },
       { name: "get_pantry", state: "error" },
+    ]);
+  });
+
+  it("collapses a repeated tool onto ONE chip carrying its LAST state", async () => {
+    // Pinned deliberately, because it is a real loss and the old comment claimed
+    // the opposite ("a repeated call in a later round keeps its own chip"). The
+    // upsert keys on the tool NAME, so a second call overwrites the first
+    // call's state: round 1 failing and round 3 succeeding reads as ✅, and the
+    // count of calls is gone. A second chip with the same label would tell the
+    // reader nothing, so the collapse is the accepted trade — but it is
+    // accepted knowingly, and this test is what makes it a decision rather than
+    // an accident.
+    streamMock.fn.mockImplementation(turnScript("Rain.", {
+      tools: (api) => {
+        api.onToolEvent?.({ name: "get_weather", state: "running" });
+        api.onToolEvent?.({ name: "get_weather", state: "error" });
+        api.onToolEvent?.({ name: "get_weather", state: "running" });
+        api.onToolEvent?.({ name: "get_weather", state: "ok" });
+      },
+      reply: (api) => api.onToken("Rain.", "Rain."),
+    }));
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(getSnapshot().messages.find((m) => m.content === "Rain.")?.toolEvents).toEqual([
+      { name: "get_weather", state: "ok" },
     ]);
   });
 

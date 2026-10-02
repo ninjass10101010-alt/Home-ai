@@ -291,6 +291,14 @@ function reseedOptimisticCounter(rows: Message[]): void {
  * overwrite bug this whole scheme exists to prevent.
  */
 function nextOptimisticId(): number {
+  // An allocation can beat hydration: the composer is live from the first render
+  // (`sendDisabled` rides `streaming`, not `hydrated`) while `ensureHydrated`
+  // only starts in the page's mount effect, and it runs as an async function —
+  // so a send in that gap allocated 101/102 while the rows already holding those
+  // ids were still sitting unread in localStorage. Same monotonic, range-
+  // filtered reseed the hydrate path uses, so it cannot re-issue an id already
+  // handed out, and it only runs until hydration has begun.
+  if (!hydratedOnce) reseedOptimisticCounter(loadChatHistory());
   msgCounter = Math.min(msgCounter + 1, OPTIMISTIC_ID_CEILING);
   return msgCounter;
 }
@@ -463,10 +471,19 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
         turnThinking = full;
         setState({ thinking: full });
       },
-      // One entry per tool, not per frame: the route writes `running` for every
-      // call up front and then one result per call, so a chip list built by
+      // One entry per tool NAME, not per frame: the route writes `running` for
+      // every call up front and then one result per call, so a chip list built by
       // appending would show each tool twice — once spinning forever beside its
-      // own answer. A repeated call in a later round keeps its own chip.
+      // own answer.
+      //
+      // Keying on the name means a turn that calls the SAME tool twice has ONE
+      // chip carrying that tool's LAST state, not one per call. That is
+      // deliberate: the chip is "did this tool work for this answer", and a
+      // second identical chip labelled the same way tells the reader nothing
+      // new. The cost is that an earlier call's outcome is overwritten by a
+      // later one — a tool that failed in round 1 and succeeded in round 3
+      // reads as ✅. Keeping both would need an occurrence index plus a
+      // de-duplicated label in `ToolActivityChips`, which is out of scope here.
       onToolEvent: (ev: ToolEvent) => {
         const at = turnToolEvents.findIndex((e) => e.name === ev.name);
         turnToolEvents = at < 0

@@ -638,11 +638,16 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       // could not have closed this without a `deleteChatMessage`, which the
       // chat_messages surface does not have.
       //
-      // `[DONE]` therefore means "this answer is complete and will be stored",
-      // not "the row is already in PocketBase" — the two are now one or two PB
-      // round trips apart. Nothing in the shipped client depends on the stronger
-      // reading: the store's post-stream reconcile is `mergeThread`, which is
-      // add-only, and the bubble is already in local state and localStorage.
+      // `[DONE]` therefore means "this answer is complete and has been handed to the
+      // requester", not "the row is already in PocketBase" — the two are now one
+      // or two PB round trips apart. Two narrower corrections to the older,
+      // stronger phrasing: a **Clem** turn (`!isClem` below) stores nothing at
+      // all, so for that agent the terminator promises delivery and nothing
+      // more; and even for Consuela the promise is conditional, because any
+      // client-side abort between this write and the guard still suppresses the
+      // store. Nothing in the shipped client depends on the stronger reading: the
+      // store's post-stream reconcile is `mergeThread`, which is add-only, and
+      // the bubble is already in local state and localStorage.
       write(sseFrame("[DONE]"));
       // Stop is a promise: a requester who aborted is already looking at
       // "Stopped.", so storing the answer behind it only hands that row back on
