@@ -204,6 +204,53 @@ describe("create_time_capsule", () => {
     expect(JSON.stringify(capsules()[0])).not.toContain("Someone Else");
   });
 
+  it("is PRIVATE by default — the same default the Time Capsules form uses", async () => {
+    // CreateCapsuleForm.tsx:24 is useState(false): the UI is private unless the
+    // parent ticks "family wide", so a chat-created capsule matches what the
+    // same action yields on the page. readUserCapsules lists `isFamilyWide = true`
+    // to EVERY member, kids included, so the default is a visibility choice, not
+    // a cosmetic one.
+    const res = await runTool("create_time_capsule", { title: "Graduation", unlockDate: "2099-06-01" }, PARENT);
+    expect(res.ok).toBe(true);
+    expect(res.capsule.isFamilyWide).toBe(false);
+    expect(capsules()[0].isFamilyWide).toBe(false);
+  });
+
+  it('a stringly-typed "false" stays private — the schema says boolean, models send strings', async () => {
+    const res = await runTool(
+      "create_time_capsule",
+      { title: "For the twins", unlockDate: "2099-06-01", isFamilyWide: "false" },
+      PARENT,
+    );
+    expect(res.ok).toBe(true);
+    expect(res.capsule.isFamilyWide).toBe(false);
+    expect(capsules()[0].isFamilyWide).toBe(false);
+  });
+
+  it("only a genuine yes widens — boolean true and the string \"true\"", async () => {
+    for (const yes of [true, "true"]) {
+      const res = await runTool(
+        "create_time_capsule",
+        { title: "Reunion", unlockDate: "2099-06-01", isFamilyWide: yes },
+        PARENT,
+      );
+      expect(res.ok, String(yes)).toBe(true);
+      expect(res.capsule.isFamilyWide, String(yes)).toBe(true);
+    }
+    expect(capsules().map((c) => c.isFamilyWide)).toEqual([true, true]);
+  });
+
+  it("a garbage value fails closed to private rather than widening", async () => {
+    const res = await runTool(
+      "create_time_capsule",
+      { title: "Someday", unlockDate: "2099-06-01", isFamilyWide: "no thanks" },
+      PARENT,
+    );
+    expect(res.ok).toBe(true);
+    expect(res.capsule.isFamilyWide).toBe(false);
+    expect(capsules()[0].isFamilyWide).toBe(false);
+  });
+
   it("fails closed on a past unlock date", async () => {
     for (const unlockDate of ["2020-01-01", localTodayISO()]) {
       const res = await runTool("create_time_capsule", { title: "Old", unlockDate }, PARENT);

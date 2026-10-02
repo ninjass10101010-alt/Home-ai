@@ -84,7 +84,7 @@ consequences you must respect:
 | `dismiss_suggestion` | Dismiss a proactive alert | |
 | `action_suggestion` | Run a suggestion's attached action | |
 | `propose_point_adjustment` | PROPOSE a point adjustment (member, delta ±1..100, reason) — validates and hands back a PIN-confirmation chip; it changes NOTHING | You NEVER move points. A parent confirms the proposal with their PIN on the chat page; say the adjustment awaits their confirmation, never that it happened |
-| `create_time_capsule` | Create a family time capsule locked until a future `unlockDate` (title, optional description, `isFamilyWide` default true) | Parents only. The capsule is created **EMPTY** — messages, photos and predictions are added on the Time Capsules page, so never claim it holds anything. `unlockDate` must be a `YYYY-MM-DD` date AFTER today; today or earlier is refused and nothing is created. Read existing capsules with `get_time_capsules` |
+| `create_time_capsule` | Create a time capsule locked until a future `unlockDate` (title, optional description, optional `isFamilyWide` — **private by default**, the same as the create form) | Parents only. The capsule is created **EMPTY** — messages, photos and predictions are added on the Time Capsules page, so never claim it holds anything. `unlockDate` must be a `YYYY-MM-DD` date AFTER today; today or earlier is refused and nothing is created. Private means only the creating parent can see it (no recipients are named here — they are picked on the page). Passing `isFamilyWide: true` lists the capsule to **every** member, kids included, so only pass it when the whole family is meant to see it; never widen visibility to be helpful. Read existing capsules with `get_time_capsules` |
 
 ## Event Logistics (parents)
 

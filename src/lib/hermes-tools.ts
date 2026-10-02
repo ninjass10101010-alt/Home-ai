@@ -280,6 +280,36 @@ function adultWriteRefusal() {
   };
 }
 
+/**
+ * The verified caller's name, or null when the session cannot prove one.
+ *
+ * Identity always comes from the session, never from a name the model typed — a
+ * wrong owner hides a write from the parent who made it. A BLANK name is the
+ * other failure: it sanitizes to the legacy demo-user namespace, whose rows
+ * belong to whoever wrote them first, so a read keyed on it answers with
+ * another member's data and a write files itself under a stranger. Every tool
+ * that keys off the caller fails closed on null; the caller keeps its own
+ * refusal copy, since what to say depends on what it was doing.
+ */
+function verifiedCallerName(context?: ToolHandlerContext): string | null {
+  return context?.caller?.name?.trim() || null;
+}
+
+/**
+ * Did the caller actually ask for a family-wide capsule? Only a real yes widens.
+ *
+ * The schema declares a boolean, but models send `"false"` / `"no"` / `0`, and
+ * the old `args.isFamilyWide !== false` test read every one of those as
+ * family-wide. `readUserCapsules` lists `isFamilyWide = true` to EVERY member,
+ * kids included, so a stringly-typed false silently widened who could see the
+ * capsule. Omitted is private too, matching CreateCapsuleForm's
+ * `useState(false)`: two paths to the same capsule must not disagree about who
+ * opens it.
+ */
+function capsuleIsFamilyWide(args: any): boolean {
+  return args.isFamilyWide === true || args.isFamilyWide === "true";
+}
+
 async function runInternalTaskCommand(
   source: TaskCommandSource,
   command: ManageTaskCommand,
@@ -2660,10 +2690,7 @@ const TOOLS: Tool[] = [
       },
     },
     handler: async (args: any, context?: ToolHandlerContext) => {
-      // Identity comes from the verified caller, never from the model's string.
-      // A blank/absent caller name would sanitize to the legacy demo-user
-      // namespace, whose XP belongs to another member — so fail closed.
-      const callerName = context?.caller?.name?.trim();
+      const callerName = verifiedCallerName(context);
       if (!callerName) {
         return summarize({ error: "could not tell whose skill tree this is — retry, or ask a grown-up" });
       }
@@ -2734,7 +2761,7 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async (_args: any, context?: ToolHandlerContext) => {
-      const callerName = context?.caller?.name?.trim();
+      const callerName = verifiedCallerName(context);
       if (!callerName) {
         return summarize({ error: "could not tell whose capsules these are — retry, or ask a grown-up", capsules: [] });
       }
@@ -2822,7 +2849,11 @@ const TOOLS: Tool[] = [
       // The planner holds ONE row per (weekOf, time, mealType) — the same key
       // adminUpsertMeal writes — so the slot is the row. Legacy weekless rows
       // count as the writing week so they can still be cleared, never a
-      // different week's meal.
+      // different week's meal. `r.time || r.day` is deliberately more permissive
+      // than adminUpsertMeal's strict `r.time`, and safe because the weekday is
+      // also matched: a legacy row carrying only `day` would otherwise be
+      // unreachable to remove, while the match can still only land inside the
+      // requested (weekday, mealType, week) slot.
       const slot = (raw as any[]).find(
         (r: any) =>
           (r.time || r.day) === weekdayShort &&
@@ -2861,25 +2892,28 @@ const TOOLS: Tool[] = [
       description:
         "Create a family time capsule that stays locked until a future date. Parents only. " +
         "The capsule is created EMPTY — messages, photos and predictions are added on the Time Capsules page, never here. " +
-        "unlockDate must be a YYYY-MM-DD date in the future; today or earlier is refused and nothing is created.",
+        "unlockDate must be a YYYY-MM-DD date in the future; today or earlier is refused and nothing is created. " +
+        "It is private to the creating parent unless isFamilyWide is true, exactly as the create form is.",
       parameters: {
         type: "object",
         properties: {
           title: { type: "string", description: "Capsule title (e.g. 'Emily starts high school')" },
           unlockDate: { type: "string", description: "Future YYYY-MM-DD date the capsule unlocks on (must be after today)" },
           description: { type: "string", description: "Optional: what the capsule is for" },
-          isFamilyWide: { type: "boolean", description: "Optional: visible to the whole family (default true)" },
+          isFamilyWide: {
+            type: "boolean",
+            description:
+              "Optional: true makes the capsule visible to EVERY family member, kids included, through get_time_capsules. " +
+              "Omitted or false keeps it private — only the parent who created it can see it, until recipients are picked on the Time Capsules page. " +
+              "Only pass true when the family really is meant to see it.",
+          },
         },
         required: ["title", "unlockDate"],
       },
     },
     handler: async (args: any, context?: ToolHandlerContext) => {
       if (!callerIsAdult(context?.caller)) return summarize(adultWriteRefusal());
-      // The creator is the verified caller, never a `createdBy` the model typed
-      // — a wrong owner hides the capsule from the parent who made it. A blank
-      // name fails closed too: sanitizeUserId would quietly file it under the
-      // legacy demo namespace, whose rows belong to whoever wrote them first.
-      const callerName = context?.caller?.name?.trim();
+      const callerName = verifiedCallerName(context);
       if (!callerName) {
         return summarize({ ok: false, error: "could not tell which parent this capsule belongs to — retry, or make it on the Time Capsules page" });
       }
@@ -2900,6 +2934,7 @@ const TOOLS: Tool[] = [
         });
       }
       const description = String(args.description ?? "").trim();
+      const familyWide = capsuleIsFamilyWide(args);
       try {
         const created = await withAdmin(async (pb) =>
           pb.collection("time_capsules").create({
@@ -2908,7 +2943,7 @@ const TOOLS: Tool[] = [
             unlockDate,
             createdBy,
             recipients: [],
-            isFamilyWide: args.isFamilyWide !== false,
+            isFamilyWide: familyWide,
             status: "locked",
             // Empty on purpose: contents are added on the page, and a capsule
             // that reported a count here would be counting rows nobody wrote.
@@ -2929,7 +2964,7 @@ const TOOLS: Tool[] = [
             status: "locked",
             createdBy,
             contentCount: 0,
-            isFamilyWide: args.isFamilyWide !== false,
+            isFamilyWide: familyWide,
           },
           note: "The capsule is empty — add messages, photos and predictions on the Time Capsules page.",
         });
