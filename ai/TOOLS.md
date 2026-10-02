@@ -70,7 +70,9 @@ consequences you must respect:
 | `update_event` | Move or edit a family event (date, time, title, member) | Google-synced events are edited on Google's side, not with this tool |
 | `remove_event` | Remove an event by title (+optional date) | Echo what was removed |
 | `add_meal` | Upsert a day+mealType slot (upsert — never overwrites blindly) | Day accepts Mon..Sun or YYYY-MM-DD |
+| `remove_meal` | Delete the planned `meal_plan_entries` row for a day+mealType slot — the same seam the Meals screen uses | `replaced` is always `true`: the slot goes back to empty. Day accepts Mon..Sun or YYYY-MM-DD, resolved exactly as `add_meal` resolves it. Refuses honestly when the slot is empty or holds a DIFFERENT meal than the one you named — check `get_weekly_meals` first; never claim a meal was removed when it was not |
 | `add_grocery_item` | Add item(s) to the shopping list | Dedupe against the current list first |
+| `remove_grocery_item` | Delete a shopping-list item by name (case- and punctuation-insensitive — `whole milk` removes `Whole Milk`) | Removes it outright rather than ticking it off; use `complete_grocery_item` for that. Refuses honestly when nothing matches and names `get_grocery_list` — check the real list before retrying, never report a removal that did not happen |
 | `add_recipe` | Save a recipe to the family recipe box (name, comma-separated ingredients, optional tags/times/servings/calories/instructions/source) | Ingredients and tags are comma lists — they store as JSON-stringified arrays like the UI path |
 | `recipe_ingredients_to_grocery` | Add one recipe's missing ingredients to the shopping list | Exact recipe name from `get_recipes`; skips what's stocked in the pantry (out-of-stock items don't count) or already on the list, counts repeated ingredients once, and aborts honestly if pantry/grocery stock can't be read |
 | `complete_grocery_item` | Mark an item picked up | |
@@ -82,6 +84,7 @@ consequences you must respect:
 | `dismiss_suggestion` | Dismiss a proactive alert | |
 | `action_suggestion` | Run a suggestion's attached action | |
 | `propose_point_adjustment` | PROPOSE a point adjustment (member, delta ±1..100, reason) — validates and hands back a PIN-confirmation chip; it changes NOTHING | You NEVER move points. A parent confirms the proposal with their PIN on the chat page; say the adjustment awaits their confirmation, never that it happened |
+| `create_time_capsule` | Create a family time capsule locked until a future `unlockDate` (title, optional description, `isFamilyWide` default true) | Parents only. The capsule is created **EMPTY** — messages, photos and predictions are added on the Time Capsules page, so never claim it holds anything. `unlockDate` must be a `YYYY-MM-DD` date AFTER today; today or earlier is refused and nothing is created. Read existing capsules with `get_time_capsules` |
 
 ## Event Logistics (parents)
 

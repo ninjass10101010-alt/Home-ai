@@ -33,6 +33,7 @@ import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
 import { createTaskOperationId } from "@/lib/task-operation-outbox";
+import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 // Live readers + shared helpers were extracted to ./consuela/live-reads
 // (Task 8, 2026-09-14). Imported here for the tool handlers below and
@@ -171,6 +172,29 @@ function splitTrimList(value: unknown): string[] {
   return String(value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+const MEAL_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/**
+ * The one day resolution for the meal planner — add_meal and remove_meal must
+ * agree or a write lands in a slot its own removal can never find. Never
+ * `.toISOString()` here: it converts to UTC and answers the wrong calendar day
+ * for any host east of UTC (see meals-week-utils.ts).
+ */
+function resolveMealDay(
+  dayRaw: string,
+): { mealDate: string; weekdayShort: string } | { error: string } {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dayRaw)) {
+    return { mealDate: dayRaw, weekdayShort: weekdayOfISO(dayRaw) };
+  }
+  const idx = MEAL_WEEKDAYS.findIndex((d) => d.toLowerCase() === dayRaw.toLowerCase());
+  if (idx === -1) return { error: `day must be Mon..Sun or YYYY-MM-DD, got "${dayRaw}"` };
+  const weekdayShort = MEAL_WEEKDAYS[idx];
+  return {
+    weekdayShort,
+    mealDate: isoDateForWeekday(weekStartForDate(localTodayISO()), weekdayShort),
+  };
+}
+
 // (task writes now go through src/lib/snapshot-tasks.ts — the store the
 // dashboard renders; the PB `tasks` collection is a mirrored replica.)
 
@@ -241,6 +265,18 @@ function adultCallerRefusal() {
     ok: false,
     reason: "adult_only",
     error: "task changes need a grown-up — ask a parent to make this change",
+  };
+}
+
+/** The non-task twin: same fail-closed gate, same `adult_only` reason code, but
+ *  copy that stays true for a grocery / meal / capsule write. Reusing
+ *  adultCallerRefusal()'s "task changes" there would tell the model the caller
+ *  was refused over chores, which is a different claim than the one made. */
+function adultWriteRefusal() {
+  return {
+    ok: false,
+    reason: "adult_only",
+    error: "changes to the family list, the meal plan and time capsules need a grown-up — ask a parent to make them",
   };
 }
 
@@ -1159,22 +1195,9 @@ const TOOLS: Tool[] = [
     handler: async (args) => {
       const name = String(args.name ?? "").trim();
       if (!name) return summarize({ ok: false, error: "Meal name is required" });
-      const dayRaw = String(args.day ?? "").trim();
-      const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-      const todayISO = localTodayISO();
-      let mealDate: string;
-      let weekdayShort: string;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(dayRaw)) {
-        mealDate = dayRaw;
-        weekdayShort = weekdayOfISO(dayRaw);
-      } else {
-        const idx = WEEKDAYS.findIndex((d) => d.toLowerCase() === dayRaw.toLowerCase());
-        if (idx === -1) {
-          return summarize({ ok: false, error: `day must be Mon..Sun or YYYY-MM-DD, got "${dayRaw}"` });
-        }
-        weekdayShort = WEEKDAYS[idx];
-        mealDate = isoDateForWeekday(weekStartForDate(todayISO), weekdayShort);
-      }
+      const resolved = resolveMealDay(String(args.day ?? "").trim());
+      if ("error" in resolved) return summarize({ ok: false, error: resolved.error });
+      const { mealDate, weekdayShort } = resolved;
       const weekOf = weekStartForDate(mealDate);
       const mealType = (typeof args.mealType === "string" ? args.mealType : "dinner").toLowerCase();
       const meal: Record<string, unknown> = {
@@ -2730,6 +2753,189 @@ const TOOLS: Tool[] = [
           isFamilyWide: c.isFamilyWide === true,
         })),
       });
+    },
+  },
+  {
+    definition: {
+      name: "remove_grocery_item",
+      description:
+        "Remove an item from the grocery shopping list by name (case- and punctuation-insensitive — 'whole milk' removes 'Whole Milk'). " +
+        "Deletes the item outright. If nothing matches it refuses and names get_grocery_list, which lists what is really on the list — never report a removal that did not happen.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Grocery item to remove (e.g. 'whole milk')" },
+        },
+        required: ["name"],
+      },
+    },
+    handler: async (args: any, context?: ToolHandlerContext) => {
+      if (!callerIsAdult(context?.caller)) return summarize(adultWriteRefusal());
+      const name = String(args.name ?? "").trim();
+      if (!name) return summarize({ ok: false, error: "no item name provided" });
+      const grocery = await liveGrocery();
+      if (grocery === null) {
+        return summarize({ ok: false, error: "grocery data unavailable — do not guess inventory, retry later" });
+      }
+      const norm = normalizeGroceryName(name);
+      const existing = grocery.find((g: any) => g.name && normalizeGroceryName(g.name) === norm);
+      if (!existing) {
+        return summarize({ ok: false, error: `"${name}" is not on the grocery list — call get_grocery_list to see what's actually there` });
+      }
+      try {
+        await withAdmin(async (pb) => pb.collection("grocery_list_items").delete(existing.id));
+        return summarize({ ok: true, name: existing.name, deleted: true });
+      } catch (e: any) {
+        return summarize({ ok: false, error: `remove_grocery_item failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "remove_meal",
+      description:
+        "Remove a planned meal from the family meal planner. Pass the day's weekday short (Mon..Sun) or a YYYY-MM-DD date — the same resolution add_meal uses — plus the meal name and which meal. " +
+        "Deletes the row outright, so `replaced` is always true: the slot goes back to empty. If the slot is empty, or it holds a different meal than the one named, it refuses and names get_weekly_meals.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Exact meal name to remove (e.g. 'Pizza')" },
+          day: { type: "string", description: "Weekday short (Mon/Tue/Wed/Thu/Fri/Sat/Sun) or YYYY-MM-DD" },
+          mealType: { type: "string", enum: ["breakfast", "lunch", "dinner", "snack"], description: "Which meal (default dinner)" },
+        },
+        required: ["name", "day"],
+      },
+    },
+    handler: async (args: any, context?: ToolHandlerContext) => {
+      if (!callerIsAdult(context?.caller)) return summarize(adultWriteRefusal());
+      const name = String(args.name ?? "").trim();
+      if (!name) return summarize({ ok: false, error: "no meal name provided" });
+      const resolved = resolveMealDay(String(args.day ?? "").trim());
+      if ("error" in resolved) return summarize({ ok: false, error: resolved.error });
+      const { mealDate, weekdayShort } = resolved;
+      const weekOf = weekStartForDate(mealDate);
+      const mealType = (typeof args.mealType === "string" ? args.mealType : "dinner").toLowerCase();
+      const raw = await liveMealRows();
+      if (raw === null) {
+        return summarize({ ok: false, error: "meal data unavailable — do not guess meals, retry later" });
+      }
+      // The planner holds ONE row per (weekOf, time, mealType) — the same key
+      // adminUpsertMeal writes — so the slot is the row. Legacy weekless rows
+      // count as the writing week so they can still be cleared, never a
+      // different week's meal.
+      const slot = (raw as any[]).find(
+        (r: any) =>
+          (r.time || r.day) === weekdayShort &&
+          (r.mealType || "dinner") === mealType &&
+          (r.weekOf || weekOf) === weekOf,
+      );
+      if (!slot) {
+        return summarize({
+          ok: false,
+          error: `no ${mealType} planned for ${weekdayShort} (${mealDate}) — call get_weekly_meals to see the real plan`,
+        });
+      }
+      const slotName = String(slot.name ?? "").trim();
+      if (normalizeGroceryName(slotName) !== normalizeGroceryName(name)) {
+        return summarize({
+          ok: false,
+          error: `${weekdayShort} ${mealType} is "${slotName}", not "${name}" — nothing was removed; call get_weekly_meals to see the real plan`,
+        });
+      }
+      try {
+        await withAdmin(async (pb) => pb.collection("meal_plan_entries").delete(slot.id));
+        return summarize({
+          ok: true,
+          replaced: true,
+          removed: { id: slot.id, name: slot.name, day: slot.time || weekdayShort, mealType, date: mealDate, weekOf },
+          note: "the slot is now empty — the Meals screen shows it as unplanned",
+        });
+      } catch (e: any) {
+        return summarize({ ok: false, error: `remove_meal failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "create_time_capsule",
+      description:
+        "Create a family time capsule that stays locked until a future date. Parents only. " +
+        "The capsule is created EMPTY — messages, photos and predictions are added on the Time Capsules page, never here. " +
+        "unlockDate must be a YYYY-MM-DD date in the future; today or earlier is refused and nothing is created.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Capsule title (e.g. 'Emily starts high school')" },
+          unlockDate: { type: "string", description: "Future YYYY-MM-DD date the capsule unlocks on (must be after today)" },
+          description: { type: "string", description: "Optional: what the capsule is for" },
+          isFamilyWide: { type: "boolean", description: "Optional: visible to the whole family (default true)" },
+        },
+        required: ["title", "unlockDate"],
+      },
+    },
+    handler: async (args: any, context?: ToolHandlerContext) => {
+      if (!callerIsAdult(context?.caller)) return summarize(adultWriteRefusal());
+      // The creator is the verified caller, never a `createdBy` the model typed
+      // — a wrong owner hides the capsule from the parent who made it. A blank
+      // name fails closed too: sanitizeUserId would quietly file it under the
+      // legacy demo namespace, whose rows belong to whoever wrote them first.
+      const callerName = context?.caller?.name?.trim();
+      if (!callerName) {
+        return summarize({ ok: false, error: "could not tell which parent this capsule belongs to — retry, or make it on the Time Capsules page" });
+      }
+      const createdBy = sanitizeUserId(callerName);
+      const title = String(args.title ?? "").trim();
+      if (!title) return summarize({ ok: false, error: "a capsule title is required" });
+      const unlockDate = String(args.unlockDate ?? "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(unlockDate)) {
+        return summarize({ ok: false, error: `unlockDate must be a YYYY-MM-DD date, got "${unlockDate}"` });
+      }
+      // Local calendar strings compare correctly as text, and today's key comes
+      // from localTodayISO() — never .toISOString(), which would shift the day.
+      const today = localTodayISO();
+      if (unlockDate <= today) {
+        return summarize({
+          ok: false,
+          error: `unlockDate must be in the future (after ${today}) — a capsule that opens the moment it is made is not a capsule, so nothing was created`,
+        });
+      }
+      const description = String(args.description ?? "").trim();
+      try {
+        const created = await withAdmin(async (pb) =>
+          pb.collection("time_capsules").create({
+            title,
+            description,
+            unlockDate,
+            createdBy,
+            recipients: [],
+            isFamilyWide: args.isFamilyWide !== false,
+            status: "locked",
+            // Empty on purpose: contents are added on the page, and a capsule
+            // that reported a count here would be counting rows nobody wrote.
+            contentCount: 0,
+            totalSize: 0,
+            unlockNotificationSent: false,
+            viewedBy: [],
+            unlockMessage: "",
+            tags: [],
+          }),
+        );
+        return summarize({
+          ok: true,
+          capsule: {
+            id: created?.id ?? null,
+            title,
+            unlockDate,
+            status: "locked",
+            createdBy,
+            contentCount: 0,
+            isFamilyWide: args.isFamilyWide !== false,
+          },
+          note: "The capsule is empty — add messages, photos and predictions on the Time Capsules page.",
+        });
+      } catch (e: any) {
+        return summarize({ ok: false, error: `create_time_capsule failed: ${e?.message}` });
+      }
     },
   },
 ];

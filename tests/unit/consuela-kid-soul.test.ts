@@ -105,8 +105,9 @@ describe("kid tool surface", () => {
     const names = kidToolNames();
     for (const blocked of [
       "add_task", "complete_task", "add_event", "remove_event", "add_meal",
-      "add_grocery_item", "complete_grocery_item",
-      "add_pantry_item", "remove_pantry_item",
+      "remove_meal", "add_grocery_item", "complete_grocery_item",
+      "remove_grocery_item", "add_pantry_item", "remove_pantry_item",
+      "create_time_capsule",
       "add_schedule_item", "update_schedule_item", "delete_schedule_item",
       "dismiss_suggestion", "action_suggestion",
       "check_for_update", "trigger_update", "get_container_status",
