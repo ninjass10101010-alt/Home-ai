@@ -185,6 +185,20 @@ describe("get_skill_tree — a kid always gets their OWN tree, read-only", () =>
     expect(res.profile.userId).toBe("Emily");
   });
 
+  // `readSkillTreeProfile` synthesizes a ZERO profile for any id that is not the
+  // legacy namespace, so a placeholder name produced a convincing member with
+  // 0 XP and level 1 — an identity nobody has.
+  it("refuses the route's \"Guest\" placeholder rather than inventing that member's tree", async () => {
+    h.rows.skill_branches = [];
+    h.rows.quests = [];
+
+    const res = await runTool("get_skill_tree", {}, { source: "hermes", caller: { memberId: "", name: "Guest", role: "child" } });
+
+    expect(res.error).toMatch(/could not tell whose skill tree/i);
+    expect(JSON.stringify(res)).not.toContain("Guest");
+    expect(JSON.stringify(res)).not.toContain("totalXP");
+  });
+
   it("creates no PocketBase row when the member has no profile yet", async () => {
     h.rows.skill_tree_profiles = [];
 
@@ -462,6 +476,21 @@ describe("get_time_capsules — honest degradation", () => {
       expect(res.capsules).toEqual([]);
       expect(JSON.stringify(res)).not.toContain("demo-user");
     }
+  });
+
+  // The route fills an unauthenticated caller's name with the literal "Guest"
+  // (`session?.name ?? "Guest"`). That is a PLACEHOLDER, not an identity: passing
+  // it through handed an unauthenticated caller a real-looking profile keyed to a
+  // member who does not exist.
+  it("treats the route's \"Guest\" placeholder as no verified identity", async () => {
+    h.rows.time_capsules = [capsule({ createdBy: "demo-user", recipients: ["demo-user"] })];
+
+    const res = await runTool("get_time_capsules", {}, { source: "hermes", caller: { memberId: "", name: "Guest", role: "child" } });
+
+    expect(res.error).toBeTruthy();
+    expect(res.capsules).toEqual([]);
+    expect(JSON.stringify(res)).not.toContain("demo-user");
+    expect(JSON.stringify(res)).not.toContain("Guest");
   });
 });
 

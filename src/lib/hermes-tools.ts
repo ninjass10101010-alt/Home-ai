@@ -281,6 +281,13 @@ function adultWriteRefusal() {
 }
 
 /**
+ * The name the route hands an unauthenticated caller (`session?.name ?? "Guest"`
+ * in api/hermes/chat). A PLACEHOLDER, never a member — see
+ * verifiedCallerName below.
+ */
+const GUEST_PLACEHOLDER_NAME = "Guest";
+
+/**
  * The verified caller's name, or null when the session cannot prove one.
  *
  * Identity always comes from the session, never from a name the model typed — a
@@ -290,9 +297,16 @@ function adultWriteRefusal() {
  * another member's data and a write files itself under a stranger. Every tool
  * that keys off the caller fails closed on null; the caller keeps its own
  * refusal copy, since what to say depends on what it was doing.
+ *
+ * The route's `"Guest"` placeholder is the same failure wearing a name: it is
+ * what `session?.name ?? "Guest"` yields for an unauthenticated caller, so
+ * accepting it handed that caller a real-looking profile keyed to a member who
+ * does not exist (`{ member: "Guest", totalXP: 0, level: 1 }`).
  */
 function verifiedCallerName(context?: ToolHandlerContext): string | null {
-  return context?.caller?.name?.trim() || null;
+  const name = context?.caller?.name?.trim();
+  if (!name || name === GUEST_PLACEHOLDER_NAME) return null;
+  return name;
 }
 
 /**
@@ -3086,6 +3100,12 @@ const TOOLS: Tool[] = [
         ok: true,
         proposal: {
           tool: "redeem_reward",
+          // Same `task-op-…` namespace as every task/ledger operation, because
+          // `applyWeekLedgerOperation` dedupes on the operation id and the redeem
+          // route replays against that history: a redemption must be recognised
+          // as the same operation if it is re-sent after an ambiguous ack. Do NOT
+          // give this a bespoke prefix — a new namespace would fail the dedupe and
+          // let one redemption spend the reward twice.
           operationId: createTaskOperationId(),
           args: { member: memberName, rewardId: String(reward.id ?? ""), reward: titleOf(reward), cost, reason },
         },
