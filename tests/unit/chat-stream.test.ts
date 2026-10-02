@@ -260,6 +260,169 @@ describe("streamConsuelaChat — attempt frames", () => {
   });
 });
 
+// The route already forwards every `reasoning_content` delta and one frame per
+// tool execution (Task 8); before this, the client parsed both and dropped them,
+// so the transcript the route worked to produce reached nobody. Both frames are
+// DISPLAY-ONLY (spec §4.2 / §8): unlike `t` they never belong to the answer, so
+// the contract to hold here is that they reach the caller intact and change
+// NOTHING about `content` — displayed === persisted depends on it.
+describe("streamConsuelaChat — reasoning and tool frames", () => {
+  function stream(...frames: string[]) {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse(frames.join(""))));
+  }
+
+  it("reports each reasoning delta with the transcript so far", async () => {
+    stream(
+      'event: reasoning\ndata: {"r":"Let me check "}\n\n',
+      'event: reasoning\ndata: {"r":"the calendar."}\n\n',
+      'data: {"t":"Soccer."}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const seen: string[] = [];
+    await streamConsuelaChat({ message: "hi", onReasoning: (full) => seen.push(full) });
+    expect(seen).toEqual(["Let me check ", "Let me check the calendar."]);
+  });
+
+  it("reports reasoning deltas alongside their own delta, never merged into the content", async () => {
+    stream(
+      'event: reasoning\ndata: {"r":"thinking hard"}\n\n',
+      'data: {"t":"It is raining."}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const deltas: [string, string][] = [];
+    const res = await streamConsuelaChat({
+      message: "hi",
+      onReasoning: (full, delta) => deltas.push([full, delta]),
+    });
+    expect(deltas).toEqual([["thinking hard", "thinking hard"]]);
+    // DISPLAY-ONLY: the think is not part of the answer, so the resolved content
+    // is the answer alone.
+    expect(res.content).toBe("It is raining.");
+  });
+
+  it("reports each tool frame as it arrives", async () => {
+    stream(
+      'event: tool\ndata: {"name":"get_weather","state":"running"}\n\n',
+      'event: tool\ndata: {"name":"get_weather","state":"ok"}\n\n',
+      'data: {"t":"Rain."}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const events: Array<{ name: string; state: string }> = [];
+    const res = await streamConsuelaChat({
+      message: "hi",
+      onToolEvent: (ev) => events.push({ ...ev }),
+    });
+    expect(events).toEqual([
+      { name: "get_weather", state: "running" },
+      { name: "get_weather", state: "ok" },
+    ]);
+    expect(res.content).toBe("Rain.");
+  });
+
+  it("drops a superseded attempt's reasoning, exactly as it drops that attempt's tokens", async () => {
+    // `attempt` is the ONLY reset in the client, and after Task 8 it has three
+    // accumulators to reset, not one. The exhaustion fallback is the concrete
+    // trigger: six rounds of tool calls, then an `attempt` for target
+    // "exhausted" — the tokens reset, so a leftover transcript would render as
+    // the fallback answer's own thinking.
+    stream(
+      'event: attempt\ndata: {"round":1,"target":"brain"}\n\n',
+      'event: reasoning\ndata: {"r":"six rounds of thinking"}\n\n',
+      'data: {"t":"Let me check"}\n\n',
+      'event: attempt\ndata: {"round":2,"target":"exhausted"}\n\n',
+      'event: reasoning\ndata: {"r":"giving up"}\n\n',
+      'data: {"t":"I ran out of steps"}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const seen: string[] = [];
+    const res = await streamConsuelaChat({ message: "hi", onReasoning: (full) => seen.push(full) });
+    expect(seen).toEqual(["six rounds of thinking", "giving up"]);
+    expect(res.content).toBe("I ran out of steps");
+  });
+
+  it("keeps the transcript already received when a reasoning frame is malformed", async () => {
+    // Contrast with `attempt`, where the reset stands on a parse failure: here
+    // the ACCUMULATED VALUE is the point, so a bad frame must add nothing and
+    // take nothing away.
+    stream(
+      'event: reasoning\ndata: {"r":"kept so far"}\n\n',
+      "event: reasoning\ndata: not-json\n\n",
+      'event: reasoning\ndata: {"r":" and more"}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const seen: string[] = [];
+    await streamConsuelaChat({
+      message: "hi",
+      onReasoning: (full) => seen.push(full),
+      onToolEvent: () => { throw new Error("no tool ran"); },
+    });
+    expect(seen).toEqual(["kept so far", "kept so far and more"]);
+  });
+
+  it("ignores a reasoning frame whose delta is not a non-empty string", async () => {
+    stream(
+      'event: reasoning\ndata: {"r":"kept so far"}\n\n',
+      'event: reasoning\ndata: {"r":42}\n\n',
+      'event: reasoning\ndata: {"r":""}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const seen: string[] = [];
+    await streamConsuelaChat({ message: "hi", onReasoning: (full) => seen.push(full) });
+    expect(seen).toEqual(["kept so far"]);
+  });
+
+  it("ignores a malformed tool frame without discarding the ones around it", async () => {
+    stream(
+      'event: tool\ndata: {"name":"get_weather","state":"running"}\n\n',
+      "event: tool\ndata: not-json\n\n",
+      'event: tool\ndata: {"state":"ok"}\n\n',
+      'event: tool\ndata: {"name":"get_weather","state":"ok"}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const events: Array<{ name: string; state: string }> = [];
+    await streamConsuelaChat({ message: "hi", onToolEvent: (ev) => events.push({ ...ev }) });
+    expect(events).toEqual([
+      { name: "get_weather", state: "running" },
+      { name: "get_weather", state: "ok" },
+    ]);
+  });
+
+  it("ignores a tool frame whose state is not one the client can render", async () => {
+    // The route sends exactly three states today, but the payload is parsed from
+    // the wire: an unknown state would reach a chip that has no glyph for it.
+    // `error` is honest for what it is — see the A1 note in the task report —
+    // so it is passed through verbatim rather than re-interpreted here.
+    stream(
+      'event: tool\ndata: {"name":"get_weather","state":"exploded"}\n\n',
+      'event: tool\ndata: {"name":"get_weather"}\n\n',
+      'event: tool\ndata: {"name":"get_weather","state":"error"}\n\n',
+      "data: [DONE]\n\n",
+    );
+    const events: Array<{ name: string; state: string }> = [];
+    await streamConsuelaChat({ message: "hi", onToolEvent: (ev) => events.push({ ...ev }) });
+    expect(events).toEqual([{ name: "get_weather", state: "error" }]);
+  });
+
+  it("does not report reasoning or tool frames on the buffered fallback", async () => {
+    // The buffered path has no frames: emitting anything here would put text on
+    // screen before the caller's own thinking-floor beat has elapsed.
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ content: "buffered", reasoning: "thought about it" }), {
+        status: 200, headers: { "content-type": "application/json" },
+      })));
+    const reasoning: string[] = [];
+    const tools: unknown[] = [];
+    const res = await streamConsuelaChat({
+      message: "hi",
+      onReasoning: (full) => reasoning.push(full),
+      onToolEvent: (ev) => tools.push(ev),
+    });
+    expect(res).toEqual({ content: "buffered", streamed: false });
+    expect(reasoning).toEqual([]);
+    expect(tools).toEqual([]);
+  });
+});
+
 describe("streamConsuelaChat watchdog", () => {
   // A wedged intermediary: one frame lands, then the body never resolves and
   // never closes. Fetch has already resolved here, so only a watchdog raced

@@ -29,6 +29,9 @@ function okFetch(messages: any[] = []) {
   }));
 }
 
+/** The unspied jsdom implementation, captured before any test replaces it. */
+const originalSetItem = Storage.prototype.setItem;
+
 beforeEach(() => {
   __resetChatStoreForTests();
   streamMock.fn.mockReset();
@@ -407,5 +410,311 @@ describe("chat-store core", () => {
     const stored = JSON.parse(localStorage.getItem("consuela-chat-messages")!);
     expect(stored.some((m: any) => m.content === "saved-reply")).toBe(true);
     expect(stored.some((m: any) => m.id === 1)).toBe(false);
+  });
+});
+
+// A reasoning model thinks in front of the family, and the route forwards every
+// reasoning delta plus one frame per tool execution (Task 8). What the store
+// does with them is DISPLAY-ONLY (spec §4.2 / §8): they belong on screen and in
+// memory, and nowhere else. `persistHistory()` runs on EVERY token tick, so an
+// unstripped transcript would write hundreds of frames of thinking to
+// localStorage on every keystroke of the think — and come back on the next page
+// load as if it had been said.
+describe("chat-store — live thinking + tool activity state", () => {
+  /** Reasoning and a tool call, then the answer. Read INSIDE the stream so the
+   *  mid-turn snapshot is observed, not the post-turn cleared one. */
+  function thinkThenAnswer(answer = "Sure."): string[] {
+    const live: string[] = [];
+    streamMock.fn.mockImplementation(async ({ onReasoning, onToolEvent, onToken }: any) => {
+      onReasoning?.("thinking", "thinking");
+      onToolEvent?.({ name: "get_weather", state: "running" });
+      onReasoning?.("thinking hard", " hard");
+      onToolEvent?.({ name: "get_weather", state: "ok" });
+      live.push(getSnapshot().thinking);
+      onToken(answer, answer);
+      return { content: answer, streamed: true };
+    });
+    return live;
+  }
+
+  it("accumulates reasoning into live thinking state", async () => {
+    const live = thinkThenAnswer();
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(live).toEqual(["thinking hard"]);
+  });
+
+  it("records tool activity as it arrives and keeps the running chip until the result", async () => {
+    const seen: unknown[][] = [];
+    streamMock.fn.mockImplementation(async ({ onToolEvent, onToken }: any) => {
+      onToolEvent?.({ name: "get_weather", state: "running" });
+      seen.push(getSnapshot().toolEvents.map((e: any) => e.state));
+      onToolEvent?.({ name: "get_weather", state: "ok" });
+      onToken("Rain.", "Rain.");
+      return { content: "Rain.", streamed: true };
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(seen).toEqual([["running"]]);
+    expect(getSnapshot().messages.find((m) => m.content === "Rain.")?.toolEvents)
+      .toEqual([{ name: "get_weather", state: "ok" }]);
+  });
+
+  it("collapses one chip per tool rather than a row per frame", async () => {
+    // The route writes a `running` frame per call before any call runs, then one
+    // result frame per call in call order. Rendering both would show the same
+    // tool twice — once spinning forever next to its own answer.
+    streamMock.fn.mockImplementation(async ({ onToolEvent, onToken }: any) => {
+      onToolEvent?.({ name: "get_weather", state: "running" });
+      onToolEvent?.({ name: "get_pantry", state: "running" });
+      onToolEvent?.({ name: "get_weather", state: "ok" });
+      onToolEvent?.({ name: "get_pantry", state: "error" });
+      onToken("Rain.", "Rain.");
+      return { content: "Rain.", streamed: true };
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(getSnapshot().messages.find((m) => m.content === "Rain.")?.toolEvents).toEqual([
+      { name: "get_weather", state: "ok" },
+      { name: "get_pantry", state: "error" },
+    ]);
+  });
+
+  it("keeps the reasoning transcript and tool chips in memory on the finished message", async () => {
+    thinkThenAnswer();
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    const reply = assistantBubbles().at(-1)!;
+    expect(reply.content).toBe("Sure.");
+    expect(reply.thinking).toBe("thinking hard");
+    expect(reply.toolEvents).toEqual([{ name: "get_weather", state: "ok" }]);
+  });
+
+  it("NEVER persists reasoning or tool activity to localStorage", async () => {
+    // The binding assertion of this whole task: reasoning text must never leave
+    // the tab's memory. Every assertion below is checked against the RAW
+    // payload, not a parsed copy, because a leak is a leak however it is
+    // encoded — and the payload is only meaningful because the test also proves
+    // the in-memory row DOES carry the same values.
+    thinkThenAnswer("Sure.");
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    const raw = localStorage.getItem("consuela-chat-messages")!;
+    // Non-vacuous: the write this reads really happened, really holds this
+    // turn's rows, and the reply in it is the one carrying the volatile fields.
+    expect(raw).toContain("Sure.");
+    const stored = JSON.parse(raw);
+    expect(stored.some((m: any) => m.content === "Sure.")).toBe(true);
+    // ...and the volatile fields are absent from every stored row.
+    expect(raw).not.toContain("thinking hard");
+    expect(raw).not.toContain("get_weather");
+    expect(stored.some((m: any) => "thinking" in m)).toBe(false);
+    expect(stored.some((m: any) => "toolEvents" in m)).toBe(false);
+    // ...while the in-memory row carries them, so the strip is what removed
+    // them rather than the values never having been produced.
+    const reply = assistantBubbles().at(-1)!;
+    expect(reply.content).toBe("Sure.");
+    expect(reply.thinking).toBe("thinking hard");
+    expect(reply.toolEvents).toEqual([{ name: "get_weather", state: "ok" }]);
+  });
+
+  it("keeps the transcript off localStorage across every write of the turn, not just the last", async () => {
+    // `persistHistory()` runs per token tick. Stripping only at the end of the
+    // turn would still have written the whole think to storage mid-stream, so
+    // this watches every value the key was ever given.
+    const written: string[] = [];
+    const spy = vi.spyOn(Storage.prototype, "setItem");
+    spy.mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === "consuela-chat-messages") written.push(value);
+      return originalSetItem.call(this, key, value);
+    } as typeof Storage.prototype.setItem);
+    try {
+      streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
+        onReasoning?.("secret middle of the think", "secret middle of the think");
+        onToken("Sure.", "Sure.");
+        return { content: "Sure.", streamed: true };
+      });
+      await ensureHydrated();
+      await send("hi", SPEAKER);
+      expect(written.length).toBeGreaterThan(1);
+      expect(written.some((v) => v.includes("secret middle of the think"))).toBe(false);
+      // ...and the answer itself is persisted, so this is a real write stream.
+      expect(written.some((v) => v.includes("Sure."))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("never sends the transcript back to the model as history", async () => {
+    // The provider round-trip is the other place a think could leak: `history`
+    // is built from the message list, so anything carried on a row rides along
+    // unless the mapping drops it. Read on the SECOND turn, whose history
+    // contains the first turn's finished reply — the row that carries the
+    // transcript.
+    const histories: string[] = [];
+    streamMock.fn.mockImplementation(async (opts: any) => {
+      histories.push(JSON.stringify(opts.history));
+      opts.onReasoning?.("thinking hard", "thinking hard");
+      opts.onToolEvent?.({ name: "get_weather", state: "ok" });
+      opts.onToken("Sure.", "Sure.");
+      return { content: "Sure.", streamed: true };
+    });
+    await ensureHydrated();
+    await send("one", SPEAKER);
+    await send("two", SPEAKER);
+    const secondTurn = histories.at(-1)!;
+    expect(secondTurn).toContain("Sure.");
+    expect(secondTurn).not.toContain("thinking hard");
+    expect(secondTurn).not.toContain("get_weather");
+  });
+
+  it("clears thinking state at the start of the next turn", async () => {
+    const starts: Array<{ thinking: string; chips: number }> = [];
+    streamMock.fn.mockImplementation(async ({ onReasoning, onToolEvent, onToken }: any) => {
+      onReasoning?.("first turn", "first turn");
+      onToolEvent?.({ name: "get_weather", state: "running" });
+      onToken("First answer.", "First answer.");
+      return { content: "First answer.", streamed: true };
+    });
+    await ensureHydrated();
+    await send("one", SPEAKER);
+    // Turn two reads the snapshot BEFORE it emits anything: a transcript left
+    // over from turn one would be showing under this turn's dots.
+    streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
+      starts.push({ thinking: getSnapshot().thinking, chips: getSnapshot().toolEvents.length });
+      onReasoning?.("second turn", "second turn");
+      onToken("Second answer.", "Second answer.");
+      return { content: "Second answer.", streamed: true };
+    });
+    await send("two", SPEAKER);
+    expect(starts).toEqual([{ thinking: "", chips: 0 }]);
+    // Cleared again once the turn ends — a finished turn shows its transcript on
+    // its own message, not as live state for whatever comes next.
+    expect(getSnapshot().thinking).toBe("");
+    expect(getSnapshot().toolEvents).toEqual([]);
+    // ...and the first turn's message kept its own copy.
+    expect(getSnapshot().messages.find((m) => m.content === "First answer.")!.thinking)
+      .toBe("first turn");
+  });
+
+  it("drops a superseded attempt's transcript and chips, exactly as it drops that attempt's tokens", async () => {
+    // A2: the route announces `target: "exhausted"` before the synthesized
+    // fallback, and the client resets content on every attempt frame. Six rounds
+    // of ✅/❌ chips and six rounds of thinking would otherwise stay attached
+    // above the "I ran out of steps" answer as if they belonged to it.
+    const atFailover: { thinking: string; chips: number; text: string }[] = [];
+    streamMock.fn.mockImplementation(async ({ onReasoning, onToolEvent, onAttempt, onToken }: any) => {
+      onAttempt?.({ round: 1, target: "brain" });
+      onReasoning?.("dead target thinking", "dead target thinking");
+      onToolEvent?.({ name: "get_pantry", state: "running" });
+      onToolEvent?.({ name: "get_pantry", state: "ok" });
+      onToken("Let me check", "Let me check");
+      onAttempt?.({ round: 2, target: "exhausted" });
+      atFailover.push({
+        thinking: getSnapshot().thinking,
+        chips: getSnapshot().toolEvents.length,
+        text: assistantBubbles().at(-1)!.content,
+      });
+      onToken("I ran out of steps", "I ran out of steps");
+      return { content: "I ran out of steps", streamed: true };
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(atFailover).toEqual([{ thinking: "", chips: 0, text: "" }]);
+    const reply = assistantBubbles().at(-1)!;
+    expect(reply.content).toBe("I ran out of steps");
+    // The answering attempt thought of nothing, so the message carries no
+    // transcript at all rather than the dead target's.
+    expect(reply.thinking).toBeUndefined();
+    expect(reply.toolEvents).toBeUndefined();
+    expect(getSnapshot().thinking).toBe("");
+    expect(getSnapshot().toolEvents).toEqual([]);
+  });
+
+  it("keeps the transcript and chips on a stopped reply, which keeps its words", async () => {
+    // The stop path is the other place a finished bubble is written. A stopped
+    // turn persisted nothing, so dropping its transcript here would lose it
+    // from a message the user is looking at.
+    streamMock.fn.mockImplementation(({ onReasoning, onToolEvent, onToken, signal }: any) => {
+      onReasoning?.("partial think", "partial think");
+      onToolEvent?.({ name: "get_weather", state: "running" });
+      onToken("partial", "partial");
+      return new Promise((_res, rej) => {
+        const e = new Error("Generation stopped");
+        e.name = "AbortError";
+        if (signal.aborted) rej(e);
+        else signal.addEventListener("abort", () => rej(e));
+      });
+    });
+    await ensureHydrated();
+    const sending = send("story", SPEAKER);
+    stop();
+    await sending;
+    const reply = assistantBubbles().at(-1)!;
+    expect(reply.content).toBe("partial");
+    expect(reply.thinking).toBe("partial think");
+    expect(reply.toolEvents).toEqual([{ name: "get_weather", state: "running" }]);
+    expect(getSnapshot().thinking).toBe("");
+    expect(getSnapshot().toolEvents).toEqual([]);
+  });
+
+  it("keeps reasoning frames from opening the bubble", async () => {
+    // Reasoning frames alone must NOT clear the typing dots: the affordance
+    // belongs up until the answer's first content token, and a transcript
+    // arriving is not an answer. Read mid-stream — after the turn ends the
+    // state is cleared, so a post-send snapshot could not tell.
+    const seen: Array<{ thinking: string; isTyping: boolean; bubbles: number }> = [];
+    streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
+      onReasoning?.("thinking", "thinking");
+      seen.push({ thinking: getSnapshot().thinking, isTyping: getSnapshot().isTyping, bubbles: assistantBubbles().length });
+      onReasoning?.("thinking hard", " hard");
+      onToken("Sure.", "Sure.");
+      seen.push({ thinking: getSnapshot().thinking, isTyping: getSnapshot().isTyping, bubbles: assistantBubbles().length });
+      return { content: "Sure.", streamed: true };
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    // The transcript is there and the dots are still up, and no bubble opened.
+    expect(seen).toEqual([
+      { thinking: "thinking", isTyping: true, bubbles: 0 },
+      { thinking: "thinking hard", isTyping: false, bubbles: 1 },
+    ]);
+    expect(getSnapshot().isTyping).toBe(false);
+  });
+
+  it("mirrors the transcript the stream reports rather than the raw deltas", async () => {
+    // onReasoning carries (transcript-so-far, new delta) so a caller can choose
+    // either. The store must take the transcript: a delta-fed accumulator would
+    // double-count every frame after the first. The client is what filters
+    // empty/non-string deltas (chat-stream.test.ts), so the store trusts what it
+    // is handed and does not re-validate it.
+    const seen: string[] = [];
+    streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
+      onReasoning?.("kept", "kept");
+      onReasoning?.("kept and grown", " and grown");
+      seen.push(getSnapshot().thinking);
+      onToken("Sure.", "Sure.");
+      return { content: "Sure.", streamed: true };
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(seen).toEqual(["kept and grown"]);
+  });
+
+  it("does not leave live thinking state behind when the turn fails outright", async () => {
+    streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
+      onReasoning?.("thinking hard", "thinking hard");
+      onToken("half an answer", "half an answer");
+      throw new Error("boom");
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(getSnapshot().thinking).toBe("");
+    expect(getSnapshot().toolEvents).toEqual([]);
+    expect(getSnapshot().streaming).toBe(false);
+    // The failure copy is a fresh row and carries nothing volatile.
+    const err = getSnapshot().messages.find((m) => m.errorFor);
+    expect("thinking" in err!).toBe(false);
+    expect("toolEvents" in err!).toBe(false);
   });
 });

@@ -20,6 +20,22 @@
  * frame that resets what the user is looking at.
  */
 
+/**
+ * The three states the route emits. `error` means the tool RESULT carried an
+ * `error` field, which is broader than a failure — the live registry answers
+ * several routine refusals that way ("Already completed — waiting for parent
+ * approval", "task is already pending") — so a caller must not render this
+ * state as a crash. Nothing on the wire separates the two cases.
+ */
+export type ToolEventState = "running" | "ok" | "error";
+
+export interface ToolEvent {
+  name: string;
+  state: ToolEventState;
+}
+
+const TOOL_EVENT_STATES: readonly string[] = ["running", "ok", "error"];
+
 export interface StreamConsuelaChatOptions {
   message: string;
   history?: Array<{ role: string; content: string }>;
@@ -31,10 +47,16 @@ export interface StreamConsuelaChatOptions {
   watchdogMs?: number;
   /** Called per token with the full content so far and the new delta. */
   onToken?: (fullContent: string, delta: string) => void;
-  /** Called per tool-status event with a friendly label and the parsed frame
-   *  payload (a propose_point_adjustment status carries `proposal` — the
-   *  chat page renders the parent-PIN confirm chip from it). The second
-   *  argument is optional, so existing (label) callers keep compiling. */
+  /** Called per reasoning delta with the transcript so far and the new delta.
+   *  Resets alongside the content accumulator on an `attempt` frame. */
+  onReasoning?: (fullReasoning: string, delta: string) => void;
+  /** Called per tool-activity frame: one `running` per announced call, then one
+   *  result frame per call in call order. */
+  onToolEvent?: (ev: ToolEvent) => void;
+  /** Called with a friendly label and the parsed frame payload (a
+   *  propose_point_adjustment status carries `proposal` — the chat page renders
+   *  the parent-PIN confirm chip from it). The second argument is optional, so
+   *  existing (label) callers keep compiling. */
   onStatus?: (label: string, data?: Record<string, unknown>) => void;
   /** Called when the route announces a new (round × target) provider call. The
    *  tokens received so far are superseded — the accumulator has been reset, so
@@ -178,6 +200,7 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
     const decoder = new TextDecoder();
     let buffer = "";
     let content = "";
+    let reasoning = "";
     let errorMsg: string | null = null;
 
     outer: for (;;) {
@@ -210,10 +233,39 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
           // fallback alike. The reset stands even if the payload is malformed:
           // leaving a superseded attempt's tokens on screen is the worse failure.
           content = "";
+          // The think resets with the tokens, and has to: the route's
+          // `reasoningAnnounced` / `reasoningChars` are function-local to
+          // callAiStream, so no cross-attempt transcript exists server-side and
+          // nothing downstream can drop a superseded one. The exhaustion
+          // fallback is the concrete case — six rounds of thinking would
+          // otherwise render as the fallback answer's own.
+          reasoning = "";
           try {
             const p = JSON.parse(frame.data);
             opts.onAttempt?.({ round: Number(p.round) || 0, target: String(p.target || "") });
-          } catch { /* malformed attempt frame — the reset above still stands */ }
+          } catch { /* malformed attempt frame — the resets above still stand */ }
+        } else if (frame.event === "reasoning") {
+          // Unlike `attempt`, the reset is NOT the point here — the accumulated
+          // transcript is — so a frame that does not parse adds nothing and
+          // takes nothing away. Dropping the transcript on a bad frame would
+          // blank what the user is reading mid-think.
+          try {
+            const p = JSON.parse(frame.data);
+            if (typeof p.r === "string" && p.r.length > 0) {
+              reasoning += p.r;
+              opts.onReasoning?.(reasoning, p.r);
+            }
+          } catch { /* malformed reasoning frame — ignore */ }
+        } else if (frame.event === "tool") {
+          // State is validated, not passed through: the payload is parsed off the
+          // wire, and an unrecognized state would reach a chip with no glyph for
+          // it. `error` itself is passed verbatim — see ToolEventState.
+          try {
+            const p = JSON.parse(frame.data);
+            if (typeof p.name === "string" && typeof p.state === "string" && TOOL_EVENT_STATES.includes(p.state)) {
+              opts.onToolEvent?.({ name: p.name, state: p.state as ToolEventState });
+            }
+          } catch { /* malformed tool frame — ignore */ }
         } else {
           try {
             const p = JSON.parse(frame.data);

@@ -14,7 +14,7 @@
  * calendar-member-snapshot.ts).
  */
 
-import { streamConsuelaChat } from "@/lib/chat-stream";
+import { streamConsuelaChat, type ToolEvent } from "@/lib/chat-stream";
 import { mergeThread, SEED_GREETING_ID } from "@/lib/chat-thread";
 import {
   isPointAdjustmentProposal,
@@ -35,6 +35,14 @@ export interface Message {
   source?: "telegram";
   /** Inert point-adjustment proposals; points move only via the chip's PIN. */
   proposals?: PointAdjustmentProposal[];
+  /**
+   * The turn's reasoning transcript, IN MEMORY ONLY. Display-only (spec §4.2 /
+   * §8): `persistHistory()` strips it, so it reaches neither localStorage nor
+   * PocketBase, and it is absent on every row that comes back from either.
+   */
+  thinking?: string;
+  /** Per-tool activity for the turn. Display-only, stripped like `thinking`. */
+  toolEvents?: ToolEvent[];
 }
 
 export interface ChatSpeaker {
@@ -50,6 +58,11 @@ export interface ChatStoreState {
   /** True for the ENTIRE stream (send start → finally). `isTyping` drops on
    *  the first token, so it cannot double as the composer's busy flag. */
   streaming: boolean;
+  /** The turn in flight, live. Empty between turns — a finished turn keeps its
+   *  transcript on its own message instead. Display-only. */
+  thinking: string;
+  /** The turn in flight, live, one entry per tool. Display-only. */
+  toolEvents: ToolEvent[];
 }
 
 const CHAT_STORAGE_KEY = "consuela-chat-messages";
@@ -71,6 +84,8 @@ function freshState(): ChatStoreState {
     statusLine: null,
     hydrated: false,
     streaming: false,
+    thinking: "",
+    toolEvents: [],
   };
 }
 
@@ -96,6 +111,23 @@ function setMessages(next: Message[] | ((prev: Message[]) => Message[])) {
 }
 
 /**
+ * Drop the display-only fields from a row on its way OUT to localStorage.
+ * Reasoning text and tool activity are DISPLAY-ONLY (spec §4.2 / §8): they must
+ * never reach PocketBase or localStorage. They are stripped HERE rather than at
+ * each write site because `setMessages` runs on every token tick and on every
+ * hydrate/reconcile — a per-write-site omission would put a whole think into
+ * storage, and the next page load would replay it as if Consuela had said it.
+ *
+ * Rows without them (every hydrated row, every user row) are returned as-is, so
+ * the common path allocates nothing.
+ */
+function stripVolatile(m: Message): Message {
+  if (m.thinking === undefined && m.toolEvents === undefined) return m;
+  const { thinking: _thinking, toolEvents: _toolEvents, ...rest } = m;
+  return rest;
+}
+
+/**
  * Persist to localStorage once hydration is done. The seed greeting is never
  * stored — it is re-seeded on load, and keeping it would put a phantom row at
  * the top of the stored thread.
@@ -107,7 +139,7 @@ function persistHistory() {
   try {
     localStorage.setItem(
       CHAT_STORAGE_KEY,
-      JSON.stringify(state.messages.filter((m) => !isSeedGreeting(m))),
+      JSON.stringify(state.messages.filter((m) => !isSeedGreeting(m)).map(stripVolatile)),
     );
   } catch {
     /* quota / private mode — the server thread is the durable copy */
@@ -300,7 +332,10 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
   }
 
   streamInFlight = true;
-  setState({ streaming: true });
+  // The previous turn's live think is cleared here, not just at its own end: a
+  // turn that ends in an error row has nothing left to hang its transcript on,
+  // and whatever survived would render under this turn's dots.
+  setState({ streaming: true, thinking: "", toolEvents: [] });
   const controller = new AbortController();
   abortController = controller;
 
@@ -332,6 +367,18 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
   let awaiting = false;
   // Whatever streamed before a stop/failure — a stopped reply keeps its words.
   let streamedSoFar = "";
+  // This turn's reasoning transcript and tool activity, held locally so the live
+  // state can be reset without losing what the finished message needs. Both are
+  // display-only and never reach persistence (see persistHistory).
+  let turnThinking = "";
+  let turnToolEvents: ToolEvent[] = [];
+  /** The turn's display-only fields, as they land on a finished bubble. Absent
+   *  keys rather than empty ones, so a turn that thought nothing carries no
+   *  transcript — the same shape a hydrated row has. */
+  const volatileFields = (): Pick<Message, "thinking" | "toolEvents"> => ({
+    ...(turnThinking ? { thinking: turnThinking } : {}),
+    ...(turnToolEvents.length ? { toolEvents: [...turnToolEvents] } : {}),
+  });
   // Proposals surfaced during THIS turn. Inert: only the chip's PIN flow writes.
   const turnProposals: PointAdjustmentProposal[] = [];
   const attachProposal = (value: unknown) => {
@@ -372,6 +419,23 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
         setState({ statusLine: label });
         attachProposal(data?.proposal);
       },
+      // Live reasoning transcript. Nothing else clears `isTyping` on this path
+      // — a think is not an answer, so the dots stay up until a token lands.
+      onReasoning: (full: string) => {
+        turnThinking = full;
+        setState({ thinking: full });
+      },
+      // One entry per tool, not per frame: the route writes `running` for every
+      // call up front and then one result per call, so a chip list built by
+      // appending would show each tool twice — once spinning forever beside its
+      // own answer. A repeated call in a later round keeps its own chip.
+      onToolEvent: (ev: ToolEvent) => {
+        const at = turnToolEvents.findIndex((e) => e.name === ev.name);
+        turnToolEvents = at < 0
+          ? [...turnToolEvents, ev]
+          : turnToolEvents.map((e, i) => (i === at ? ev : e));
+        setState({ toolEvents: [...turnToolEvents] });
+      },
       // The stream resets its OWN accumulator on an attempt frame, but the
       // bubble renders only from onToken — so without this the dead target's
       // words stay on screen through the next attempt's silent reasoning phase,
@@ -380,10 +444,17 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
       // every row unconditionally and gates the thinking dots on isTyping alone,
       // so the affordance goes back UP here and the attempt's own status label
       // replaces the dead one.
+      //
+      // The turn's think and its chips go with it: a superseded attempt's
+      // transcript and its ✅/❌ row would otherwise stay attached above the
+      // answering attempt — most visibly on the exhaustion fallback, where the
+      // route announces target "exhausted" after six rounds of tool calls.
       onAttempt: () => {
         streamedSoFar = "";
         awaiting = true;
-        setState({ isTyping: true, statusLine: null });
+        turnThinking = "";
+        turnToolEvents = [];
+        setState({ isTyping: true, statusLine: null, thinking: "", toolEvents: [] });
         if (!bubbleOpen) return;
         setMessages((prev) =>
           prev.map((m) => (m.id === streamId ? { ...m, content: "" } : m)),
@@ -432,6 +503,10 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
     setState({ isTyping: false, statusLine: null });
 
     const finalContent = content || "I processed that.";
+    // The turn's think and chips land on the finished bubble HERE, and nowhere
+    // else: they are in-memory display state (persistHistory strips them), and
+    // the live copy is cleared in the finally below.
+    const volatile = volatileFields();
     setMessages((prev) =>
       prev.some((m) => m.id === streamId)
         ? prev.map((m) =>
@@ -441,6 +516,7 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
                   content: finalContent,
                   proposals:
                     m.proposals ?? (turnProposals.length ? [...turnProposals] : undefined),
+                  ...volatile,
                 }
               : m,
           )
@@ -453,6 +529,7 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
               timestamp: "Just now",
               at: streamAt,
               ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
+              ...volatile,
             },
           ],
     );
@@ -467,6 +544,10 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
       // User pressed stop — not an error. Keep whatever streamed; if nothing
       // did, say so plainly instead of dropping a silent hole in the thread.
       const stoppedContent = streamedSoFar.trim() || "Stopped.";
+      // A stopped reply is the other finished bubble, so the turn's think and
+      // chips belong on it too: nothing else persists them, and the user is
+      // looking at exactly this row.
+      const volatile = volatileFields();
       setMessages((prev) =>
         prev.some((m) => m.id === streamId)
           ? prev.map((m) =>
@@ -476,6 +557,7 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
                     content: stoppedContent,
                     proposals:
                       m.proposals ?? (turnProposals.length ? [...turnProposals] : undefined),
+                    ...volatile,
                   }
                 : m,
             )
@@ -488,6 +570,7 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
                 timestamp: "Just now",
                 at: streamAt,
                 ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
+                ...volatile,
               },
             ],
       );
@@ -532,7 +615,10 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
   } finally {
     abortController = null;
     streamInFlight = false;
-    setState({ streaming: false });
+    // The live think belongs to the turn in flight only — a finished turn keeps
+    // its transcript on its own message. Cleared here as well as at send start,
+    // so the error paths (which drop the reply row entirely) cannot strand it.
+    setState({ streaming: false, thinking: "", toolEvents: [] });
   }
 }
 
