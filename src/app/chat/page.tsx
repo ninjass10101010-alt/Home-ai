@@ -369,6 +369,22 @@ function ChatContent() {
   // one of a think's hundreds of deltas.
   const thinkGrowthBucket = Math.floor(thinking.length / 512);
 
+  // The live think + chips are gated on `streaming`, not `isTyping`: `isTyping`
+  // drops on the answer's FIRST token, and the turn's activity is only handed to
+  // the finished bubble at finalize — so a long answer would otherwise spend its
+  // whole duration with no chips anywhere on screen. This flag makes the handoff
+  // atomic instead of overlapping the store's reconcile await (which lands
+  // between the two writes), so the chips are never rendered twice.
+  const newestAssistantOwnsActivity = useMemo(() => {
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const m = visibleMessages[i];
+      if (m.role !== "assistant") continue;
+      return !!m.thinking || !!m.toolEvents?.length;
+    }
+    return false;
+  }, [visibleMessages]);
+  const showLiveActivity = streaming && !newestAssistantOwnsActivity;
+
   // Only auto-scroll while the reader is already near the bottom — never
   // fight someone scrolling back through history.
   useEffect(() => {
@@ -664,23 +680,26 @@ function ChatContent() {
           );
         })}
 
-        {isTyping && (
+        {(showLiveActivity || isTyping) && (
           <div className="flex flex-col gap-2">
             {/* Live tool activity + the reasoning transcript, deliberately
                 OUTSIDE the `role="status"` region below: a transcript that grows
                 by one delta at a time inside a polite live region would
                 re-announce the entire think on every frame. */}
-            <div className="flex gap-2.5">
-              <div className="w-8 shrink-0" aria-hidden />
-              <div className="min-w-0 max-w-[82%] flex flex-col gap-2">
-                <ToolActivityChips events={toolEvents} />
-                <ThinkingDisclosure
-                  text={thinking}
-                  open={liveThinkingOpen}
-                  onOpenChange={setLiveThinkingOpen}
-                />
+            {showLiveActivity && (
+              <div className="flex gap-2.5">
+                <div className="w-8 shrink-0" aria-hidden />
+                <div className="min-w-0 max-w-[82%] flex flex-col gap-2">
+                  <ToolActivityChips events={toolEvents} />
+                  <ThinkingDisclosure
+                    text={thinking}
+                    open={liveThinkingOpen}
+                    onOpenChange={setLiveThinkingOpen}
+                  />
+                </div>
               </div>
-            </div>
+            )}
+            {isTyping && (
             <div role="status" aria-live="polite" className="flex gap-2.5">
             <div className="w-8 h-8 rounded-2xl flex items-center justify-center text-sm shrink-0"
               style={{
@@ -708,6 +727,7 @@ function ChatContent() {
               ))}
             </div>
             </div>
+            )}
           </div>
         )}
 

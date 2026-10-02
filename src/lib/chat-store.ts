@@ -469,16 +469,31 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
       // so the affordance goes back UP here and the attempt's own status label
       // replaces the dead one.
       //
-      // The turn's think and its chips go with it: a superseded attempt's
-      // transcript and its ✅/❌ row would otherwise stay attached above the
-      // answering attempt — most visibly on the exhaustion fallback, where the
-      // route announces target "exhausted" after six rounds of tool calls.
-      onAttempt: () => {
+      // The turn's THINK goes with a superseded attempt: its words are already
+      // on screen and retracted here, so a transcript belonging to them is
+      // fiction.
+      //
+      // The turn's CHIPS do not. The route announces an attempt before EVERY
+      // provider call, including the answering round — and that round runs no
+      // tools, so clearing on it erased the turn's activity with nothing left to
+      // repopulate it: the finished message was chip-less and a ❌ tool error was
+      // visible for a few seconds and then gone. Tool activity belongs to the
+      // TURN (the tools that gathered the answer belong to the answer); the one
+      // attempt that is not a provider call at all is the route's synthesized
+      // exhaustion answer, and it must start clean rather than inherit six
+      // rounds of ✅/❌ as if they described it.
+      onAttempt: ({ target }: { target?: string } = {}) => {
         streamedSoFar = "";
         awaiting = true;
         turnThinking = "";
-        turnToolEvents = [];
-        setState({ isTyping: true, statusLine: null, thinking: "", toolEvents: [] });
+        const clearsChips = target === "exhausted";
+        if (clearsChips) turnToolEvents = [];
+        setState({
+          isTyping: true,
+          statusLine: null,
+          thinking: "",
+          ...(clearsChips ? { toolEvents: [] } : {}),
+        });
         if (!bubbleOpen) return;
         setMessages((prev) =>
           prev.map((m) => (m.id === streamId ? { ...m, content: "" } : m)),

@@ -337,20 +337,49 @@ describe("chat page — thinking transcript + tool activity wiring", () => {
   }
 
   it("shows the chips and an open transcript under the dots, then collapses on the answer and keeps both on the finished message", async () => {
+    // The store hands the turn's activity to the finished bubble at finalize and
+    // only clears the live copy afterwards, and its server reconcile sits
+    // BETWEEN those two writes. Parking that read is what makes the handoff
+    // observable instead of batched away — without it there is no render in
+    // which both copies could coexist, and the guard would go untested.
+    let park = false;
+    let release: (() => void) | null = null;
+    const threadBody = () =>
+      new Response(JSON.stringify({ ok: true, messages: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    vi.stubGlobal("fetch", vi.fn(() => {
+      if (!park) return Promise.resolve(threadBody());
+      return new Promise<Response>((res) => { release = () => res(threadBody()); });
+    }));
+
     const s = pendingStream();
     const el = render(<ChatPage />);
     let send: Promise<void> | undefined;
     act(() => {
       send = inputProps.current!.onSendMessage("what's for dinner?");
     });
+    // The route's real frame order: an attempt frame precedes EVERY provider
+    // call, so the round that reached for the pantry and the ANSWERING round each
+    // announce one. A mock that never calls `onAttempt` asserts a frame order the
+    // route cannot produce — which is how the chips "passed" here while being
+    // unreachable in production.
     act(() => {
-      s.opts.onReasoning("The user wants dinner — check the pantry first.", "…");
+      s.opts.onAttempt({ round: 1, target: "t0" });
     });
     act(() => {
       s.opts.onToolEvent({ name: "get_pantry", state: "running" });
     });
     act(() => {
       s.opts.onToolEvent({ name: "get_pantry", state: "ok" });
+    });
+    // The answering round thinks for itself before it answers.
+    act(() => {
+      s.opts.onAttempt({ round: 2, target: "t0" });
+    });
+    act(() => {
+      s.opts.onReasoning("The user wants dinner — check the pantry first.", "…");
     });
 
     // LIVE: one chip per tool call (running then ok — NOT two chips), and the
@@ -360,17 +389,33 @@ describe("chat page — thinking transcript + tool activity wiring", () => {
     expect(el.textContent).toContain("The user wants dinner — check the pantry first.");
     expect(el.textContent).toContain("Consuela is thinking…");
 
+    // The answer's first token opens the bubble; the turn ends and the store
+    // parks on its reconcile with the chips already handed to the message.
+    act(() => {
+      s.opts.onToken("We have chicken and rice.", "We have chicken and rice.");
+    });
+    park = true;
+    s.resolve!({ content: "We have chicken and rice.", streamed: true });
+    for (let i = 0; i < 20 && !release; i += 1) {
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    }
+    expect(release, "the store parked on its reconcile read").not.toBeNull();
+    // The live copy is gone AND the message owns the chips — never both at once.
+    expect(el.textContent).toContain("We have chicken and rice.");
+    expect(el.querySelectorAll('[data-testid="tool-activity"]')).toHaveLength(1);
+    expect(el.querySelector('[data-state="ok"]')).not.toBeNull();
+
+    park = false;
+    release!();
     await act(async () => {
-      s.resolve!({ content: "We have chicken and rice.", streamed: true });
       await send;
     });
 
-    // The answer started → the transcript collapsed…
+    // The transcript collapsed on the answer…
     expect(el.textContent).not.toContain("The user wants dinner — check the pantry first.");
     expect(thinkingButton(el).textContent).toContain("Show thinking");
     // …and the chips + transcript stayed on the finished message.
-    expect(el.querySelector('[data-testid="tool-activity"]')).not.toBeNull();
-    expect(el.querySelector('[data-state="ok"]')).not.toBeNull();
+    expect(el.querySelectorAll('[data-testid="tool-activity"]')).toHaveLength(1);
 
     // Re-openable from the finished message.
     act(() => {
@@ -378,6 +423,40 @@ describe("chat page — thinking transcript + tool activity wiring", () => {
     });
     expect(el.textContent).toContain("The user wants dinner — check the pantry first.");
     expect(el.textContent).toContain("We have chicken and rice.");
+  });
+
+  it("keeps the turn's chips on screen while the answer streams, not only until its first token", async () => {
+    // `isTyping` drops on the answer's FIRST token, but the turn is still in
+    // flight and the finished bubble does not own the activity yet — it only
+    // takes it at finalize. Gating the live surfaces on `isTyping` therefore
+    // left a whole long answer with no chips anywhere, which is the window the
+    // reported "a tool error never comes back" symptom lives in.
+    const s = pendingStream();
+    const el = render(<ChatPage />);
+    act(() => {
+      void inputProps.current!.onSendMessage("what's in the pantry?");
+    });
+    act(() => {
+      s.opts.onAttempt({ round: 1, target: "t0" });
+    });
+    act(() => {
+      s.opts.onToolEvent({ name: "get_pantry", state: "error" });
+    });
+    act(() => {
+      s.opts.onAttempt({ round: 2, target: "t0" });
+    });
+    act(() => {
+      s.opts.onToken("I could not check the pantry.", "I could not check the pantry.");
+    });
+
+    expect(el.textContent).toContain("I could not check the pantry.");
+    expect(
+      el.querySelectorAll('[data-testid="tool-activity"] [data-state="error"]'),
+      "the chips survive the answer's first token",
+    ).toHaveLength(1);
+    // The dots are the one thing that DOES drop on the first token. Scoped to
+    // the bubbles: the signed-out banner is also a `role="status"` region.
+    expect(el.querySelector('[role="status"] .chat-dot')).toBeNull();
   });
 
   it("a transcript-less turn leaves no disclosure header behind", async () => {

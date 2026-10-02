@@ -464,19 +464,44 @@ describe("chat-store core", () => {
 // localStorage on every keystroke of the think — and come back on the next page
 // load as if it had been said.
 describe("chat-store — live thinking + tool activity state", () => {
+  /**
+   * The route's frame order for a turn: an attempt frame before EVERY provider
+   * call, so the round that runs tools and the ANSWERING round each get one. A
+   * mock that never calls `onAttempt` asserts an order the route cannot produce,
+   * and any assertion about the finished message's chips or transcript then
+   * passes for the wrong reason.
+   */
+  function turnScript(
+    answer: string,
+    rounds: { tools?: (api: any) => void; reply?: (api: any) => void },
+  ): (api: any) => Promise<{ content: string; streamed: boolean }> {
+    return async (api: any) => {
+      api.onAttempt?.({ round: 1, target: "t0" });
+      rounds.tools?.(api);
+      api.onAttempt?.({ round: 2, target: "t0" });
+      rounds.reply?.(api);
+      return { content: answer, streamed: true };
+    };
+  }
+
   /** Reasoning and a tool call, then the answer. Read INSIDE the stream so the
    *  mid-turn snapshot is observed, not the post-turn cleared one. */
   function thinkThenAnswer(answer = "Sure."): string[] {
     const live: string[] = [];
-    streamMock.fn.mockImplementation(async ({ onReasoning, onToolEvent, onToken }: any) => {
-      onReasoning?.("thinking", "thinking");
-      onToolEvent?.({ name: "get_weather", state: "running" });
-      onReasoning?.("thinking hard", " hard");
-      onToolEvent?.({ name: "get_weather", state: "ok" });
-      live.push(getSnapshot().thinking);
-      onToken(answer, answer);
-      return { content: answer, streamed: true };
-    });
+    streamMock.fn.mockImplementation(turnScript(answer, {
+      tools: (api) => {
+        api.onReasoning?.("thinking", "thinking");
+        api.onToolEvent?.({ name: "get_weather", state: "running" });
+        api.onToolEvent?.({ name: "get_weather", state: "ok" });
+        live.push(getSnapshot().thinking);
+      },
+      reply: (api) => {
+        // The answering round thinks for itself, so the transcript that lands on
+        // the finished message is its own rather than the tool round's.
+        api.onReasoning?.("thinking hard", "thinking hard");
+        api.onToken(answer, answer);
+      },
+    }));
     return live;
   }
 
@@ -484,18 +509,19 @@ describe("chat-store — live thinking + tool activity state", () => {
     const live = thinkThenAnswer();
     await ensureHydrated();
     await send("hi", SPEAKER);
-    expect(live).toEqual(["thinking hard"]);
+    expect(live).toEqual(["thinking"]);
   });
 
   it("records tool activity as it arrives and keeps the running chip until the result", async () => {
     const seen: unknown[][] = [];
-    streamMock.fn.mockImplementation(async ({ onToolEvent, onToken }: any) => {
-      onToolEvent?.({ name: "get_weather", state: "running" });
-      seen.push(getSnapshot().toolEvents.map((e: any) => e.state));
-      onToolEvent?.({ name: "get_weather", state: "ok" });
-      onToken("Rain.", "Rain.");
-      return { content: "Rain.", streamed: true };
-    });
+    streamMock.fn.mockImplementation(turnScript("Rain.", {
+      tools: (api) => {
+        api.onToolEvent?.({ name: "get_weather", state: "running" });
+        seen.push(getSnapshot().toolEvents.map((e: any) => e.state));
+        api.onToolEvent?.({ name: "get_weather", state: "ok" });
+      },
+      reply: (api) => api.onToken("Rain.", "Rain."),
+    }));
     await ensureHydrated();
     await send("hi", SPEAKER);
     expect(seen).toEqual([["running"]]);
@@ -507,14 +533,15 @@ describe("chat-store — live thinking + tool activity state", () => {
     // The route writes a `running` frame per call before any call runs, then one
     // result frame per call in call order. Rendering both would show the same
     // tool twice — once spinning forever next to its own answer.
-    streamMock.fn.mockImplementation(async ({ onToolEvent, onToken }: any) => {
-      onToolEvent?.({ name: "get_weather", state: "running" });
-      onToolEvent?.({ name: "get_pantry", state: "running" });
-      onToolEvent?.({ name: "get_weather", state: "ok" });
-      onToolEvent?.({ name: "get_pantry", state: "error" });
-      onToken("Rain.", "Rain.");
-      return { content: "Rain.", streamed: true };
-    });
+    streamMock.fn.mockImplementation(turnScript("Rain.", {
+      tools: (api) => {
+        api.onToolEvent?.({ name: "get_weather", state: "running" });
+        api.onToolEvent?.({ name: "get_pantry", state: "running" });
+        api.onToolEvent?.({ name: "get_weather", state: "ok" });
+        api.onToolEvent?.({ name: "get_pantry", state: "error" });
+      },
+      reply: (api) => api.onToken("Rain.", "Rain."),
+    }));
     await ensureHydrated();
     await send("hi", SPEAKER);
     expect(getSnapshot().messages.find((m) => m.content === "Rain.")?.toolEvents).toEqual([
@@ -523,7 +550,35 @@ describe("chat-store — live thinking + tool activity state", () => {
     ]);
   });
 
-  it("keeps the reasoning transcript and tool chips in memory on the finished message", async () => {
+  it("keeps the turn's tool activity on the answer, even though the ANSWERING round announces its own attempt", async () => {
+    // The route writes an attempt frame before EVERY provider call — and the
+    // answering round is a provider call like any other, so it gets one too.
+    // Resetting the turn's chips on it made them unreachable: the answering
+    // round runs no tools, so nothing ever put them back and the finished
+    // message was chip-less (a ❌ tool error was visible for a few seconds and
+    // then erased with no evidence on the answer).
+    //
+    // Frame order below is the route's real one: attempt → the round's tool
+    // frames → the answering round's attempt → its tokens.
+    const atAnswerStart: number[] = [];
+    streamMock.fn.mockImplementation(async ({ onToolEvent, onAttempt, onToken }: any) => {
+      onAttempt?.({ round: 1, target: "t0" });
+      onToolEvent?.({ name: "get_pantry", state: "running" });
+      onToolEvent?.({ name: "get_pantry", state: "error" });
+      onAttempt?.({ round: 2, target: "t0" });
+      atAnswerStart.push(getSnapshot().toolEvents.length);
+      onToken("I could not check the pantry.", "I could not check the pantry.");
+      return { content: "I could not check the pantry.", streamed: true };
+    });
+    await ensureHydrated();
+    await send("what is in the pantry?", SPEAKER);
+    expect(atAnswerStart, "the chips survive the answering round's attempt").toEqual([1]);
+    const reply = assistantBubbles().at(-1)!;
+    expect(reply.content).toBe("I could not check the pantry.");
+    expect(reply.toolEvents).toEqual([{ name: "get_pantry", state: "error" }]);
+  });
+
+  it("keeps the transcript and chips in memory on the finished message", async () => {
     thinkThenAnswer();
     await ensureHydrated();
     await send("hi", SPEAKER);
@@ -572,11 +627,12 @@ describe("chat-store — live thinking + tool activity state", () => {
       return originalSetItem.call(this, key, value);
     } as typeof Storage.prototype.setItem);
     try {
-      streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
-        onReasoning?.("secret middle of the think", "secret middle of the think");
-        onToken("Sure.", "Sure.");
-        return { content: "Sure.", streamed: true };
-      });
+      streamMock.fn.mockImplementation(turnScript("Sure.", {
+        reply: (api) => {
+          api.onReasoning?.("secret middle of the think", "secret middle of the think");
+          api.onToken("Sure.", "Sure.");
+        },
+      }));
       await ensureHydrated();
       await send("hi", SPEAKER);
       expect(written.length).toBeGreaterThan(1);
@@ -595,13 +651,16 @@ describe("chat-store — live thinking + tool activity state", () => {
     // contains the first turn's finished reply — the row that carries the
     // transcript.
     const histories: string[] = [];
-    streamMock.fn.mockImplementation(async (opts: any) => {
-      histories.push(JSON.stringify(opts.history));
-      opts.onReasoning?.("thinking hard", "thinking hard");
-      opts.onToolEvent?.({ name: "get_weather", state: "ok" });
-      opts.onToken("Sure.", "Sure.");
-      return { content: "Sure.", streamed: true };
-    });
+    streamMock.fn.mockImplementation(turnScript("Sure.", {
+      tools: (api) => {
+        histories.push(JSON.stringify(api.history));
+        api.onToolEvent?.({ name: "get_weather", state: "ok" });
+      },
+      reply: (api) => {
+        api.onReasoning?.("thinking hard", "thinking hard");
+        api.onToken("Sure.", "Sure.");
+      },
+    }));
     await ensureHydrated();
     await send("one", SPEAKER);
     await send("two", SPEAKER);
@@ -613,22 +672,26 @@ describe("chat-store — live thinking + tool activity state", () => {
 
   it("clears thinking state at the start of the next turn", async () => {
     const starts: Array<{ thinking: string; chips: number }> = [];
-    streamMock.fn.mockImplementation(async ({ onReasoning, onToolEvent, onToken }: any) => {
-      onReasoning?.("first turn", "first turn");
-      onToolEvent?.({ name: "get_weather", state: "running" });
-      onToken("First answer.", "First answer.");
-      return { content: "First answer.", streamed: true };
-    });
+    streamMock.fn.mockImplementation(turnScript("First answer.", {
+      tools: (api) => api.onToolEvent?.({ name: "get_weather", state: "running" }),
+      reply: (api) => {
+        api.onReasoning?.("first turn", "first turn");
+        api.onToken("First answer.", "First answer.");
+      },
+    }));
     await ensureHydrated();
     await send("one", SPEAKER);
     // Turn two reads the snapshot BEFORE it emits anything: a transcript left
     // over from turn one would be showing under this turn's dots.
-    streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
-      starts.push({ thinking: getSnapshot().thinking, chips: getSnapshot().toolEvents.length });
-      onReasoning?.("second turn", "second turn");
-      onToken("Second answer.", "Second answer.");
-      return { content: "Second answer.", streamed: true };
-    });
+    streamMock.fn.mockImplementation(turnScript("Second answer.", {
+      tools: (api) => {
+        starts.push({ thinking: getSnapshot().thinking, chips: getSnapshot().toolEvents.length });
+      },
+      reply: (api) => {
+        api.onReasoning?.("second turn", "second turn");
+        api.onToken("Second answer.", "Second answer.");
+      },
+    }));
     await send("two", SPEAKER);
     expect(starts).toEqual([{ thinking: "", chips: 0 }]);
     // Cleared again once the turn ends — a finished turn shows its transcript on
@@ -647,7 +710,7 @@ describe("chat-store — live thinking + tool activity state", () => {
     // above the "I ran out of steps" answer as if they belonged to it.
     const atFailover: { thinking: string; chips: number; text: string }[] = [];
     streamMock.fn.mockImplementation(async ({ onReasoning, onToolEvent, onAttempt, onToken }: any) => {
-      onAttempt?.({ round: 1, target: "brain" });
+      onAttempt?.({ round: 1, target: "t0" });
       onReasoning?.("dead target thinking", "dead target thinking");
       onToolEvent?.({ name: "get_pantry", state: "running" });
       onToolEvent?.({ name: "get_pantry", state: "ok" });
@@ -678,9 +741,11 @@ describe("chat-store — live thinking + tool activity state", () => {
     // The stop path is the other place a finished bubble is written. A stopped
     // turn persisted nothing, so dropping its transcript here would lose it
     // from a message the user is looking at.
-    streamMock.fn.mockImplementation(({ onReasoning, onToolEvent, onToken, signal }: any) => {
-      onReasoning?.("partial think", "partial think");
+    streamMock.fn.mockImplementation(({ onAttempt, onReasoning, onToolEvent, onToken, signal }: any) => {
+      onAttempt?.({ round: 1, target: "t0" });
       onToolEvent?.({ name: "get_weather", state: "running" });
+      onAttempt?.({ round: 2, target: "t0" });
+      onReasoning?.("partial think", "partial think");
       onToken("partial", "partial");
       return new Promise((_res, rej) => {
         const e = new Error("Generation stopped");
@@ -707,7 +772,8 @@ describe("chat-store — live thinking + tool activity state", () => {
     // arriving is not an answer. Read mid-stream — after the turn ends the
     // state is cleared, so a post-send snapshot could not tell.
     const seen: Array<{ thinking: string; isTyping: boolean; bubbles: number }> = [];
-    streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
+    streamMock.fn.mockImplementation(async ({ onAttempt, onReasoning, onToken }: any) => {
+      onAttempt?.({ round: 1, target: "t0" });
       onReasoning?.("thinking", "thinking");
       seen.push({ thinking: getSnapshot().thinking, isTyping: getSnapshot().isTyping, bubbles: assistantBubbles().length });
       onReasoning?.("thinking hard", " hard");
@@ -732,7 +798,8 @@ describe("chat-store — live thinking + tool activity state", () => {
     // empty/non-string deltas (chat-stream.test.ts), so the store trusts what it
     // is handed and does not re-validate it.
     const seen: string[] = [];
-    streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
+    streamMock.fn.mockImplementation(async ({ onAttempt, onReasoning, onToken }: any) => {
+      onAttempt?.({ round: 1, target: "t0" });
       onReasoning?.("kept", "kept");
       onReasoning?.("kept and grown", " and grown");
       seen.push(getSnapshot().thinking);
@@ -745,7 +812,8 @@ describe("chat-store — live thinking + tool activity state", () => {
   });
 
   it("does not leave live thinking state behind when the turn fails outright", async () => {
-    streamMock.fn.mockImplementation(async ({ onReasoning, onToken }: any) => {
+    streamMock.fn.mockImplementation(async ({ onAttempt, onReasoning, onToken }: any) => {
+      onAttempt?.({ round: 1, target: "t0" });
       onReasoning?.("thinking hard", "thinking hard");
       onToken("half an answer", "half an answer");
       throw new Error("boom");

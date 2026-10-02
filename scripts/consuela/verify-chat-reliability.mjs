@@ -2,10 +2,15 @@
 /**
  * Chat reliability probe (2026-10-01 plan, Task 18).
  *
- * Covers the shipped wire-contract behaviours of ARCHITECTURE.md §5.7: the
- * stale-optimistic-id collision, the reasoning transcript, tool-activity chips,
- * the (round x target) attempt reset, verbatim route errors, and a mid-stream
- * transport drop.
+ * Covers the CLIENT half of the ARCHITECTURE.md §5.7 wire contract: the
+ * stale-optimistic-id collision, the reasoning transcript, tool-activity chips
+ * surviving onto the settled message, the (round x target) attempt reset,
+ * verbatim route errors, and a mid-stream transport drop.
+ *
+ * NOT the route: `/api/hermes/chat` is 307'd wholesale to the loopback server
+ * below, so no `route.ts` code runs here. The frame SEQUENCES are transcribed
+ * from the route, which is why they matter — a frame order the route cannot
+ * produce would make every assertion below vacuous.
  *
  * WHY A REAL LOOPBACK SSE SERVER INSTEAD OF `route.fulfill`
  * ---------------------------------------------------------
@@ -398,6 +403,31 @@ function bubblesOverlap(page, reply, sentinel) {
   }, { reply, sentinel });
 }
 
+/**
+ * Whether the error chip lives in the SAME rendered message row as the reply.
+ *
+ * `bubblesOverlap` above matches a sentinel by its exact text, which a chip
+ * cannot offer: the chip span is not a text leaf (it carries a glyph span and an
+ * sr-only span), and its label is only part of its `textContent`. So the chip is
+ * located by selector and the reply by text, then both are walked up to the
+ * `space-y-2` content column `MessageRow` renders.
+ */
+async function chipSharesReplyRow(page, reply) {
+  return page.evaluate(({ reply: a, selector }) => {
+    let replyLeaf = null;
+    for (const node of document.querySelectorAll("*")) {
+      if (node.children.length === 0 && (node.textContent ?? "").trim() === a) replyLeaf = node;
+    }
+    const chip = document.querySelector(selector);
+    const replyRow = replyLeaf?.closest("div.space-y-2") ?? null;
+    const chipRow = chip?.closest("div.space-y-2") ?? null;
+    return {
+      shared: replyRow !== null && chipRow !== null && replyRow === chipRow,
+      detail: !replyLeaf ? "no reply bubble" : !chip ? "no error chip" : "",
+    };
+  }, { reply, selector: '[data-testid="tool-activity"] [data-state="error"]' });
+}
+
 /** Scenario 1 — the headline bug: a prior session's rows must not be overwritten. */
 async function scenarioStaleIdCollision() {
   const STALE_ASSISTANT = "stale-assistant-row-from-yesterday";
@@ -499,6 +529,11 @@ async function scenarioToolError() {
       { frame: 'event: attempt\ndata: {"round":1,"target":"t0"}\n\n' },
       { frame: 'event: tool\ndata: {"name":"get_pantry","state":"running"}\n\n' },
       { frame: 'event: tool\ndata: {"name":"get_pantry","state":"error"}\n\n' },
+      // The ANSWERING round announces its own attempt before its first token —
+      // the route writes one before EVERY provider call. Its chips and the
+      // answering round's attempt are separate things, and conflating them is
+      // what erased this error off the reply.
+      { frame: 'event: attempt\ndata: {"round":2,"target":"t0"}\n\n' },
       { frame: `data: {"t":"${REPLY}"}\n\n`, gate: "answer-token" },
       { frame: "data: [DONE]\n\n" },
     ],
@@ -524,6 +559,25 @@ async function scenarioToolError() {
   sse.openGate("answer-token");
   await waitForText(page, REPLY);
   check("tool error: the honest reply still renders", (await countText(page, REPLY)) > 0);
+
+  // The chips must still be there AFTER the turn settles. The answering round's
+  // attempt frame used to clear them, so a tool error was visible for a few
+  // seconds and then vanished with no evidence left on the answer.
+  await page.getByTitle("Send message").waitFor({ state: "visible", timeout: 30_000 });
+  check(
+    "tool error: the error chip is still on the SETTLED reply, not just live",
+    (await page.locator('[data-testid="tool-activity"] [data-state="error"]').count()) > 0,
+  );
+  check(
+    "tool error: the live copy is gone, so the chips are not rendered twice",
+    (await page.locator('[data-testid="tool-activity"]').count()) === 1,
+  );
+  const onReplyRow = await chipSharesReplyRow(page, REPLY);
+  check(
+    "tool error: the chip sits on the SAME bubble as the answer",
+    onReplyRow.shared,
+    onReplyRow.detail,
+  );
 
   const rows = await persistedRows(page);
   check(
