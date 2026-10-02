@@ -2575,7 +2575,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "get_hall_of_fame",
-      description: "Get the family's Hall of Fame: each enshrined member, the week they won it, their rank, points and prize. Newest weeks first.",
+      description: "Get the family's Hall of Fame: each enshrined member, the week they won it, their rank, points and prize. Newest weeks first, then rank order (1, 2, 3) within a week.",
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
@@ -2583,15 +2583,34 @@ const TOOLS: Tool[] = [
       // photo-avatar data URLs as members.emoji, and get_leaderboard's comment
       // records that payload as a verified live cause of the provider's
       // "snag connecting to my brain" request-limit failure.
-      let rows: any[] = [];
+      //
+      // The read must also degrade HONESTLY: `[]` for a PocketBase outage reads
+      // as "nobody is enshrined yet" — a confident "no" to a kid asking "am I
+      // in the hall of fame?". Same `| null` idiom as liveWeekArchive /
+      // liveRewards: null means the read failed, [] means the hall is empty.
+      let rows: any[] | null = null;
       try {
         rows = await withAdmin(async (pb) => pb.collection("hall_of_fame").getFullList({ requestKey: null }));
       } catch {
-        rows = [];
+        rows = null;
       }
-      const entries = (Array.isArray(rows) ? rows : [])
+      if (!Array.isArray(rows)) {
+        return summarize({ error: "hall of fame unavailable — do not guess who is enshrined", count: 0, entries: [] });
+      }
+      // Newest week first, then podium order WITHIN the week — otherwise "who
+      // won last week?" can surface rank 2 first, because PB's return order is
+      // not a ranking.
+      const rankKey = (value: unknown) => {
+        if (value === null || value === undefined || value === "") return Number.MAX_SAFE_INTEGER;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+      };
+      const entries = rows
         .slice()
-        .sort((a: any, b: any) => String(b.weekStart || "").localeCompare(String(a.weekStart || "")))
+        .sort((a: any, b: any) => {
+          const byWeek = String(b.weekStart || "").localeCompare(String(a.weekStart || ""));
+          return byWeek !== 0 ? byWeek : rankKey(a.rank) - rankKey(b.rank);
+        })
         .map((r: any) => ({
           member: r.member,
           emoji: textEmoji(r.emoji),
@@ -2653,7 +2672,9 @@ const TOOLS: Tool[] = [
           return {
             id: branch.id,
             name: branch.name,
-            icon: branch.icon,
+            // Emoji-adjacent, so it rides textEmoji like members/hall emojis —
+            // a branch icon is ordinary text today, and must stay payload-free.
+            icon: textEmoji(branch.icon),
             category: branch.category,
             totalQuests: branchQuests.length,
             completedQuests: completed,

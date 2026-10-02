@@ -89,17 +89,24 @@ const h = vi.hoisted(() => {
     failReads,
     writes,
     pb,
+    // PB auth is its own failure mode: the throwing reader must log it too,
+    // not just a failed query.
+    failAuth: false,
     reset() {
       for (const key of Object.keys(rows)) delete rows[key];
       failReads.clear();
       writes.length = 0;
+      (h as any).failAuth = false;
     },
   };
 });
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: async (fn: any) => fn(h.pb),
-  getAuthedPB: async () => h.pb,
+  getAuthedPB: async () => {
+    if (h.failAuth) throw new Error("pb auth down");
+    return h.pb;
+  },
 }));
 
 vi.mock("@/db", () => ({
@@ -128,10 +135,17 @@ import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
 const KID = { source: "hermes" as const, caller: { memberId: "emily", name: "Emily", role: "child" } };
 const PARENT = { source: "hermes" as const, caller: { memberId: "rebecca", name: "Rebecca", role: "parent" } };
 
-async function runTool(name: string, args: Record<string, any> = {}, context?: any) {
+// The RAW payload the model actually receives. Assertions about "what the model
+// can see" must use this: `JSON.stringify(null)` is "null", so an assertion
+// built from a null result can never fail.
+async function runToolRaw(name: string, args: Record<string, any> = {}, context?: any) {
   const tool = getTool(name);
   expect(tool, `tool "${name}" must be registered`).toBeDefined();
-  return JSON.parse(await tool!.handler(args, context));
+  return tool!.handler(args, context);
+}
+
+async function runTool(name: string, args: Record<string, any> = {}, context?: any) {
+  return JSON.parse(await runToolRaw(name, args, context));
 }
 
 const profile = (over: Record<string, any> = {}) => ({
@@ -194,6 +208,18 @@ describe("get_skill_tree — a kid always gets their OWN tree, read-only", () =>
     expect(h.writes).toEqual([]);
   });
 
+  it("sanitizes a branch icon that carries a photo data URL", async () => {
+    h.rows.skill_branches = [
+      { id: "b1", name: "Math Explorer", icon: `data:image/png;base64,${"C".repeat(2000)}`, unlockLevel: 1, unlockXP: 0, prerequisiteBranches: [], order: 0 },
+    ];
+    h.rows.quests = [];
+
+    const raw = await runToolRaw("get_skill_tree", {}, KID);
+
+    expect(raw).not.toContain("data:image");
+    expect(JSON.parse(raw).branches[0].icon).toBe("👤");
+  });
+
   it("ignores a model-supplied member name — a kid's tree is always their own", async () => {
     h.rows.skill_tree_profiles = [
       profile({ id: "legacy-1", userId: "demo-user", totalXP: 999 }),
@@ -234,10 +260,14 @@ describe("get_skill_tree — a kid always gets their OWN tree, read-only", () =>
     h.rows.skill_tree_profiles = [profile({ id: "legacy-1", userId: "demo-user", totalXP: 999 })];
 
     for (const context of [undefined, { source: "hermes" as const }, { source: "hermes" as const, caller: { memberId: "", name: "  ", role: "child" } }]) {
-      const res = await runTool("get_skill_tree", {}, context);
+      const raw = await runToolRaw("get_skill_tree", {}, context);
+      // Checked on the raw payload — a re-stringified parse of a null would be
+      // "null" and pass no matter what leaked.
+      expect(raw).not.toContain("999");
+      expect(raw).not.toContain("demo-user");
+      const res = JSON.parse(raw);
       expect(res.error).toBeTruthy();
       expect(res.profile).toBeUndefined();
-      expect(JSON.stringify(res)).not.toContain("999");
     }
   });
 });
@@ -260,7 +290,6 @@ describe("readSkillTreeProfile — never creates, never serves the legacy namesp
     const res = await (liveReads as any).readSkillTreeProfile("demo-user");
 
     expect(res).toBeNull();
-    expect(JSON.stringify(res)).not.toContain("999");
     expect(h.writes).toEqual([]);
   });
 
@@ -358,6 +387,18 @@ describe("readUserCapsules — the throwing reader behind liveTimeCapsules", () 
     await expect(readUserCapsules("Emily")).rejects.toThrow(/read failed/);
   });
 
+  it("logs a PocketBase AUTH failure too — no silent throw", async () => {
+    h.failAuth = true;
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      await expect(readUserCapsules("Emily")).rejects.toThrow(/auth down/);
+      expect(logged).toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it("leaves getUserCapsules' existing []-on-failure contract intact", async () => {
     h.failReads.add("time_capsules");
 
@@ -424,12 +465,39 @@ describe("get_hall_of_fame — photo avatars must never reach the provider", () 
     expect(res.entries[0]).toMatchObject({ member: "Emily", rank: 1, points: 40, prize: "Movie night" });
   });
 
-  it("degrades to an empty hall when the read fails, without inventing winners", async () => {
+  it("reports a failed read instead of a confident empty hall", async () => {
     h.failReads.add("hall_of_fame");
 
     const res = await runTool("get_hall_of_fame", {}, KID);
 
+    // "Nobody is enshrined" and "we could not look" must not look the same to
+    // a kid asking "am I in the hall of fame?".
+    expect(res.error).toMatch(/do not guess/i);
+    expect(res.count).toBe(0);
     expect(res.entries).toEqual([]);
+  });
+
+  it("reports an honestly empty hall (read succeeded) with no error", async () => {
+    h.rows.hall_of_fame = [];
+
+    const res = await runTool("get_hall_of_fame", {}, KID);
+
+    expect(res.error).toBeUndefined();
+    expect(res.count).toBe(0);
+    expect(res.entries).toEqual([]);
+  });
+
+  it("orders a multi-podium week by rank, not by PocketBase's return order", async () => {
+    h.rows.hall_of_fame = [
+      hallRow({ id: "third", member: "Emily", rank: 3, points: 10 }),
+      hallRow({ id: "first", member: "Rebecca", rank: 1, points: 30 }),
+      hallRow({ id: "second", member: "Bailey", rank: 2, points: 20 }),
+    ];
+
+    const res = await runTool("get_hall_of_fame", {}, KID);
+
+    // Same weekStart, so the week sort alone leaves PB's order — rank 3 first.
+    expect(res.entries.map((e: any) => e.rank)).toEqual([1, 2, 3]);
   });
 });
 

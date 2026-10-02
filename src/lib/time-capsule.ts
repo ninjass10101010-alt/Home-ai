@@ -19,9 +19,11 @@ import { getDaysUntilUnlock, isCapsuleUnlocked } from '@/db/features/time-capsul
  * confident "you have no capsules".
  */
 export async function readUserCapsules(userId: string): Promise<TimeCapsule[]> {
-  const pb = await getAuthedPB();
-
+  // getAuthedPB sits INSIDE the try: a PB auth outage is a read failure too,
+  // and the controller's contract is that the throwing path and the
+  // []-returning wrapper are distinguishable in the logs — not one silent.
   try {
+    const pb = await getAuthedPB();
     // F8a — a member sees capsules they created/were sent under their session
     // name AND any legacy demo-user capsules (creator or recipient).
     const memberId = sanitizeUserId(userId);
