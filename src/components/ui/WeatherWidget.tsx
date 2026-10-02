@@ -12,7 +12,7 @@ import { db } from "@/db";
 import { moonPhase, moonPhaseName } from "@/lib/weather-astro";
 import { mixHex, posterTextSurface, weatherHeaderTextSurfaces } from "@/lib/weather-contrast";
 import { skyPhase, skySceneKey } from "@/lib/weather-scene-params";
-import { SKY, INK, GLASS, GLASS_NIGHT } from "./wx-tokens";
+import { SKY, GLASS, GLASS_NIGHT } from "./wx-tokens";
 import { SceneLayers, Condition, MonsterDigit, wmoToScene, dayCondition, conditionPresentation, wmoCondition, posterCarriesSun, useWxMotionOk } from "./WxToys";
 import { useWallMode } from "@/hooks/useWallMode";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";

@@ -602,24 +602,49 @@ export function dayCondition(condition: string): ConditionCode {
 // silhouettes; only the hero digits carry faces (one sleeping face per
 // glyph, one peering eyeball across the whole hero number).
 
+/** WCAG 1.4.11 gate source (F2 review fix): the tone that carries each
+    condition glyph's main silhouette against the shipped SKY field(s) it
+    renders on — the ink/blue outline on the light washes, the white fill on
+    the dark storm/heavy-snow washes. `monster-skin.test.ts` pins every entry
+    against `posterTextSurface` stops at ≥ 3:1, so a field or tone retune
+    fails the gate. */
+export const CONDITION_SILHOUETTE_TONES: Record<ConditionCode, { light: string; dark?: string }> = {
+  clear: { light: MONSTER.inkBlue },
+  partly: { light: MONSTER.inkBlue },
+  "partly-night": { light: MONSTER.inkBlue },
+  cloudy: { light: MONSTER.inkBlue },
+  rain: { light: MONSTER.inkBlue },
+  storm: { light: MONSTER.glint },
+  snow: { light: MONSTER.blue, dark: MONSTER.glint },
+  fog: { light: MONSTER.inkBlue },
+  night: { light: MONSTER.inkBlue },
+};
+
 function SunG() {
+  const rays = Array.from({ length: 8 }, (_, i) => {
+    const ang = (i * Math.PI) / 4;
+    return {
+      x1: 50 + Math.cos(ang) * 31,
+      y1: 46 + Math.sin(ang) * 31,
+      x2: 50 + Math.cos(ang) * 40,
+      y2: 46 + Math.sin(ang) * 40,
+    };
+  });
   return (
     <>
-      {Array.from({ length: 8 }, (_, i) => {
-        const ang = (i * Math.PI) / 4;
-        return (
-          <line
-            key={i}
-            x1={50 + Math.cos(ang) * 31}
-            y1={46 + Math.sin(ang) * 31}
-            x2={50 + Math.cos(ang) * 40}
-            y2={46 + Math.sin(ang) * 40}
-            stroke={MONSTER.orange}
-            strokeWidth="7"
-            strokeLinecap="round"
-          />
-        );
-      })}
+      {/* Ink under-stroke: the sun body sits at ~1:1 on the light clear/dawn/
+          dusk washes, so the silhouette's 3:1 carrier is its ink outline. */}
+      <g stroke={MONSTER.inkBlue} strokeWidth="12" strokeLinecap="round">
+        {rays.map((ray, i) => (
+          <line key={i} {...ray} />
+        ))}
+      </g>
+      <g stroke={MONSTER.orange} strokeWidth="7" strokeLinecap="round">
+        {rays.map((ray, i) => (
+          <line key={i} {...ray} />
+        ))}
+      </g>
+      <circle cx="50" cy="46" r="24" fill={MONSTER.inkBlue} stroke={MONSTER.inkBlue} strokeWidth="8" />
       <circle cx="50" cy="46" r="24" fill={MONSTER.orange} />
       <circle cx="67" cy="63" r="6" fill={MONSTER.knotOrange} />
       <ellipse cx="42" cy="37" rx="7" ry="4.5" fill={MONSTER.glint} opacity="0.5" />
@@ -627,17 +652,31 @@ function SunG() {
   );
 }
 
-type CloudTone = "day" | "night" | "snow";
+type CloudTone = "day" | "night" | "snow" | "storm";
 
-function CloudG({ tone }: { tone: CloudTone }) {
-  const main = tone === "night" ? MONSTER.purple : tone === "snow" ? MONSTER.glint : MONSTER.teal;
-  const shade = tone === "snow" ? MONSTER.teal : MONSTER.blue;
+function CloudBody({ fill }: { fill: string }) {
   return (
     <>
-      <circle cx="34" cy="42" r="16" fill={main} />
-      <circle cx="55" cy="30" r="21" fill={main} />
-      <circle cx="74" cy="44" r="14" fill={main} />
-      <rect x="20" y="38" width="58" height="24" rx="12" fill={main} />
+      <circle cx="34" cy="42" r="16" fill={fill} />
+      <circle cx="55" cy="30" r="21" fill={fill} />
+      <circle cx="74" cy="44" r="14" fill={fill} />
+      <rect x="20" y="38" width="58" height="24" rx="12" fill={fill} />
+    </>
+  );
+}
+
+function CloudG({ tone }: { tone: CloudTone }) {
+  // Light washes (day/night/light-snow) carry an ink/blue outline under the
+  // fill; storm + heavy-snow are dark, so the white fill itself carries 3:1.
+  const main = tone === "night" ? MONSTER.purple : tone === "snow" || tone === "storm" ? MONSTER.glint : MONSTER.blue;
+  const outline = tone === "snow" ? MONSTER.blue : MONSTER.inkBlue;
+  const shade = tone === "day" ? MONSTER.teal : tone === "snow" ? MONSTER.blue : tone === "night" ? MONSTER.blue : MONSTER.purple;
+  return (
+    <>
+      <g fill={outline} stroke={outline} strokeWidth="8">
+        <CloudBody fill={outline} />
+      </g>
+      <CloudBody fill={main} />
       <circle cx="38" cy="56" r="11" fill={shade} opacity="0.9" />
       <circle cx="62" cy="58" r="8" fill={shade} opacity="0.75" />
       <circle cx="48" cy="22" r="5" fill={MONSTER.glint} opacity="0.5" />
@@ -646,12 +685,24 @@ function CloudG({ tone }: { tone: CloudTone }) {
 }
 
 function DropsG() {
+  const drops = [
+    { x1: 36, y1: 60, x2: 36, y2: 74, stroke: MONSTER.blue },
+    { x1: 52, y1: 66, x2: 52, y2: 84, stroke: MONSTER.teal },
+    { x1: 68, y1: 60, x2: 68, y2: 74, stroke: MONSTER.blue },
+  ];
   return (
-    <g strokeLinecap="round" strokeWidth="9">
-      <line x1="36" y1="60" x2="36" y2="74" stroke={MONSTER.blue} />
-      <line x1="52" y1="66" x2="52" y2="84" stroke={MONSTER.teal} />
-      <line x1="68" y1="60" x2="68" y2="74" stroke={MONSTER.blue} />
-    </g>
+    <>
+      <g stroke={MONSTER.inkBlue} strokeWidth="14" strokeLinecap="round">
+        {drops.map((drop, i) => (
+          <line key={i} x1={drop.x1} y1={drop.y1} x2={drop.x2} y2={drop.y2} />
+        ))}
+      </g>
+      <g strokeLinecap="round" strokeWidth="9">
+        {drops.map((drop, i) => (
+          <line key={i} x1={drop.x1} y1={drop.y1} x2={drop.x2} y2={drop.y2} stroke={drop.stroke} />
+        ))}
+      </g>
+    </>
   );
 }
 
@@ -672,23 +723,48 @@ function BoltG() {
 }
 
 function SnowflakeG({ x, y, s = 9 }: { x: number; y: number; s?: number }) {
+  const spokes = [0, 60, 120].map((d) => {
+    const rad = (d * Math.PI) / 180;
+    return { x1: x - Math.cos(rad) * s, y1: y - Math.sin(rad) * s, x2: x + Math.cos(rad) * s, y2: y + Math.sin(rad) * s };
+  });
+  // Blue outline + white core: blue carries the light snow wash, the white
+  // core carries the dark heavy-snow wash — no white-on-white glint left.
   return (
-    <g stroke={MONSTER.glint} strokeWidth="3.5" strokeLinecap="round">
-      {[0, 60, 120].map((d) => {
-        const rad = (d * Math.PI) / 180;
-        return <line key={d} x1={x - Math.cos(rad) * s} y1={y - Math.sin(rad) * s} x2={x + Math.cos(rad) * s} y2={y + Math.sin(rad) * s} />;
-      })}
-      <circle cx={x} cy={y} r="3.2" fill={MONSTER.teal} stroke="none" />
-    </g>
+    <>
+      <g stroke={MONSTER.blue} strokeWidth="8" strokeLinecap="round">
+        {spokes.map((spoke, i) => (
+          <line key={i} {...spoke} />
+        ))}
+      </g>
+      <g stroke={MONSTER.glint} strokeWidth="3.5" strokeLinecap="round">
+        {spokes.map((spoke, i) => (
+          <line key={i} {...spoke} />
+        ))}
+      </g>
+      <circle cx={x} cy={y} r="4.2" fill={MONSTER.blue} />
+      <circle cx={x} cy={y} r="3.2" fill={MONSTER.glint} />
+    </>
   );
 }
 
 function FogG() {
+  const bars = [
+    { x1: 24, y1: 16, x2: 80, y2: 16, stroke: MONSTER.purple },
+    { x1: 32, y1: 34, x2: 76, y2: 34, stroke: MONSTER.teal },
+    { x1: 26, y1: 52, x2: 62, y2: 52, stroke: MONSTER.blue },
+  ];
   return (
     <>
-      <line x1="24" y1="16" x2="80" y2="16" stroke={MONSTER.purple} strokeWidth="12" strokeLinecap="round" />
-      <line x1="32" y1="34" x2="76" y2="34" stroke={MONSTER.teal} strokeWidth="12" strokeLinecap="round" />
-      <line x1="26" y1="52" x2="62" y2="52" stroke={MONSTER.blue} strokeWidth="12" strokeLinecap="round" />
+      <g stroke={MONSTER.inkBlue} strokeWidth="15" strokeLinecap="round">
+        {bars.map((bar, i) => (
+          <line key={i} x1={bar.x1} y1={bar.y1} x2={bar.x2} y2={bar.y2} />
+        ))}
+      </g>
+      <g strokeLinecap="round" strokeWidth="12">
+        {bars.map((bar, i) => (
+          <line key={i} x1={bar.x1} y1={bar.y1} x2={bar.x2} y2={bar.y2} stroke={bar.stroke} />
+        ))}
+      </g>
       <rect x="32" y="12" width="14" height="5" rx="2.5" fill={MONSTER.glint} opacity="0.5" />
       <rect x="40" y="30" width="12" height="5" rx="2.5" fill={MONSTER.glint} opacity="0.45" />
     </>
@@ -696,13 +772,27 @@ function FogG() {
 }
 
 // The night-star cream tones are NightStars' own (grandfathered from the
-// pre-Monster glyph — night icons keep their established palette).
+// pre-Monster glyph — night icons keep their established palette). The ink
+// under-stroke is the 3:1 carrier: cream alone is 2.68 on the night wash.
+const STAR_PATHS = [
+  { d: "m18 6 2.4 7.2L28 16l-7.6 2.8L18 26l-2.4-7.2L8 16l7.6-2.8L18 6Z", fill: "#FFF9E6" },
+  { d: "m34 23 1.6 4.8L41 30l-5.4 2.2L34 37l-1.6-4.8L27 30l5.4-2.2L34 23Z", fill: "#F6D7A8" },
+];
+
 function StarClusterG() {
   return (
     <>
-      <path d="m18 6 2.4 7.2L28 16l-7.6 2.8L18 26l-2.4-7.2L8 16l7.6-2.8L18 6Z" fill="#FFF9E6" />
-      <path d="m34 23 1.6 4.8L41 30l-5.4 2.2L34 37l-1.6-4.8L27 30l5.4-2.2L34 23Z" fill="#F6D7A8" />
+      <g fill={MONSTER.inkBlue} stroke={MONSTER.inkBlue} strokeWidth="3.5" strokeLinejoin="round">
+        {STAR_PATHS.map((star) => (
+          <path key={star.d} d={star.d} />
+        ))}
+      </g>
+      {STAR_PATHS.map((star) => (
+        <path key={star.d} d={star.d} fill={star.fill} />
+      ))}
+      <circle cx="12" cy="34" r="2" fill={MONSTER.inkBlue} stroke={MONSTER.inkBlue} strokeWidth="3" />
       <circle cx="12" cy="34" r="2" fill="#FFF9E6" />
+      <circle cx="29" cy="10" r="1.5" fill={MONSTER.inkBlue} stroke={MONSTER.inkBlue} strokeWidth="3" />
       <circle cx="29" cy="10" r="1.5" fill="#FFF9E6" />
     </>
   );
@@ -1039,7 +1129,7 @@ export function Condition({ code, size = 80, hideSun = false }: { code: Conditio
       return (
         <svg data-weather-icon="storm" aria-hidden="true" width={size} height={size} viewBox="0 0 100 100">
           <g transform="translate(0 -4)">
-            <CloudG tone="night" />
+            <CloudG tone="storm" />
           </g>
           <BoltG />
         </svg>

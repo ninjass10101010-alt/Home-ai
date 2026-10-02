@@ -6,9 +6,10 @@ import type { ReactElement } from "react";
 import { WEATHER_MATERIAL } from "@/lib/weather-skins/types";
 import { getWeatherSkin } from "@/components/ui/WeatherSkins";
 import { SKY, INK } from "@/components/ui/wx-tokens";
-import { contrastRatio } from "@/lib/weather-contrast";
-import { Condition, MonsterDigit, SceneLayers } from "@/components/ui/WxToys";
-import type { ConditionCode } from "@/components/ui/WxToys";
+import { contrastRatio, posterTextSurface } from "@/lib/weather-contrast";
+import { Condition, MonsterDigit, SceneLayers, CONDITION_SILHOUETTE_TONES } from "@/components/ui/WxToys";
+import type { ConditionCode, WxScene } from "@/components/ui/WxToys";
+import type { SkyPhase } from "@/lib/weather-scene-params";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,6 +52,10 @@ it("getWeatherSkin still returns a skin for each condition (monster washes)", ()
     expect(skin.skyGradient).toBeDefined();
   }
 });
+it("SKY carries exactly the 9 shipped washes", () => {
+  expect(Object.keys(SKY)).toHaveLength(9);
+});
+
 it("every stop of every SKY wash is ≥ 4.5:1 vs its ink", () => {
   for (const [k, cls] of Object.entries(SKY)) {
     const stops = [...cls.matchAll(/#([0-9a-f]{6})/gi)].map((m) => `#${m[1]}`);
@@ -61,6 +66,43 @@ it("every stop of every SKY wash is ≥ 4.5:1 vs its ink", () => {
     }
   }
 });
+
+// ── Condition-icon contrast (F2): main silhouette ≥ 3:1 on its shipped field ─
+// The field mapping is explicit here; the tones come from the implementation,
+// so a tone retune or a SKY field retune both fail this gate.
+
+const CONDITION_FIELDS: Record<ConditionCode, { scene: WxScene; heavySnow?: boolean; skyPhase?: SkyPhase }[]> = {
+  clear: [{ scene: "clear" }, { scene: "clear", skyPhase: "dawn" }, { scene: "clear", skyPhase: "dusk" }],
+  partly: [{ scene: "clear" }, { scene: "clear", skyPhase: "dawn" }, { scene: "clear", skyPhase: "dusk" }],
+  "partly-night": [{ scene: "night" }],
+  cloudy: [
+    { scene: "cloudy" },
+    { scene: "cloudy", skyPhase: "dawn" },
+    { scene: "cloudy", skyPhase: "dusk" },
+    { scene: "night" },
+  ],
+  rain: [{ scene: "rain" }],
+  storm: [{ scene: "storm" }],
+  snow: [{ scene: "snow" }, { scene: "snow", heavySnow: true }],
+  fog: [{ scene: "cloudy" }, { scene: "night" }],
+  night: [{ scene: "night" }],
+};
+
+it.each(Object.keys(CONDITION_FIELDS) as ConditionCode[])(
+  "condition %s main silhouette is ≥ 3:1 on every shipped field it renders on",
+  (code) => {
+    const tones = CONDITION_SILHOUETTE_TONES[code];
+    for (const field of CONDITION_FIELDS[code]) {
+      const tone = field.heavySnow ? tones.dark ?? tones.light : tones.light;
+      const label = `${code} ${tone} vs ${field.scene}${field.skyPhase ? `/${field.skyPhase}` : ""}${field.heavySnow ? " heavy" : ""}`;
+      const stops = posterTextSurface(field.scene, field.heavySnow ?? false, field.skyPhase ?? "day");
+      expect(stops).toHaveLength(3);
+      for (const stop of stops) {
+        expect(contrastRatio(tone, stop), `${label} stop ${stop}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  }
+);
 
 // ── Monster condition icons: one sculptural silhouette per code, zero faces ──
 
@@ -89,6 +131,23 @@ it.each(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-"] as const)(
     expect(nodes).toHaveLength(1);
   }
 );
+
+it.each(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-"] as const)(
+  "MonsterDigit %s renders real anatomy (≥2 shape elements)",
+  (digit: string) => {
+    const el = renderNode(createElement(MonsterDigit, { digit }));
+    const svg = el.querySelector(`[data-weather-digit="${digit}"]`);
+    expect(svg, digit).toBeTruthy();
+    expect(svg!.querySelectorAll("path, line, rect, circle, ellipse").length, digit).toBeGreaterThanOrEqual(2);
+  }
+);
+
+it("exactly one eyeball pupil rides the peering digit; without eye there is none", () => {
+  const peering = renderNode(createElement(MonsterDigit, { digit: "5", eye: true }));
+  expect(peering.querySelectorAll('circle[fill="#101418"]')).toHaveLength(1);
+  const sleeping = renderNode(createElement(MonsterDigit, { digit: "5" }));
+  expect(sleeping.querySelectorAll('circle[fill="#101418"]')).toHaveLength(0);
+});
 
 it("a 2-digit number renders exactly 2 digit nodes; unknown char falls back to text", () => {
   const el = renderNode(
@@ -122,7 +181,7 @@ it("moon disc keeps its character hook (exactly one data-weather-character=\"moo
   expect(el.querySelector('[data-weather-character="moon"] [data-weather-shape="night-orbit"]')).toBeTruthy();
 });
 
-it("the night scene renders no cloud faces and no sun dots anywhere", () => {
+it("the clear scene renders no cloud faces and no sun face dots anywhere", () => {
   const el = renderNode(createElement(SceneLayers as unknown as (props: Record<string, unknown>) => ReactElement, {
     scene: "clear",
     showFog: false,
