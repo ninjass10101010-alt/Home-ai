@@ -66,11 +66,40 @@ describe("contrastRatio sanity", () => {
   it("identical colors are 1", () => expect(contrastRatio("#898CBB", "#898CBB")).toBeCloseTo(1, 3));
 });
 
+describe("AA gate — Monster wash stops via posterTextSurface", () => {
+  it.each([
+    { scene: "clear" as const, heavy: false, ink: SLATE_800 },
+    { scene: "cloudy" as const, heavy: false, ink: SLATE_800 },
+    { scene: "rain" as const, heavy: false, ink: SLATE_800 },
+    { scene: "snow" as const, heavy: false, ink: SLATE_800 },
+    { scene: "snow" as const, heavy: true, ink: "#FFFFFF" },
+    { scene: "storm" as const, heavy: false, ink: "#FFFFFF" },
+    { scene: "night" as const, heavy: false, ink: SLATE_800 },
+  ])("every $scene heavy=$heavy stop is ≥ 4.5:1 vs its ink", ({ scene, heavy, ink }) => {
+    for (const stop of posterTextSurface(scene, heavy, "day")) {
+      expect(contrastRatio(ink, stop), `${scene} stop ${stop}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
 describe("SKY wash strings match the verified ink stops", () => {
   const stopsOf = (skyClass: string) =>
-    Array.from(skyClass.matchAll(/#([0-9a-f]{6})/gi), (m) => `#${m[1]}`.toLowerCase());
+    Array.from(skyClass.matchAll(/#([0-9a-f]{6})/gi), (m) => `#${m[1]}`.toLowerCase())
 
-  it.each(["dawn", "dusk"] as const)("SKY.%s hexes equal posterTextSurface stops", (phase) => {
-    expect(stopsOf(SKY[phase])).toEqual(posterTextSurface("clear", false, phase).map((s) => s.toLowerCase()));
+  // SKY key → the posterTextSurface call whose stops must equal the wash.
+  const SURFACE_FOR: Record<string, () => string[]> = {
+    clear: () => posterTextSurface("clear", false, "day"),
+    dawn: () => posterTextSurface("clear", false, "dawn"),
+    dusk: () => posterTextSurface("clear", false, "dusk"),
+    cloudy: () => posterTextSurface("cloudy", false, "day"),
+    rain: () => posterTextSurface("rain", false, "day"),
+    snow: () => posterTextSurface("snow", false, "day"),
+    heavySnow: () => posterTextSurface("snow", true, "day"),
+    storm: () => posterTextSurface("storm", false, "day"),
+    night: () => posterTextSurface("night", false, "day"),
+  };
+
+  it.each(Object.keys(SURFACE_FOR))("SKY.%s hexes equal posterTextSurface stops", (key) => {
+    expect(stopsOf(SKY[key])).toEqual(SURFACE_FOR[key]().map((s) => s.toLowerCase()));
   });
 });

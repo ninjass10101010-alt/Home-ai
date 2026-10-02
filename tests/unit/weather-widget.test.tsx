@@ -150,7 +150,7 @@ function compositeHex(foreground: string, background: string, opacity: number): 
 }
 
 function stormHeaderSurfaces(): string[] {
-  const stops = ["#6A6F96", "#5D5B8F", "#4D4770"];
+  const stops = ["#656399", "#5F5D93", "#58568E"];
   return stops.flatMap((stop) => [0.4, 0.64].map((opacity) => compositeHex("#FFFFFF", stop, opacity)));
 }
 
@@ -176,7 +176,7 @@ function modalCellTextSurfaces(accent: string): string[] {
 }
 
 function failedFetchHeaderSurfaces(): string[] {
-  const stops = ["#DFE4EE", "#EEF1F6", "#D9E6F5"];
+  const stops = ["#9CC9E2", "#A1CDE5", "#A6D1E8"];
   const glassAlpha = 0.3;
   const surfaceAlpha = glassAlpha + 0.4 * (1 - glassAlpha);
   return stops
@@ -555,13 +555,13 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(strip.getAttribute("aria-valuenow")).toBe("0");
   });
 
-  it("uses a sky-blue clear-day canvas while preserving condition palettes", () => {
-    expect(SKY.clear).toBe("from-[#55bce8] via-[#8fd8f1] to-[#d8f2f4]");
-    expect(SKY.cloudy).toBe("from-[#dfe4ee] via-[#eef1f6] to-[#d9e6f5]");
-    expect(SKY.rain).toBe("from-[#b9c4d8] via-[#c9d7ea] to-[#d8d3f0]");
-    expect(SKY.snow).toBe("from-[#f4f7fb] via-[#e6efff] to-[#efe6fb]");
-    expect(SKY.storm).toBe("from-[#6a6f96] via-[#5d5b8f] to-[#4d4770]");
-    expect(SKY.night).toBe("from-[#6f74a8] via-[#a29dc9] to-[#e2dbf2]");
+  it("uses a flat Monster sky-blue clear-day canvas while preserving condition palettes", () => {
+    expect(SKY.clear).toBe("from-[#55bce8] via-[#58c0ea] to-[#5bc4ec]");
+    expect(SKY.cloudy).toBe("from-[#9cc9e2] via-[#a1cde5] to-[#a6d1e8]");
+    expect(SKY.rain).toBe("from-[#adb9d3] via-[#a9b6d1] to-[#a5b2cf]");
+    expect(SKY.snow).toBe("from-[#f6f6fa] via-[#f3f2f8] to-[#f0eef6]");
+    expect(SKY.storm).toBe("from-[#656399] via-[#5f5d93] to-[#58568e]");
+    expect(SKY.night).toBe("from-[#8b90c6] via-[#8e93c9] to-[#9196cd]");
     expect(SKY.dawn).toBe("from-[#898cbb] via-[#e8a2b6] to-[#ffd8a0]");
     expect(SKY.dusk).toBe("from-[#8c8db1] via-[#ce73a1] to-[#ffb072]");
   });
@@ -582,7 +582,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
     expect(strip.getAttribute("aria-valuenow")).toBe("1");
     expect(el.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("rain");
-    expect((el.querySelector('.wx-sky[data-active="true"]') as HTMLElement).className).toContain("from-[#b9c4d8]");
+    expect((el.querySelector('.wx-sky[data-active="true"]') as HTMLElement).className).toContain("from-[#adb9d3]");
     expect(el.querySelector('[data-testid="wx-hero-temp"]')?.textContent).toBe("70");
 
     act(() => {
@@ -948,7 +948,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     };
     expect(typeof helpers.contrastSafeTextAccent).toBe("function");
     if (typeof helpers.contrastSafeTextAccent !== "function") return;
-    const clearStops = ["#55BCE8", "#8FD8F1", "#D8F2F4"];
+    const clearStops = ["#55BCE8", "#58C0EA", "#5BC4EC"];
     for (const season of ["spring", "summer", "autumn", "winter"] as const) {
       const accent = getWeatherSkin(season, false, 0).accent;
       const safe = helpers.contrastSafeTextAccent(accent, clearStops, "#1E293B");
@@ -957,8 +957,8 @@ describe("WeatherWidget — Not Boring redesign", () => {
   });
 
   it.each([
-    { season: "autumn" as const, code: 3, stops: ["#DFE4EE", "#EEF1F6", "#D9E6F5"] },
-    { season: "winter" as const, code: 71, stops: ["#F4F7FB", "#E6EFFF", "#EFE6FB"] },
+    { season: "autumn" as const, code: 3, stops: ["#9CC9E2", "#A1CDE5", "#A6D1E8"] },
+    { season: "winter" as const, code: 71, stops: ["#F6F6FA", "#F3F2F8", "#F0EEF6"] },
   ])("keeps the selected $season strip cell readable against its accent composite", async ({ season, code, stops }) => {
     localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "day", season, holidayOverride: "none" }));
     try {
@@ -1055,13 +1055,13 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(typeof helpers.contrastSafeTextAccent).toBe("function");
     if (typeof helpers.accentForeground !== "function" || typeof helpers.contrastSafeTextAccent !== "function") return;
     const foreground = helpers.accentForeground(accent);
-    const safeText = helpers.contrastSafeTextAccent(accent, ["#55BCE8", "#8FD8F1", "#D8F2F4"], "#1E293B");
+    const safeText = helpers.contrastSafeTextAccent(accent, ["#55BCE8", "#58C0EA", "#5BC4EC"], "#1E293B");
     expect(contrastRatio(foreground, accent)).toBeGreaterThanOrEqual(4.5);
-    expect(Math.min(...["#55BCE8", "#8FD8F1", "#D8F2F4"].map((surface) => contrastRatio(safeText, surface))), holiday).toBeGreaterThanOrEqual(4.5);
+    expect(Math.min(...["#55BCE8", "#58C0EA", "#5BC4EC"].map((surface) => contrastRatio(safeText, surface))), holiday).toBeGreaterThanOrEqual(4.5);
   });
 
   it.each([
-    { name: "night", accent: "#FF6F5E", surfaces: ["#6F74A8", "#A29DC9", "#E2DBF2"], fallback: "#1E293B" },
+    { name: "night", accent: "#FF6F5E", surfaces: ["#8B90C6", "#8E93C9", "#9196CD"], fallback: "#1E293B" },
     { name: "storm header", accent: "#FFB44F", surfaces: stormHeaderSurfaces(), fallback: "#FFFFFF" },
     { name: "slate", accent: "#7FA8D9", surfaces: ["#1E293B", "#334155"], fallback: "#FFFFFF" },
   ])("returns only validated text candidates for the $name surface", ({ accent, surfaces, fallback }) => {
@@ -1084,7 +1084,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
       const now = Array.from(el.querySelectorAll<HTMLElement>("span")).find((node) => node.textContent === "NOW");
       expect(now).toBeTruthy();
       const nowColor = now!.style.color;
-      expect(Math.min(...["#55BCE8", "#8FD8F1", "#D8F2F4"].map((surface) => contrastRatio(nowColor, surface)))).toBeGreaterThanOrEqual(4.5);
+      expect(Math.min(...["#55BCE8", "#58C0EA", "#5BC4EC"].map((surface) => contrastRatio(nowColor, surface)))).toBeGreaterThanOrEqual(4.5);
 
       act(() => findDetailsButton(el)!.click());
       await settle();
@@ -1318,7 +1318,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
     expect(activeSky).toBeTruthy();
     // toy night: lightened dusk wash (slate-800 ink passes AA at every stop)
-    expect(activeSky!.className).toContain("from-[#6f74a8]");
+    expect(activeSky!.className).toContain("from-[#8b90c6]");
     // night text ink follows the toy sky: slate-800, not the old white-on-lilac
     const heroTemp = el.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement | null;
     expect(heroTemp).toBeTruthy();
@@ -1329,8 +1329,8 @@ describe("WeatherWidget — Not Boring redesign", () => {
     document.documentElement.dataset.theme = theme;
     try {
       for (const scene of [
-        { code: 0, isDay: 0, stops: ["#6f74a8", "#a29dc9", "#e2dbf2"], ink: "#1E293B", softOpacity: 0.78 },
-        { code: 95, isDay: 1, stops: ["#6a6f96", "#5d5b8f", "#4d4770"], ink: "#FFFFFF", softOpacity: 0.95 },
+        { code: 0, isDay: 0, stops: ["#8b90c6", "#8e93c9", "#9196cd"], ink: "#1E293B", softOpacity: 0.78 },
+        { code: 95, isDay: 1, stops: ["#656399", "#5f5d93", "#58568e"], ink: "#FFFFFF", softOpacity: 0.95 },
       ]) {
         mockOpenMeteo(makeOpenMeteoPayload({ code: scene.code, isDay: scene.isDay }));
         const el = render(<WeatherWidget />);
@@ -1376,9 +1376,9 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
       expect(hero.style.color).toBe("rgb(255, 255, 255)");
       expect(location).toBeTruthy();
-      expect(locationChip?.className).toContain("rgba(255,255,255,0.32)");
+      expect(locationChip?.className).toContain("rgba(255,255,255,0.36)");
       expect(locationChip?.className).toContain("before:from-white/40");
-      expect(details?.className).toContain("rgba(255,255,255,0.32)");
+      expect(details?.className).toContain("rgba(255,255,255,0.36)");
       expect(details?.className).toContain("before:from-white/40");
       expect(holiday).toBeTruthy();
       if (!location || !details || !holiday) return;
@@ -1432,7 +1432,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
       const heroTemp = Array.from(dialog.querySelectorAll<HTMLElement>("span")).find((node) => node.className.includes("text-[60px]"));
       const degree = heroTemp?.nextElementSibling as HTMLElement | undefined;
 
-      expect(activeSky.className).toContain("from-[#6f74a8]");
+      expect(activeSky.className).toContain("from-[#8b90c6]");
       expect(heroTemp).toBeTruthy();
       if (!heroTemp) return;
       expect(heroTemp.style.color).toBe("rgb(30, 41, 59)");
@@ -1440,7 +1440,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
       expect(degree!.style.color).toBe("rgba(30, 41, 59, 0.78)");
       expect(heroInk).toBeTruthy();
       expect(heroInk!.style.backgroundColor).toBe("rgba(255, 255, 255, 0.45)");
-      const nightStops = ["#6f74a8", "#a29dc9", "#e2dbf2"];
+      const nightStops = ["#8b90c6", "#8e93c9", "#9196cd"];
       const minimumHeroContrast = Math.min(...nightStops.map((background) =>
         effectiveContrast("#1E293B", 1, compositeHex("#FFFFFF", background, 0.45))
       ));
@@ -1462,7 +1462,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
     expect(activeSky).toBeTruthy();
     // storm wash, not the clear pastel
-    expect(activeSky!.className).toContain("from-[#6a6f96]");
+    expect(activeSky!.className).toContain("from-[#656399]");
     expect(activeSky!.className).not.toContain("from-[#bfe3ff]");
     // storm keeps WHITE ink — the deepened wash passes AA at every stop
     const heroTemp = el.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement | null;
@@ -1493,7 +1493,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.textContent).toContain("Big snow today — boots by the door");
     expect(el.textContent).not.toContain("Raincoats ready");
     const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
-    expect(activeSky!.className).toContain("from-[#5d6f8c]");
+    expect(activeSky!.className).toContain("from-[#4c607e]");
   });
 
   it("keeps WMO 85 a snow shower while 86 remains heavy snow", async () => {
@@ -1534,8 +1534,8 @@ describe("WeatherWidget — Not Boring redesign", () => {
       const heavySky = heavy.querySelector('.wx-sky[data-active="true"]') as HTMLElement;
       expect(normalScene.getAttribute("data-heavy-snow")).toBe("false");
       expect(heavyScene.getAttribute("data-heavy-snow")).toBe("true");
-      expect(normalSky.className).toContain("from-[#f4f7fb]");
-      expect(heavySky.className).toContain("from-[#5d6f8c]");
+      expect(normalSky.className).toContain("from-[#f6f6fa]");
+      expect(heavySky.className).toContain("from-[#4c607e]");
       expect(heavySky.className).not.toBe(normalSky.className);
       expect(normalScene.querySelectorAll('[data-weather-precip="snow"]').length).toBeGreaterThan(0);
       expect(heavyScene.querySelectorAll('[data-weather-precip="snow"]').length).toBeGreaterThan(0);
@@ -1567,8 +1567,8 @@ describe("WeatherWidget — Not Boring redesign", () => {
       const heavySky = dialogs[1].querySelector('.wx-sky[data-active="true"]') as HTMLElement;
       expect(normalScene.getAttribute("data-heavy-snow")).toBe("false");
       expect(heavyScene.getAttribute("data-heavy-snow")).toBe("true");
-      expect(normalSky.className).toContain("from-[#f4f7fb]");
-      expect(heavySky.className).toContain("from-[#5d6f8c]");
+      expect(normalSky.className).toContain("from-[#f6f6fa]");
+      expect(heavySky.className).toContain("from-[#4c607e]");
       expect(normalScene.querySelectorAll('[data-weather-precip="snow"]').length).toBeGreaterThan(0);
       expect(heavyScene.querySelectorAll('[data-weather-precip="snow"]').length).toBeGreaterThan(0);
       const heavyHero = Array.from(dialogs[1].querySelectorAll<HTMLElement>("span")).find((node) => node.className.includes("text-[60px]"));
@@ -1846,7 +1846,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(scrubber.getAttribute("aria-valuenow")).toBe("1");
     expect(scrubber.getAttribute("aria-valuetext")).toContain("degrees");
     expect(dialog.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("snow");
-    expect((dialog.querySelector('.wx-sky[data-active="true"]') as HTMLElement).className).toContain("from-[#f4f7fb]");
+    expect((dialog.querySelector('.wx-sky[data-active="true"]') as HTMLElement).className).toContain("from-[#f6f6fa]");
   });
 
   it("omits the daylight interval when sunrise is null", async () => {
@@ -2167,9 +2167,9 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
   it("keeps cloudy, rain, and snow poster accents visibly distinct", () => {
     const cases = [
-      { scene: "cloudy" as const, shape: "cloud-bars", background: "#EEF1F6" },
-      { scene: "rain" as const, shape: "rain-diamonds", background: "#C9D7EA" },
-      { scene: "snow" as const, shape: "snow-diamonds", background: "#E6EFFF" },
+      { scene: "cloudy" as const, shape: "cloud-bars", background: "#A1CDE5" },
+      { scene: "rain" as const, shape: "rain-diamonds", background: "#A9B6D1" },
+      { scene: "snow" as const, shape: "snow-diamonds", background: "#F3F2F8" },
     ];
     const results = cases.map(({ scene, shape, background }) => {
       const el = render(<SceneLayers scene={scene} showFog={false} showBirds={false} cloudCover={80} precipitation={80} />);
@@ -2386,7 +2386,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     // toy sky crossfade follows the scrubbed (rainy) hour
     const skies = Array.from(dialog.querySelectorAll('.wx-sky[data-active="true"]'));
     expect(skies.length).toBe(1);
-    expect(skies[0].className).toContain("from-[#b9c4d8]");
+    expect(skies[0].className).toContain("from-[#adb9d3]");
     // hourly chips render clay icons (inline clay gradients) instead of emoji glyphs
     const chips = dialog.querySelector('[role="list"]');
     expect(chips?.innerHTML).toContain("linear-gradient");

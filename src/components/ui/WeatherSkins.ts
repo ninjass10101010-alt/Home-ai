@@ -25,12 +25,15 @@ export interface WeatherSkin {
   skyGradient: (season: SeasonKey | null) => string;
 }
 
+// Monster harmonization (2026-10-02): the seasonal card washes join the flat
+// sky-blue field family while each season keeps its accent/inkSoft/glow/
+// particle identity (those are the accent/chrome system).
 const DAY_SKINS: Record<SeasonKey, Omit<WeatherSkin, "skyGradient">> = {
   spring: {
     name: "spring",
     night: false,
-    skyTop: "#FDF0C4",
-    skyBottom: "#E9DFF9",
+    skyTop: "#BEE5F8",
+    skyBottom: "#EAF5FD",
     ink: "#1C1512",
     inkSoft: "rgba(28,21,18,0.64)",
     accent: "#D95F92",
@@ -45,8 +48,8 @@ const DAY_SKINS: Record<SeasonKey, Omit<WeatherSkin, "skyGradient">> = {
   summer: {
     name: "summer",
     night: false,
-    skyTop: "#FFD8CB",
-    skyBottom: "#FFEBCF",
+    skyTop: "#A8DFF8",
+    skyBottom: "#E3F4FC",
     ink: "#211310",
     inkSoft: "rgba(33,19,16,0.64)",
     accent: "#E85D45",
@@ -61,8 +64,8 @@ const DAY_SKINS: Record<SeasonKey, Omit<WeatherSkin, "skyGradient">> = {
   autumn: {
     name: "autumn",
     night: false,
-    skyTop: "#FFDCC8",
-    skyBottom: "#F5BCA0",
+    skyTop: "#BCD9EC",
+    skyBottom: "#EFEBE0",
     ink: "#23120C",
     inkSoft: "rgba(35,18,12,0.64)",
     accent: "#C74E33",

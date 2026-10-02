@@ -13,6 +13,20 @@ import type { SkyPhase } from "@/lib/weather-scene-params";
 const DAWN_STOPS = ["#898CBB", "#E8A2B6", "#FFD8A0"];
 const DUSK_STOPS = ["#8C8DB1", "#CE73A1", "#FFB072"];
 
+// Monster flat washes (2026-10-02), pinned 1:1 to the SKY tokens — the
+// "SKY wash strings match the verified ink stops" suite enforces the coupling.
+// Machine-verified AA: light fields ≥ 4.5:1 vs slate-800 (clear 6.79/7.07/7.35,
+// cloudy 8.27/8.62/8.99, rain 7.42/7.17/6.87, snow 13.57/13.14/12.72, night
+// 4.81/4.99/5.19); the dark-field exception keeps white ink (heavySnow
+// 6.40/6.80/7.23, storm 5.53/6.05/6.70).
+const CLEAR_STOPS = ["#55BCE8", "#58C0EA", "#5BC4EC"];
+const CLOUDY_STOPS = ["#9CC9E2", "#A1CDE5", "#A6D1E8"];
+const RAIN_STOPS = ["#ADB9D3", "#A9B6D1", "#A5B2CF"];
+const SNOW_STOPS = ["#F6F6FA", "#F3F2F8", "#F0EEF6"];
+const HEAVY_SNOW_STOPS = ["#4C607E", "#485C7A", "#445876"];
+const STORM_STOPS = ["#656399", "#5F5D93", "#58568E"];
+const NIGHT_STOPS = ["#8B90C6", "#8E93C9", "#9196CD"];
+
 export type Rgb = [number, number, number];
 
 // ↓ verbatim from WeatherSkins.ts:146-156
@@ -77,13 +91,13 @@ export function posterTextSurface(scene: WxScene, heavySnow = false, skyPhase: S
   if (scene === "clear" || scene === "cloudy") {
     if (skyPhase === "dawn") return [...DAWN_STOPS];
     if (skyPhase === "dusk") return [...DUSK_STOPS];
-    if (scene === "clear") return ["#55BCE8", "#8FD8F1", "#D8F2F4"];
-    return ["#DFE4EE", "#EEF1F6", "#D9E6F5"];
+    if (scene === "clear") return [...CLEAR_STOPS];
+    return [...CLOUDY_STOPS];
   }
-  if (scene === "rain") return ["#B9C4D8", "#C9D7EA", "#D8D3F0"];
-  if (scene === "snow") return heavySnow ? ["#5D6F8C", "#465A78", "#354861"] : ["#F4F7FB", "#E6EFFF", "#EFE6FB"];
-  if (scene === "storm") return ["#6A6F96", "#5D5B8F", "#4D4770"];
-  return ["#6F74A8", "#A29DC9", "#E2DBF2"]; // night
+  if (scene === "rain") return [...RAIN_STOPS];
+  if (scene === "snow") return heavySnow ? [...HEAVY_SNOW_STOPS] : [...SNOW_STOPS];
+  if (scene === "storm") return [...STORM_STOPS];
+  return [...NIGHT_STOPS]; // night
 }
 
 export function weatherHeaderTextSurfaces(
