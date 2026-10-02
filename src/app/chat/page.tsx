@@ -206,7 +206,7 @@ const MessageRow = memo(function MessageRow({
           <div className="flex flex-wrap gap-2 self-start" data-testid="point-proposals">
             {msg.proposals.map((p, i) =>
               p.tool === "redeem_reward" ? (
-                <div key={`redeem|${p.args.member}|${p.args.rewardId}|${p.args.reason}|${i}`} data-testid="redeem-proposals">
+                <div key={`redeem|${p.args.member}|${p.args.rewardId}|${p.args.reason}|${p.operationId}|${i}`} data-testid="redeem-proposals">
                   <RedeemRewardChip proposal={p} actorName={currentUserName ?? null} />
                 </div>
               ) : (

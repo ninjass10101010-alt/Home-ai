@@ -4,13 +4,17 @@
 // POSTs /api/rewards/redeem — the canonical write path, NOT the planner's
 // deliberately tighter ALLOWED_TOOLS surface.
 //
-// Two facts this suite pins, because both are money:
+// Three facts this suite pins, because all of them are money:
 //   1. The PIN that confirms a redemption is the REWARD OWNER's. A parent PIN is
 //      additionally required only above PARENT_APPROVAL_MIN_COST (100, strictly
 //      greater), so a cheap reward must not ask the family to wait for a parent.
 //   2. operationId is the idempotency key — the redeem route validates it first
 //      and answers 409 `duplicate` on a replay, so a retry that minted a fresh
-//      key would spend the points twice.
+//      key would spend the points twice. The chip FREEZES it at mount, which is
+//      why the list key must carry it (see the key contract below).
+//   3. A shop price or a balance can arrive as a numeric STRING (PocketBase text
+//      field), and the redeem route reads it with `Number(...)` anyway — so a
+//      stringly-typed cost must not silently erase the chip the model promised.
 // Harness copied from chat-points-chip.test.tsx (createRoot + act, URL-routing
 // fetch stub, open-gated Modal mock, native-setter typePin).
 // @vitest-environment jsdom
@@ -18,6 +22,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -71,7 +77,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/db", () => ({ db: { selectMembers: () => [] } }));
 
 import ChatPage from "@/app/chat/page";
-import RedeemRewardChip from "@/components/chat/RedeemRewardChip";
+import RedeemRewardChip, { isRewardRedemptionProposal } from "@/components/chat/RedeemRewardChip";
 import { __resetChatStoreForTests } from "@/lib/chat-store";
 
 const PROPOSAL = {
@@ -87,7 +93,7 @@ const PROPOSAL = {
 };
 
 /** PARENT_APPROVAL_MIN_COST on the redeem route — strictly greater than. */
-const atCost = (cost: number) => ({ ...PROPOSAL, args: { ...PROPOSAL.args, cost } });
+const atCost = (cost: number | string) => ({ ...PROPOSAL, args: { ...PROPOSAL.args, cost } });
 
 let activeRoot: ReturnType<typeof createRoot> | null = null;
 function render(ui: ReactElement): HTMLElement {
@@ -205,6 +211,9 @@ describe("chat page — redemption-proposal chip wiring", () => {
     expect(el.textContent).toContain("Confirm with PIN");
     expect(el.textContent).toContain("Movie night");
     expect(el.textContent).toContain("25 pts");
+    // The redeem row is its own testid: the adjust row must stay findable on a
+    // thread that carries both kinds of proposal.
+    expect(el.querySelector('[data-testid="redeem-proposals"]')).not.toBeNull();
     expect(redeemCalls).toHaveLength(0);
   });
 
@@ -259,6 +268,82 @@ describe("chat page — redemption-proposal chip wiring", () => {
 
     expect(el.textContent).not.toContain("Confirm with PIN");
     expect(redeemCalls).toHaveLength(0);
+  });
+});
+
+describe("RedeemRewardChip — a stringly-typed price must not erase the chip", () => {
+  // The tool hands back the raw shop row (`reward.cost ?? reward.points ?? 0`),
+  // and a PocketBase TEXT field arrives as a string. The redeem route reads the
+  // same value with `Number(...)` and would happily charge it, so a chip that
+  // refuses the string leaves the model promising a PIN confirmation that no one
+  // can give — the exact regression this chip exists to prevent.
+  const stringCost = atCost("25");
+
+  it("the guard accepts a numeric string", () => {
+    expect(isRewardRedemptionProposal(stringCost)).toBe(true);
+  });
+
+  it("the guard still refuses a cost that is not a number at all", () => {
+    // `Number("")`, `Number(null)` and `Number([])` are all 0, and a reward
+    // priced at 0 would be handed to the route as a free redemption — so an
+    // empty string, null and a boolean stay rejected.
+    expect(isRewardRedemptionProposal(atCost(""))).toBe(false);
+    expect(isRewardRedemptionProposal(atCost("   "))).toBe(false);
+    expect(isRewardRedemptionProposal(atCost(null as unknown as number))).toBe(false);
+    expect(isRewardRedemptionProposal(atCost(true as unknown as number))).toBe(false);
+    expect(isRewardRedemptionProposal(atCost("free"))).toBe(false);
+    expect(isRewardRedemptionProposal(atCost(Number.NaN))).toBe(false);
+  });
+
+  it("a stringly-typed cost still renders the chip and quotes the number", async () => {
+    stubFetch({ status: 200, body: { ok: true } });
+    streamMock.fn.mockResolvedValue({
+      content: "Ready for confirmation",
+      streamed: false,
+      proposals: [stringCost],
+    });
+    const el = render(<ChatPage />);
+    await act(async () => { await inputProps.current!.onSendMessage("Emily wants movie night"); });
+
+    expect(el.textContent).toContain("Confirm with PIN");
+    expect(el.textContent).toContain("25 pts");
+  });
+
+  it("a stringly-typed cost above the threshold still asks for a parent", async () => {
+    stubFetch({ status: 200, body: { ok: true } });
+    streamMock.fn.mockResolvedValue({
+      content: "Ready for confirmation",
+      streamed: false,
+      proposals: [atCost("150")],
+    });
+    const el = render(<ChatPage />);
+    await act(async () => { await inputProps.current!.onSendMessage("Emily wants the big reward"); });
+
+    expect(clickButton(el, "Confirm with PIN")).toBe(true);
+    expect(el.querySelector('input[data-testid="parent-pin"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="pin-modal-description"]')!.textContent).toContain("150");
+  });
+
+  it("a stringly-typed cost above the threshold still withholds the parent at exactly 100", async () => {
+    stubFetch({ status: 200, body: { ok: true } });
+    const el = render(<RedeemRewardChip proposal={atCost("100")} actorName="Rebecca G" />);
+    clickButton(el, "Confirm with PIN");
+    expect(el.querySelector('input[data-testid="parent-pin"]')).toBeNull();
+  });
+
+  it("a stringly-typed BALANCE in the route's weekData is printed, not swallowed", async () => {
+    stubFetch({
+      status: 200,
+      body: { ok: true, applied: true, member: "Emily G", weekData: { points: { "Emily G": "25" } } },
+    });
+    const el = render(<RedeemRewardChip proposal={PROPOSAL} actorName="Rebecca G" />);
+    clickButton(el, "Confirm with PIN");
+    typePin(el, "1234");
+    clickButton(el, "Submit");
+    await settle();
+
+    expect(document.body.textContent).toContain("25 pts");
+    expect(el.textContent).toContain("Done ✓");
   });
 });
 
@@ -425,6 +510,36 @@ describe("RedeemRewardChip — the redeem write contract", () => {
     expect(el.textContent).toContain("Only a parent can approve this reward.");
     expect(el.textContent).not.toContain("Done ✓");
   });
+
+  it("a 202 (ledger wrote, snapshot not yet reconciled) shows the redemption WITHOUT the canonical balance", async () => {
+    // The ledger wrote the deduction, but the snapshot the rest of the dashboard
+    // reads has not caught up — so the ledger's number is real and the dashboard
+    // is showing something else. Printing it next to the dashboard's own balance
+    // shows the family two different numbers for the same child, so the honest
+    // Done chip withholds the number until the two agree. A 200/202 that does
+    // NOT say `reconciled: false` keeps the balance (see the test above).
+    stubFetch({
+      status: 202,
+      body: {
+        ok: true,
+        applied: true,
+        reconciled: false,
+        member: "Emily G",
+        weekData: { points: { "Emily G": 25 } },
+      },
+    });
+    const el = render(<RedeemRewardChip proposal={PROPOSAL} actorName="Rebecca G" />);
+    clickButton(el, "Confirm with PIN");
+    typePin(el, "1234");
+    clickButton(el, "Submit");
+    await settle();
+
+    expect(redeemCalls).toHaveLength(1);
+    expect(el.textContent).toContain("Done ✓");
+    expect(el.textContent).not.toContain("pts left");
+    expect(document.body.textContent).toContain("Redeemed ✓");
+    expect(document.body.textContent).not.toContain("25 pts left");
+  });
 });
 
 describe("RedeemRewardChip — PIN modal behavior (mirrors AdjustPointsChip)", () => {
@@ -532,5 +647,39 @@ describe("RedeemRewardChip — PIN modal behavior (mirrors AdjustPointsChip)", (
     expect(kidStore.verifyPinRemote).not.toHaveBeenCalled();
     expect(el.textContent).toMatch(/fresh proposal/i);
     expect(el.textContent).not.toContain("Done ✓");
+  });
+});
+
+describe("RedeemRewardChip — the two duplicated constants this money path cannot drift on", () => {
+  const read = (rel: string) => readFileSync(resolve(__dirname, "../../", rel), "utf8");
+
+  it("the chip's parent-approval threshold is the redeem route's threshold", () => {
+    // Both files must carry the SAME literal. Drift is bounded but real: down
+    // means the chip asks for a grown-up the route never required; up means the
+    // chip skips a field the route demands and the family eats an honest 401.
+    // Neither is Critical, and both are silent — so the literal is pinned here
+    // instead of extracted into a shared module (which would mean editing the
+    // route, outside this fix's file set). A deliberate threshold change fails
+    // here, which is the point: it has to be a decision, not a drift.
+    expect(read("src/app/api/rewards/redeem/route.ts")).toMatch(
+      /const PARENT_APPROVAL_MIN_COST = 100/,
+    );
+    expect(read("src/components/chat/RedeemRewardChip.tsx")).toMatch(
+      /const PARENT_APPROVAL_MIN_COST = 100/,
+    );
+  });
+
+  it("the chat page keys a redeem chip by its OWN operationId, not by list position", () => {
+    // The chip FREEZES operationId at mount (retry safety), so a React key that
+    // omitted it would let a NEW proposal inherit the frozen key of a proposal
+    // that no longer exists at that slot — and the route's 409 `duplicate` would
+    // answer a redemption that never happened, which the chip then reports as
+    // "Already redeemed ✓". chat-store dedupes identical proposals within a turn
+    // so the collision is unreachable today; the key carries the id anyway so a
+    // future change to that key cannot turn it into a silent money-path lie.
+    const page = read("src/app/chat/page.tsx");
+    const redeemKey = /key=\{`redeem\|[^`]*`\}/.exec(page)?.[0];
+    expect(redeemKey).toBeDefined();
+    expect(redeemKey).toContain("${p.operationId}");
   });
 });

@@ -718,3 +718,56 @@ describe("chat-store — live thinking + tool activity state", () => {
     expect("toolEvents" in err!).toBe(false);
   });
 });
+
+// An adjustment and a redemption can share a member AND a reason while being two
+// separate things for two separate people to confirm with their PINs. Dedupe is
+// per-tool for exactly that reason: one key for both shapes would silently drop
+// the redemption from a turn that proposed both, and the family would be told a
+// reward awaits confirmation that no chip ever offered.
+describe("chat-store — inert proposals dedupe per tool", () => {
+  const ADJUST = {
+    tool: "adjust_points" as const,
+    operationId: "op-adjust-1",
+    args: { member: "Emily G", delta: 5, reason: "great week" },
+  };
+  const REDEEM = {
+    tool: "redeem_reward" as const,
+    operationId: "op-redeem-1",
+    args: { member: "Emily G", rewardId: "7", reward: "Movie night", cost: 25, reason: "great week" },
+  };
+
+  /** The buffered path and the streamed path both funnel through attachProposal. */
+  async function sendProposals(proposals: unknown[], via: "buffered" | "streamed") {
+    if (via === "buffered") {
+      streamMock.fn.mockResolvedValue({ content: "Two things to confirm", streamed: false, proposals });
+    } else {
+      streamMock.fn.mockImplementation(async ({ onStatus, onToken }: any) => {
+        for (const proposal of proposals) {
+          onStatus("Working…", { label: "Working…", proposal });
+        }
+        onToken("Two things to confirm", "Two things to confirm");
+        return { content: "Two things to confirm", streamed: true };
+      });
+    }
+    await ensureHydrated();
+    await send("Emily earned movie night", SPEAKER);
+    return assistantBubbles().at(-1)!.proposals ?? [];
+  }
+
+  it("keeps an adjustment AND a redemption that share a member and a reason", async () => {
+    for (const via of ["buffered", "streamed"] as const) {
+      __resetChatStoreForTests();
+      const attached = await sendProposals([ADJUST, REDEEM], via);
+      expect(attached.map((p) => p.tool)).toEqual(["adjust_points", "redeem_reward"]);
+    }
+  });
+
+  it("still collapses a TRUE duplicate of the same proposal", async () => {
+    // The per-tool key must not become a no-op: the same redemption offered
+    // twice in one turn is one thing to confirm, and two chips for it would ask
+    // the family for the same PIN twice.
+    const attached = await sendProposals([REDEEM, { ...REDEEM, operationId: "op-redeem-2" }], "streamed");
+    expect(attached).toHaveLength(1);
+    expect(attached[0].operationId).toBe("op-redeem-1");
+  });
+});

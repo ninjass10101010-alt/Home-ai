@@ -21,13 +21,38 @@ import { verifyPinRemote, unreachableCopy } from "@/modes/kid/kid-store";
 
 /** The redeem route's PARENT_APPROVAL_MIN_COST, mirrored so the chip asks for a
  *  parent PIN exactly when the route will demand one — strictly greater, so a
- *  100-point reward needs no grown-up. */
+ *  100-point reward needs no grown-up. The two literals are pinned to each other
+ *  by chat-redeem-chip.test.tsx: this is a mirror, not a second source of truth,
+ *  and a threshold change has to be made in both files on purpose. */
 const PARENT_APPROVAL_MIN_COST = 100;
+
+/** How long a toast stays up before it fades. NOT Toast's EXIT_MS (the exit
+ *  animation); the visible dwell this chip asks for. */
+const TOAST_VISIBLE_MS = 3000;
+
+/** A point value as a number, or as the numeric string a PocketBase text field
+ *  hands back — `null` when it is neither.
+ *
+ *  The shop row and the route's week read both reach the chip raw, and the redeem
+ *  route itself reads them with `Number(...)`. So a stringly-typed price must not
+ *  erase the chip: `Number("25")` is the 25 the route would charge. The empty
+ *  string is deliberately refused even though `Number("")` is 0 — a blank price
+ *  would reach the route as a FREE redemption, and `null`/`true` reach it the
+ *  same way. */
+function usableNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export interface RewardRedemptionProposal {
   tool: "redeem_reward";
   operationId: string;
-  args: { member: string; rewardId: string; reward: string; cost: number; reason: string };
+  /** Numbered, or stringly-typed as a shop row can be — see usableNumber. */
+  args: { member: string; rewardId: string; reward: string; cost: number | string; reason: string };
 }
 
 export function isRewardRedemptionProposal(value: unknown): value is RewardRedemptionProposal {
@@ -43,7 +68,7 @@ export function isRewardRedemptionProposal(value: unknown): value is RewardRedem
     typeof p.args.rewardId === "string" &&
     p.args.rewardId.trim() !== "" &&
     typeof p.args.reward === "string" &&
-    Number.isFinite(p.args.cost) &&
+    usableNumber(p.args.cost) !== null &&
     typeof p.args.reason === "string"
   );
 }
@@ -55,8 +80,13 @@ export default function RedeemRewardChip({
   proposal: RewardRedemptionProposal;
   actorName: string | null;
 }) {
-  const { member, reward, cost, reason } = proposal.args;
+  const { member, reward, reason } = proposal.args;
   const firstName = member.split(" ")[0];
+  // Read once, as a number: the parent gate and the copy the family reads must
+  // agree, and neither can afford a stringly-typed price (see usableNumber). An
+  // unusable one falls back to 0, which under-asks for a parent rather than
+  // inventing a grown-up's PIN for a reward the route may not even price.
+  const cost = usableNumber(proposal.args.cost) ?? 0;
   const needsParent = cost > PARENT_APPROVAL_MIN_COST;
   // The idempotency key, frozen at mount. The redeem route validates it first
   // and answers 409 `duplicate` on a replay, so a retry that re-read the key
@@ -79,7 +109,7 @@ export default function RedeemRewardChip({
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+    toastTimerRef.current = setTimeout(() => setToast(null), TOAST_VISIBLE_MS);
   }, []);
   useEffect(
     () => () => {
@@ -166,11 +196,19 @@ export default function RedeemRewardChip({
       // The route's own week read is the balance to show — re-reading points
       // here could race the write it just made.
       const spentMember = typeof data.member === "string" && data.member.trim() ? data.member.trim() : member;
-      const left = data?.weekData?.points?.[spentMember];
+      const left = usableNumber(data?.weekData?.points?.[spentMember]);
+      // A 202 (`reconciled: false`) means the ledger took the deduction but the
+      // snapshot the rest of the dashboard reads has not caught up. The
+      // redemption is genuinely done, but printing the ledger's number next to a
+      // dashboard still showing the pre-deduction one shows the family two
+      // different balances for the same child — so the honest Done chip withholds
+      // the number until the two agree.
+      const agreesWithDashboard = data?.reconciled !== false;
       closePin();
       setDone(true);
-      setBalance(Number.isFinite(left) ? left : null);
-      showToast(Number.isFinite(left) ? `Redeemed ✓ — ${firstName} has ${left} pts left` : "Redeemed ✓");
+      const shown = agreesWithDashboard ? left : null;
+      setBalance(shown);
+      showToast(shown === null ? "Redeemed ✓" : `Redeemed ✓ — ${firstName} has ${shown} pts left`);
     } catch {
       setBusy(false);
       setPinError(unreachableCopy());
