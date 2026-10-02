@@ -79,8 +79,7 @@ describe("chat-store core", () => {
     streamMock.fn.mockImplementation(({ onToken, signal }: any) => {
       onToken("partial ", "partial ");
       return new Promise((_res, rej) => {
-        // See the stop test below: attaching to an already-aborted signal hangs
-        // the suite rather than reporting it.
+        // See the stop test below for why `aborted` is checked before listening.
         const e = new Error("Generation stopped");
         e.name = "AbortError";
         if (signal.aborted) rej(e);
@@ -371,11 +370,11 @@ describe("chat-store core", () => {
     vi.stubGlobal("fetch", fetchMock);
     streamMock.fn.mockImplementation(({ onToken, signal }: any) => {
       onToken("partial", "partial");
-      // `stop()` must have run before the mock is reached, or the listener below
-      // attaches to an already-aborted signal, never fires, and the await hangs
-      // until the suite times out instead of reporting. send() has no await
-      // between creating this controller and calling the stream, which is the
-      // invariant this test depends on — check, don't assume.
+      // If `stop()` already ran before this mock was reached, the abort listener
+      // would attach to an already-aborted signal and never fire, so the promise
+      // would never settle and the await below would hang the suite instead of
+      // reporting. Check `aborted` before listening — do not rely on send() having
+      // no await between the controller and this call.
       return new Promise((_res, rej) => {
         const e = new Error("Generation stopped");
         e.name = "AbortError";

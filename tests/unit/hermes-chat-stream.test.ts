@@ -942,10 +942,16 @@ describe("hermes chat — a stopped turn persists nothing", () => {
     // instead of reporting, so the loop condition alone buys nothing.
     const deadline = Date.now() + 1000;
     for (;;) {
+      let timer: ReturnType<typeof setTimeout>;
       const { value } = await Promise.race([
         reader.read(),
-        new Promise<{ value?: undefined }>((r) => setTimeout(() => r({}), Math.max(0, deadline - Date.now()))),
+        new Promise<{ value?: undefined }>((r) => { timer = setTimeout(() => r({}), Math.max(0, deadline - Date.now())); }),
       ]);
+      // Clear the loser's timer so a fast read leaves no armed handle behind —
+      // harmless on real timers, a flake source the moment this file fakes them.
+      clearTimeout(timer!);
+      // When the timeout wins, `value` is undefined and this breaks at once, so
+      // the orphaned read can never steal a chunk the loop still needed.
       if (!value) break;
       seen += decoder.decode(value);
       if (seen.includes(needle)) break;

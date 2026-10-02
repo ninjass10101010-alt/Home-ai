@@ -585,10 +585,12 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       // socket and arrives here identically. The route cannot tell them apart (the
       // discriminator is client-side, `failError(stopSignal)`), and dropping is
       // still the lesser evil — resurrection was the bug this replaced — but it is
-      // a behaviour change worth knowing: MAX_ROUNDS(6) × AI_TIMEOUT_MS(60s) is
-      // 6 minutes of legitimate worst case, above the cap, so a watchdog-killed
-      // turn's answer no longer reaches the family thread either, and the only
-      // device holding it is the one showing the offline copy.
+      // a behaviour change worth knowing: a legitimate turn can take at least
+      // 6 minutes (up to MAX_ROUNDS(6) × targets × AI_TIMEOUT_MS(60s) with
+      // failover, since each target gets a fresh timeout), above the cap, so a
+      // watchdog-killed turn's answer no longer reaches the family thread
+      // either, and the only device holding it is the one showing the offline
+      // copy.
       if (!isClem && !clientGone && !request.signal.aborted) {
         await persistChatPair(request, message, finalContent, sessionName || "");
       }
