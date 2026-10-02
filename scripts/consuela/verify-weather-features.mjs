@@ -94,7 +94,7 @@ const cloudInfo = await page.evaluate((selector) => {
 ok(cloudInfo?.cover === "90" && cloudInfo.visible === "true", "poster cloud layer carries measured 90% cover", JSON.stringify(cloudInfo));
 ok(cloudInfo?.count === 2, "measured cover renders a finite two-layer cloud stack", cloudInfo?.count);
 ok(cloudInfo?.puffs.every(({ form, layer, opacity, visibility }) => form && layer && opacity > 0 && visibility === "visible"), "cloud puffs expose data-backed visible layers", JSON.stringify(cloudInfo?.puffs));
-ok(cloudInfo?.characters === 1, "measured front cloud carries one geometric character", `characters=${cloudInfo?.characters}`);
+ok(cloudInfo?.characters === 0, "poster clouds render face-free (Monster: no cloud character)", `characters=${cloudInfo?.characters}`);
 
 console.log("[visibility fog — 800m]");
 const fogA = await page.evaluate(() => !!document.querySelector('[data-testid="wx-fog"]'));
@@ -124,6 +124,12 @@ await page.waitForTimeout(2500);
 console.log("[birds — clear sky]");
 const sunCharacter = await page.evaluate(() => document.querySelectorAll('[data-testid="wx-poster-accents"] [data-weather-character="sun"]').length);
 ok(sunCharacter === 1, "clear-day sun carries the geometric character", `characters=${sunCharacter}`);
+const heroDigits = await page.evaluate((selector) => {
+  const card = document.querySelector(selector);
+  const digits = Array.from(card?.querySelectorAll('[data-testid="wx-hero-temp"] [data-weather-digit]') ?? []);
+  return { count: digits.length, value: digits.map((d) => d.getAttribute("data-weather-digit")).join("") };
+}, CARD);
+ok(heroDigits.count === 2 && heroDigits.value === "70", "hero temp renders as Monster capsule digits", JSON.stringify(heroDigits));
 const birdsD = await page.evaluate(() => {
   const b = document.querySelector('[data-testid="wx-birds"]');
   if (!b) return null;

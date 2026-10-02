@@ -14,7 +14,7 @@ import { moonPhase, moonPhaseName } from "@/lib/weather-astro";
 import { mixHex, posterTextSurface, weatherHeaderTextSurfaces } from "@/lib/weather-contrast";
 import { skyPhase, skySceneKey } from "@/lib/weather-scene-params";
 import { SKY, INK, GLASS, GLASS_NIGHT } from "./wx-tokens";
-import { SceneLayers, Condition, wmoToScene, dayCondition, conditionPresentation, wmoCondition, posterCarriesSun, useWxMotionOk } from "./WxToys";
+import { SceneLayers, Condition, MonsterDigit, wmoToScene, dayCondition, conditionPresentation, wmoCondition, posterCarriesSun, useWxMotionOk } from "./WxToys";
 import { useWallMode } from "@/hooks/useWallMode";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook, InsightEvent } from "@/lib/weather-insights";
@@ -1202,19 +1202,25 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                     <span data-testid="wx-hero-temp" className="text-[64px] font-black leading-none tracking-[-0.03em] sm:text-[80px] xl:text-[96px]" style={{ color: skin.ink }}>—</span>
                   ) : (
                     <>
+                      {/* Monster capsule digits — the span keeps the responsive
+                          text classes, so each glyph box (0.625em × 1em) tracks
+                          the 64/80/96px hero scale. The LAST digit peers; every
+                          other glyph sleeps (one eyeball across the number). */}
                       <span
                         data-testid="wx-hero-temp"
-                        className="relative z-10 text-[64px] font-black leading-none tracking-[-0.03em] tabular-nums sm:text-[80px] xl:text-[96px]"
+                        className="relative z-10 flex text-[64px] font-black leading-none tracking-[-0.03em] tabular-nums sm:text-[80px] xl:text-[96px]"
                         style={{ color: skin.ink }}
                       >
-                        {heroTemp}
+                        {String(heroTemp).split("").map((ch, i, chars) => (
+                          <MonsterDigit key={i} digit={ch} eye={i === chars.length - 1} />
+                        ))}
                       </span>
                       <span className="self-start mt-1.5 ml-0.5 text-[22px] font-light leading-none sm:mt-2 sm:text-[28px]" style={{ color: skin.inkSoft }} aria-hidden="true">°</span>
                       <span className="sr-only"> degrees</span>
                     </>
                   )}
                   </div>
-                  {/* clay condition — clamp prevents overflow on 320 px phones.
+                  {/* Monster condition — clamp prevents overflow on 320 px phones.
                       The poster already paints the sun on a clear day, so the
                       hero suppresses its own disc (same rule as the night moon). */}
                   <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: wall ? "124px" : "clamp(56px, 16vw, 80px)", height: wall ? "124px" : "clamp(56px, 16vw, 80px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>

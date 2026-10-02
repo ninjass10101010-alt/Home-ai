@@ -1,13 +1,14 @@
 "use client";
 
 import { CSSProperties, useEffect, useId, useState } from "react";
+import type { ReactNode } from "react";
 import { moonLitPath } from "@/lib/weather-astro";
 import type { SkyPhase } from "@/lib/weather-scene-params";
 import { cloudVariant, backCloudVariant, starOpacity } from "@/lib/weather-scene-params";
-import { WX_POSTER } from "./wx-tokens";
+import { MONSTER, WX_POSTER } from "./wx-tokens";
 
 // WxToys — the toy weather kit: SunOrb, CloudPuff, seagull Birds,
-// keyframe-wired SceneLayers, and the clay Condition icon set.
+// keyframe-wired SceneLayers, and the Monster capsule Condition icon set.
 // Gradients live in inline styles: Tailwind JIT cannot generate dynamic
 // from-[${…}] / opacity-${n} classes, so clay never uses them.
 
@@ -57,19 +58,17 @@ const CLOUD_VARIANTS: [number, number, number][][] = [
   [[56, 80, 36], [104, 66, 46], [150, 82, 32], [80, 94, 28]],
 ];
 
-export function CloudPuff({ className = "", style, tone = "day", layer, character = false, variant = 0, bob = false }: {
+export function CloudPuff({ className = "", style, tone = "day", layer, variant = 0, bob = false }: {
   className?: string;
   style?: CSSProperties;
   tone?: "day" | "poster" | "night" | "heavy-snow";
   layer?: "front" | "back";
-  character?: boolean;
   variant?: 0 | 1 | 2;
   bob?: boolean;
 }) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   const t = CLOUD_TONES[tone];
   const blobs = CLOUD_VARIANTS[variant];
-  const faceInk = tone === "night" ? "#34385F" : tone === "heavy-snow" ? "#3D4D66" : "#174F59";
   return (
     <div aria-hidden="true" className={`relative h-14 w-24 ${className}`} style={style} data-cloud-form={tone} data-cloud-layer={layer}>
       <svg
@@ -97,13 +96,6 @@ export function CloudPuff({ className = "", style, tone = "day", layer, characte
         </g>
       </svg>
       <div className="absolute -bottom-2 left-3 right-3 h-3 rounded-full blur-md" style={{ background: t.shade }} />
-      {character && (
-        <svg data-weather-character="cloud" className="absolute inset-0 h-full w-full" viewBox="0 0 200 120" fill="none">
-          <circle cx={blobs[1][0] - 14} cy={blobs[1][1] + 6} r="3.4" fill={faceInk} />
-          <circle cx={blobs[1][0] + 14} cy={blobs[1][1] + 6} r="3.4" fill={faceInk} />
-          <path d={`M${blobs[1][0] - 10} ${blobs[1][1] + 16} Q${blobs[1][0]} ${blobs[1][1] + 24} ${blobs[1][0] + 10} ${blobs[1][1] + 16}`} stroke={faceInk} strokeWidth="3.4" strokeLinecap="round" fill="none" />
-        </svg>
-      )}
     </div>
   );
 }
@@ -236,9 +228,6 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
               style={motionOk ? { animation: "wx-breathe 9s ease-in-out infinite", transformBox: "fill-box", transformOrigin: "center" } : undefined}
             />
             <circle data-weather-shape="sun" cx={sun.x} cy={sun.y} r={19} fill={SUN_DISC[phase].fill} opacity="0.92" />
-            <circle cx={sun.x - 6} cy={sun.y - 2} r="1.8" fill="#6A452A" />
-            <circle cx={sun.x + 6} cy={sun.y - 2} r="1.8" fill="#6A452A" />
-            <path d={`M${sun.x - 6} ${sun.y + 5}Q${sun.x} ${sun.y + 10} ${sun.x + 6} ${sun.y + 5}`} fill="none" stroke="#6A452A" strokeWidth="1.8" strokeLinecap="round" />
           </g>
           <g
             data-weather-shape="sun-rays"
@@ -298,12 +287,6 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
               <circle cx={-13} cy={4} r={1.8} fill="#9AA3C4" />
             </g>
             <circle r={21} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1" />
-            {/* the face fades with the light — no face at new moon */}
-            <g data-weather-face="moon" opacity={moonIllumination}>
-              <circle cx={-5} cy={-3} r="1.8" fill="#62658D" />
-              <circle cx={5} cy={-3} r="1.8" fill="#62658D" />
-              <path d="M-4 4 Q0 8 4 4" fill="none" stroke="#62658D" strokeWidth="1.8" strokeLinecap="round" />
-            </g>
           </g>
         </g>
       )}
@@ -408,7 +391,6 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
           layer="front"
           tone={cloudTone}
           variant={cloudVariant(numericCloudCover)}
-          character={scene !== "storm" && !heavySnow && frontCloudOpacity >= 0.25}
           bob={driftAnimation}
           className="absolute top-12 left-[-12px] -rotate-6 scale-[1.35]"
           style={{ opacity: frontCloudOpacity, visibility: frontCloudOpacity > 0 ? "visible" : "hidden", ...(driftAnimation && driftDuration != null ? ({ animation: `wx-drift ${driftDuration}s linear infinite`, "--travel": "calc(100cqw + 140px)" } as CSSProperties) : {}) }}
@@ -613,20 +595,116 @@ export function dayCondition(condition: string): ConditionCode {
   return "cloudy";
 }
 
-// ─── Clay icon set (inline clay styles — no dynamic Tailwind) ──
+// ─── Monster capsule icon set (Amendment A grammar) ─────────────
+// Every glyph is fat capsule segments (round-capped strokes), joint knobs
+// where segments meet, balloon-knot nubs at select ends, and white glints —
+// the locked monster-v3 language. Condition icons are face-free sculptural
+// silhouettes; only the hero digits carry faces (one sleeping face per
+// glyph, one peering eyeball across the whole hero number).
 
-const clay = (from: string, to: string, shade: string): CSSProperties => ({
-  background: `linear-gradient(to bottom, ${from}, ${to})`,
-  boxShadow: `inset 0 3px 6px rgba(255,255,255,.95), inset 0 -6px 10px ${shade}, 0 10px 20px -8px ${shade}`,
-});
-
-export function Sun({ size = 64 }: { size?: number }) {
+function SunG() {
   return (
-    <div
-      aria-hidden="true"
-      style={{ width: size, height: size, ...clay("#fff4c8", "#ffb974", "rgba(230,120,40,.45)"), borderRadius: 9999 }}
-      className="ring-1 ring-white/60"
-    />
+    <>
+      {Array.from({ length: 8 }, (_, i) => {
+        const ang = (i * Math.PI) / 4;
+        return (
+          <line
+            key={i}
+            x1={50 + Math.cos(ang) * 31}
+            y1={46 + Math.sin(ang) * 31}
+            x2={50 + Math.cos(ang) * 40}
+            y2={46 + Math.sin(ang) * 40}
+            stroke={MONSTER.orange}
+            strokeWidth="7"
+            strokeLinecap="round"
+          />
+        );
+      })}
+      <circle cx="50" cy="46" r="24" fill={MONSTER.orange} />
+      <circle cx="67" cy="63" r="6" fill={MONSTER.knotOrange} />
+      <ellipse cx="42" cy="37" rx="7" ry="4.5" fill={MONSTER.glint} opacity="0.5" />
+    </>
+  );
+}
+
+type CloudTone = "day" | "night" | "snow";
+
+function CloudG({ tone }: { tone: CloudTone }) {
+  const main = tone === "night" ? MONSTER.purple : tone === "snow" ? MONSTER.glint : MONSTER.teal;
+  const shade = tone === "snow" ? MONSTER.teal : MONSTER.blue;
+  return (
+    <>
+      <circle cx="34" cy="42" r="16" fill={main} />
+      <circle cx="55" cy="30" r="21" fill={main} />
+      <circle cx="74" cy="44" r="14" fill={main} />
+      <rect x="20" y="38" width="58" height="24" rx="12" fill={main} />
+      <circle cx="38" cy="56" r="11" fill={shade} opacity="0.9" />
+      <circle cx="62" cy="58" r="8" fill={shade} opacity="0.75" />
+      <circle cx="48" cy="22" r="5" fill={MONSTER.glint} opacity="0.5" />
+    </>
+  );
+}
+
+function DropsG() {
+  return (
+    <g strokeLinecap="round" strokeWidth="9">
+      <line x1="36" y1="60" x2="36" y2="74" stroke={MONSTER.blue} />
+      <line x1="52" y1="66" x2="52" y2="84" stroke={MONSTER.teal} />
+      <line x1="68" y1="60" x2="68" y2="74" stroke={MONSTER.blue} />
+    </g>
+  );
+}
+
+function BoltG() {
+  return (
+    <>
+      <path
+        d="M55 50 L40 74 H52 L46 92 L67 66 H54 Z"
+        fill={MONSTER.orange}
+        stroke={MONSTER.orange}
+        strokeWidth="5"
+        strokeLinejoin="round"
+      />
+      <circle cx="46" cy="90" r="4" fill={MONSTER.knotOrange} />
+      <path d="M47 70 L51 64" stroke={MONSTER.glint} strokeWidth="3.5" strokeLinecap="round" opacity="0.55" />
+    </>
+  );
+}
+
+function SnowflakeG({ x, y, s = 9 }: { x: number; y: number; s?: number }) {
+  return (
+    <g stroke={MONSTER.glint} strokeWidth="3.5" strokeLinecap="round">
+      {[0, 60, 120].map((d) => {
+        const rad = (d * Math.PI) / 180;
+        return <line key={d} x1={x - Math.cos(rad) * s} y1={y - Math.sin(rad) * s} x2={x + Math.cos(rad) * s} y2={y + Math.sin(rad) * s} />;
+      })}
+      <circle cx={x} cy={y} r="3.2" fill={MONSTER.teal} stroke="none" />
+    </g>
+  );
+}
+
+function FogG() {
+  return (
+    <>
+      <line x1="24" y1="16" x2="80" y2="16" stroke={MONSTER.purple} strokeWidth="12" strokeLinecap="round" />
+      <line x1="32" y1="34" x2="76" y2="34" stroke={MONSTER.teal} strokeWidth="12" strokeLinecap="round" />
+      <line x1="26" y1="52" x2="62" y2="52" stroke={MONSTER.blue} strokeWidth="12" strokeLinecap="round" />
+      <rect x="32" y="12" width="14" height="5" rx="2.5" fill={MONSTER.glint} opacity="0.5" />
+      <rect x="40" y="30" width="12" height="5" rx="2.5" fill={MONSTER.glint} opacity="0.45" />
+    </>
+  );
+}
+
+// The night-star cream tones are NightStars' own (grandfathered from the
+// pre-Monster glyph — night icons keep their established palette).
+function StarClusterG() {
+  return (
+    <>
+      <path d="m18 6 2.4 7.2L28 16l-7.6 2.8L18 26l-2.4-7.2L8 16l7.6-2.8L18 6Z" fill="#FFF9E6" />
+      <path d="m34 23 1.6 4.8L41 30l-5.4 2.2L34 37l-1.6-4.8L27 30l5.4-2.2L34 23Z" fill="#F6D7A8" />
+      <circle cx="12" cy="34" r="2" fill="#FFF9E6" />
+      <circle cx="29" cy="10" r="1.5" fill="#FFF9E6" />
+    </>
   );
 }
 
@@ -640,117 +718,264 @@ function NightStars({ size = 64 }: { size?: number }) {
       viewBox="0 0 48 48"
       fill="none"
     >
-      <path d="m18 6 2.4 7.2L28 16l-7.6 2.8L18 26l-2.4-7.2L8 16l7.6-2.8L18 6Z" fill="#FFF9E6" />
-      <path d="m34 23 1.6 4.8L41 30l-5.4 2.2L34 37l-1.6-4.8L27 30l5.4-2.2L34 23Z" fill="#F6D7A8" />
-      <circle cx="12" cy="34" r="2" fill="#FFF9E6" />
-      <circle cx="29" cy="10" r="1.5" fill="#FFF9E6" />
+      <StarClusterG />
     </svg>
   );
 }
 
+// Standalone Monster primitives (export surface kept stable; Condition
+// composes the same fragments into its condition svgs).
+export function Sun({ size = 64 }: { size?: number }) {
+  return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 100 100"><SunG /></svg>;
+}
+
 export function Cloud({ size = 80, tone = "day" }: { size?: number; tone?: "day" | "night" }) {
-  const c =
-    tone === "night"
-      ? clay("#e9e6ff", "#b9b3e8", "rgba(90,80,160,.45)")
-      : clay("#ffffff", "#e6ecf7", "rgba(140,155,195,.4)");
-  const s = size / 80;
   return (
-    <div aria-hidden="true" className="relative" style={{ width: size, height: size * 0.6 }}>
-      <div className="absolute rounded-full" style={{ left: 0, bottom: 0, width: 34 * s, height: 34 * s, ...c }} />
-      <div className="absolute rounded-full" style={{ left: 20 * s, bottom: 0, width: 46 * s, height: 46 * s, ...c }} />
-      <div className="absolute rounded-full" style={{ right: 0, bottom: 0, width: 30 * s, height: 30 * s, ...c }} />
-      <div className="absolute rounded-full" style={{ left: 12 * s, bottom: 0, width: 56 * s, height: 20 * s, ...c }} />
-      <div className="absolute inset-x-3 -bottom-2 h-3 rounded-full bg-slate-500/15 blur-md" />
-    </div>
+    <svg aria-hidden="true" width={size} height={size * 0.72} viewBox="0 0 100 72">
+      <CloudG tone={tone === "night" ? "night" : "day"} />
+    </svg>
   );
 }
 
 export function Drop({ size = 22, delay = 0 }: { size?: number; delay?: number }) {
   return (
-    <div
-      aria-hidden="true"
-      style={{
-        width: size,
-        height: size * 1.3,
-        animationDelay: `${delay}s`,
-        borderRadius: "50% 50% 50% 50%/60% 60% 40% 40%",
-        transform: "rotate(180deg)",
-        ...clay("#dff1ff", "#8fc7ff", "rgba(60,120,200,.45)"),
-      }}
-    />
+    <svg aria-hidden="true" width={size} height={size * 1.3} viewBox="0 0 22 30" style={{ animationDelay: `${delay}s` }}>
+      <line x1="11" y1="9" x2="11" y2="22" stroke={MONSTER.blue} strokeWidth="13" strokeLinecap="round" />
+      <circle cx="11" cy="7" r="3.5" fill={MONSTER.teal} />
+    </svg>
   );
 }
 
 export function Bolt({ size = 48 }: { size?: number }) {
-  const id = useId();
   return (
-    <svg aria-hidden="true" width={size} height={size * 1.3} viewBox="0 0 48 62" className="drop-shadow-[0_8px_16px_rgba(230,160,40,.45)]">
-      <defs>
-        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#fff2b8" />
-          <stop offset="1" stopColor="#ffc857" />
-        </linearGradient>
-      </defs>
+    <svg aria-hidden="true" width={size} height={size * 1.3} viewBox="0 0 100 130">
       <path
-        d="M28 2 L6 34 H22 L18 60 L42 24 H26 Z"
-        fill={`url(#${id})`}
-        stroke="rgba(255,255,255,.7)"
-        strokeWidth="2"
+        d="M55 6 L38 38 H52 L44 88 L70 44 H54 Z"
+        fill={MONSTER.orange}
+        stroke={MONSTER.orange}
+        strokeWidth="8"
         strokeLinejoin="round"
       />
-      <path d="M26 6 L11 32" stroke="rgba(255,255,255,.8)" strokeWidth="3" strokeLinecap="round" />
+      <circle cx="44" cy="84" r="5" fill={MONSTER.knotOrange} />
+      <path d="M50 22 L42 36" stroke={MONSTER.glint} strokeWidth="4" strokeLinecap="round" opacity="0.55" />
     </svg>
   );
 }
 
 export function Flake({ size = 28 }: { size?: number }) {
-  const arm =
-    "absolute left-1/2 top-1/2 h-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-white to-[#cfe3ff] shadow-[0_0_6px_rgba(255,255,255,.9)]";
   return (
-    <div aria-hidden="true" className="relative" style={{ width: size, height: size }}>
-      {[0, 60, 120].map((d) => (
-        <div key={d} className={arm} style={{ width: size, rotate: `${d}deg` }} />
-      ))}
-      <div className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
-    </div>
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 28 28">
+      <SnowflakeG x={14} y={14} s={10} />
+    </svg>
   );
 }
 
 export function Fog({ width = 80 }: { width?: number }) {
-  return (
-    <div aria-hidden="true" className="flex flex-col gap-1.5" style={{ width }}>
-      {[1, 0.8, 0.6].map((w, i) => (
-        <div
-          key={i}
-          style={{
-            width: `${w * 100}%`,
-            marginLeft: i % 2 ? "auto" : 0,
-            opacity: 0.9 - i * 0.2,
-            height: 12,
-            borderRadius: 9999,
-            ...clay("#ffffff", "#dde6f3", "rgba(140,155,195,.3)"),
-          }}
-        />
-      ))}
-    </div>
-  );
+  return <svg aria-hidden="true" width={width} height={width * 0.6} viewBox="0 0 100 60"><FogG /></svg>;
 }
 
 export function Wind({ width = 72 }: { width?: number }) {
   return (
+    <svg aria-hidden="true" width={width} height={width * 0.6} viewBox="0 0 72 44" fill="none" strokeLinecap="round" strokeWidth="7">
+      <path d="M6 12 H44 a7 7 0 1 0 -7 -7" stroke={MONSTER.teal} />
+      <path d="M6 24 H56 a7 7 0 1 1 -7 7" stroke={MONSTER.blue} />
+      <path d="M6 36 H30" stroke={MONSTER.purple} />
+    </svg>
+  );
+}
+
+// ─── MonsterDigit — the capsule-grammar hero digit set ───────────
+// Geometry extrapolated from the locked monster-v3 reference glyphs
+// ("4", "5", "7", "2"): every digit is 2–5 capsule segments + knobs +
+// knots + glints on a fixed 200×320 box (tabular alignment), with one
+// sleeping face (or, for the hero's single peering digit, an eyeball).
+
+const DIGIT_VIEW_W = 200;
+const DIGIT_VIEW_H = 320;
+const DIGIT_ASPECT = DIGIT_VIEW_W / DIGIT_VIEW_H;
+
+function DigitSleepFace({ x, y, ink, rotate = 0 }: { x: number; y: number; ink: string; rotate?: number }) {
+  return (
+    <g transform={rotate ? `rotate(${rotate} ${x} ${y})` : undefined} stroke={ink} strokeWidth="5" fill="none" strokeLinecap="round">
+      <path d={`M${x} ${y} q8 9 16 0`} />
+      <path d={`M${x + 6} ${y + 15} q6 6 12 0`} />
+    </g>
+  );
+}
+
+function DigitEye({ x, y, r = 22 }: { x: number; y: number; r?: number }) {
+  return (
+    <>
+      <circle cx={x} cy={y} r={r} fill={MONSTER.glint} />
+      <circle cx={x + r / 6} cy={y + r / 6} r={r * 0.42} fill={MONSTER.pupil} />
+      <circle cx={x + r / 3} cy={y - r / 8} r={r * 0.15} fill={MONSTER.glint} />
+    </>
+  );
+}
+
+type DigitGlyph = (peering: boolean) => ReactNode;
+
+const MONSTER_DIGITS: Record<string, DigitGlyph> = {
+  // 0 — two capsule loops (red left arc, blue right arc) + orange/teal knobs
+  "0": (peering) => (
+    <>
+      <path d="M100 66 A56 94 0 0 0 100 254" stroke={MONSTER.red} strokeWidth="44" fill="none" strokeLinecap="round" />
+      <path d="M100 66 A56 94 0 0 1 100 254" stroke={MONSTER.blue} strokeWidth="44" fill="none" strokeLinecap="round" />
+      <circle cx="100" cy="66" r="26" fill={MONSTER.orange} />
+      <circle cx="100" cy="254" r="26" fill={MONSTER.teal} />
+      <circle cx="132" cy="94" r="6" fill={MONSTER.glint} opacity="0.5" />
+      <rect x="54" y="200" width="10" height="22" rx="5" fill={MONSTER.glint} opacity="0.5" />
+      {peering ? <DigitEye x={128} y={180} r={22} /> : <DigitSleepFace x={148} y={152} ink={MONSTER.inkBlue} />}
+    </>
+  ),
+  // 1 — teal flag + blue stem + orange foot, orange joint knob
+  "1": (peering) => (
+    <>
+      <line x1="58" y1="112" x2="100" y2="62" stroke={MONSTER.teal} strokeWidth="40" strokeLinecap="round" />
+      <line x1="100" y1="62" x2="100" y2="268" stroke={MONSTER.blue} strokeWidth="50" strokeLinecap="round" />
+      <line x1="100" y1="268" x2="136" y2="268" stroke={MONSTER.orange} strokeWidth="38" strokeLinecap="round" />
+      <circle cx="58" cy="112" r="22" fill={MONSTER.teal} />
+      <circle cx="100" cy="62" r="24" fill={MONSTER.orange} />
+      <circle cx="136" cy="268" r="9" fill={MONSTER.knotOrange} />
+      <rect x="86" y="128" width="10" height="24" rx="5" fill={MONSTER.glint} opacity="0.5" />
+      {peering ? <DigitEye x={100} y={182} r={20} /> : <DigitSleepFace x={80} y={172} ink={MONSTER.inkBlue} />}
+    </>
+  ),
+  // 2 — mockup "2": orange bar + teal nub, red curve, blue stem, purple base
+  "2": (peering) => (
+    <>
+      <line x1="58" y1="74" x2="158" y2="74" stroke={MONSTER.orange} strokeWidth="46" strokeLinecap="round" />
+      <circle cx="58" cy="74" r="25" fill={MONSTER.teal} />
+      <path d="M106 102 C 168 108, 162 150, 118 174 L 92 194" stroke={MONSTER.red} strokeWidth="44" fill="none" strokeLinecap="round" />
+      <line x1="92" y1="194" x2="92" y2="264" stroke={MONSTER.blue} strokeWidth="44" strokeLinecap="round" />
+      <line x1="74" y1="264" x2="152" y2="264" stroke={MONSTER.purple} strokeWidth="40" strokeLinecap="round" />
+      <circle cx="74" cy="264" r="10" fill={MONSTER.knotPurple} />
+      <rect x="72" y="62" width="16" height="8" rx="4" fill={MONSTER.glint} opacity="0.5" />
+      <circle cx="112" cy="148" r="5" fill={MONSTER.glint} opacity="0.55" />
+      {peering ? <DigitEye x={128} y={136} r={20} /> : <DigitSleepFace x={96} y={68} ink={MONSTER.inkOrange} />}
+    </>
+  ),
+  // 3 — two open arc capsules (red upper bowl, blue lower bowl) + teal joint
+  "3": (peering) => (
+    <>
+      <path d="M84 158 C 145 158, 145 66, 84 66" stroke={MONSTER.red} strokeWidth="42" fill="none" strokeLinecap="round" />
+      <path d="M88 162 C 152 162, 152 258, 88 258" stroke={MONSTER.blue} strokeWidth="44" fill="none" strokeLinecap="round" />
+      <circle cx="86" cy="160" r="30" fill={MONSTER.teal} />
+      <circle cx="84" cy="66" r="9" fill={MONSTER.knotRed} />
+      <circle cx="118" cy="92" r="5.5" fill={MONSTER.glint} opacity="0.5" />
+      <circle cx="128" cy="242" r="5" fill={MONSTER.glint} opacity="0.5" />
+      {peering ? <DigitEye x={136} y={200} r={20} /> : <DigitSleepFace x={134} y={192} ink={MONSTER.inkBlue} rotate={90} />}
+    </>
+  ),
+  // 4 — mockup "4": teal roof, red/blue pillars, purple crossbar, orange foot
+  "4": (peering) => (
+    <>
+      <line x1="66" y1="92" x2="134" y2="92" stroke={MONSTER.teal} strokeWidth="50" strokeLinecap="round" />
+      <line x1="66" y1="100" x2="66" y2="224" stroke={MONSTER.red} strokeWidth="52" strokeLinecap="round" />
+      <line x1="134" y1="100" x2="134" y2="272" stroke={MONSTER.blue} strokeWidth="52" strokeLinecap="round" />
+      <line x1="34" y1="228" x2="166" y2="228" stroke={MONSTER.purple} strokeWidth="44" strokeLinecap="round" />
+      <line x1="134" y1="272" x2="168" y2="272" stroke={MONSTER.orange} strokeWidth="38" strokeLinecap="round" />
+      <circle cx="34" cy="228" r="11" fill={MONSTER.knotPurple} />
+      <circle cx="168" cy="272" r="9" fill={MONSTER.knotOrange} />
+      <circle cx="98" cy="80" r="5.5" fill={MONSTER.glint} opacity="0.55" />
+      <rect x="122" y="120" width="9" height="22" rx="4.5" fill={MONSTER.glint} opacity="0.5" />
+      <rect x="44" y="220" width="18" height="9" rx="4.5" fill={MONSTER.glint} opacity="0.45" />
+      <circle cx="152" cy="264" r="5" fill={MONSTER.glint} opacity="0.5" />
+      {peering ? <DigitEye x={134} y={190} r={20} /> : <DigitSleepFace x={58} y={156} ink={MONSTER.inkRed} />}
+    </>
+  ),
+  // 5 — mockup "5": orange bar + teal nub, red shoulder + blob, blue belly;
+  //     the locked glyph keeps BOTH the sleeping bar face and the peering eye
+  "5": (peering) => (
+    <>
+      {peering && <DigitEye x={102} y={174} r={24} />}
+      <line x1="22" y1="54" x2="124" y2="54" stroke={MONSTER.orange} strokeWidth="50" strokeLinecap="round" />
+      <circle cx="22" cy="54" r="26" fill={MONSTER.teal} />
+      <line x1="46" y1="76" x2="46" y2="140" stroke={MONSTER.red} strokeWidth="48" strokeLinecap="round" />
+      <circle cx="64" cy="152" r="33" fill={MONSTER.red} />
+      <path d="M68 168 C 144 178, 140 248, 48 256" stroke={MONSTER.blue} strokeWidth="48" fill="none" strokeLinecap="round" />
+      <path d="M79 50 q9 9 18 0 M86 66 q6 6 12 0" stroke={MONSTER.inkOrange} strokeWidth="5" fill="none" strokeLinecap="round" />
+      <rect x="36" y="42" width="18" height="9" rx="4.5" fill={MONSTER.glint} opacity="0.5" />
+      <circle cx="110" cy="212" r="5" fill={MONSTER.glint} opacity="0.5" />
+      <circle cx="124" cy="54" r="12" fill={MONSTER.knotOrange} />
+      <circle cx="46" cy="140" r="9" fill={MONSTER.knotRed} />
+    </>
+  ),
+  // 6 — blue loop + red tail capsule, red balloon knot at the tail tip
+  "6": (peering) => (
+    <>
+      <circle cx="100" cy="206" r="54" fill="none" stroke={MONSTER.blue} strokeWidth="46" />
+      <path d="M94 154 C 62 128, 56 84, 88 52" stroke={MONSTER.red} strokeWidth="46" fill="none" strokeLinecap="round" />
+      <circle cx="88" cy="52" r="10" fill={MONSTER.knotRed} />
+      <circle cx="100" cy="120" r="5" fill={MONSTER.glint} opacity="0.55" />
+      <rect x="126" y="168" width="10" height="20" rx="5" fill={MONSTER.glint} opacity="0.5" />
+      {peering ? <DigitEye x={154} y={202} r={20} /> : <DigitSleepFace x={154} y={194} ink={MONSTER.inkBlue} rotate={90} />}
+    </>
+  ),
+  // 7 — mockup "7": teal bar, red diagonal, orange corner knob, red knot
+  "7": (peering) => (
+    <>
+      <line x1="50" y1="78" x2="150" y2="78" stroke={MONSTER.teal} strokeWidth="52" strokeLinecap="round" />
+      <line x1="150" y1="82" x2="88" y2="268" stroke={MONSTER.red} strokeWidth="52" strokeLinecap="round" />
+      <circle cx="150" cy="79" r="33" fill={MONSTER.orange} />
+      <circle cx="50" cy="78" r="24" fill={MONSTER.teal} />
+      <circle cx="88" cy="268" r="10" fill={MONSTER.knotRed} />
+      <circle cx="128" cy="66" r="5.5" fill={MONSTER.glint} opacity="0.55" />
+      <circle cx="104" cy="232" r="5" fill={MONSTER.glint} opacity="0.5" />
+      {peering ? <DigitEye x={120} y={170} r={20} /> : <DigitSleepFace x={112} y={162} ink={MONSTER.inkRed} />}
+    </>
+  ),
+  // 8 — two blob loops (orange upper ring, blue lower ring) + purple waist
+  "8": (peering) => (
+    <>
+      <circle cx="100" cy="112" r="42" fill="none" stroke={MONSTER.orange} strokeWidth="40" />
+      <circle cx="100" cy="208" r="54" fill="none" stroke={MONSTER.blue} strokeWidth="44" />
+      <circle cx="100" cy="159" r="30" fill={MONSTER.purple} />
+      <circle cx="100" cy="70" r="9" fill={MONSTER.knotOrange} />
+      <circle cx="74" cy="84" r="5" fill={MONSTER.glint} opacity="0.5" />
+      <circle cx="146" cy="188" r="5.5" fill={MONSTER.glint} opacity="0.5" />
+      {peering ? <DigitEye x={54} y={204} r={20} /> : <DigitSleepFace x={54} y={198} ink={MONSTER.inkBlue} rotate={90} />}
+    </>
+  ),
+  // 9 — blue loop + red tail, red knot at the tail tip (six, flipped)
+  "9": (peering) => (
+    <>
+      <circle cx="100" cy="116" r="54" fill="none" stroke={MONSTER.blue} strokeWidth="46" />
+      <path d="M106 168 C 138 194, 144 238, 112 268" stroke={MONSTER.red} strokeWidth="46" fill="none" strokeLinecap="round" />
+      <circle cx="112" cy="268" r="10" fill={MONSTER.knotRed} />
+      <rect x="116" y="62" width="10" height="20" rx="5" fill={MONSTER.glint} opacity="0.5" />
+      <circle cx="124" cy="224" r="5" fill={MONSTER.glint} opacity="0.55" />
+      {peering ? <DigitEye x={50} y={112} r={20} /> : <DigitSleepFace x={50} y={106} ink={MONSTER.inkBlue} rotate={90} />}
+    </>
+  ),
+  // minus — one red capsule + teal nub + dark knot (no face)
+  "-": () => (
+    <>
+      <line x1="56" y1="160" x2="144" y2="160" stroke={MONSTER.red} strokeWidth="40" strokeLinecap="round" />
+      <circle cx="56" cy="160" r="20" fill={MONSTER.teal} />
+      <circle cx="144" cy="160" r="9" fill={MONSTER.knotRed} />
+      <rect x="76" y="152" width="16" height="8" rx="4" fill={MONSTER.glint} opacity="0.5" />
+    </>
+  ),
+};
+
+export function MonsterDigit({ digit, size, eye = false }: { digit: string; size?: number; eye?: boolean }) {
+  const glyph = MONSTER_DIGITS[digit];
+  // Without `size` the box tracks the parent font-size (0.625em × 1em), so
+  // the hero's responsive text classes drive 64/80/96px digit boxes.
+  const box: CSSProperties = size
+    ? { width: size * DIGIT_ASPECT, height: size }
+    : { width: `${DIGIT_ASPECT}em`, height: "1em" };
+  if (!glyph) return <span>{digit}</span>;
+  return (
     <svg
+      data-weather-digit={digit}
       aria-hidden="true"
-      width={width}
-      height={width * 0.6}
-      viewBox="0 0 72 44"
-      fill="none"
-      strokeLinecap="round"
-      strokeWidth="5"
-      className="drop-shadow-[0_6px_12px_rgba(140,155,195,.35)]"
+      viewBox={`0 0 ${DIGIT_VIEW_W} ${DIGIT_VIEW_H}`}
+      className="block shrink-0"
+      style={box}
     >
-      <path d="M4 14 H44 a7 7 0 1 0 -7 -7" stroke="#ffffff" />
-      <path d="M4 26 H56 a7 7 0 1 1 -7 7" stroke="#e3ebf7" />
-      <path d="M4 38 H30" stroke="#ffffff" />
+      {glyph(eye)}
     </svg>
   );
 }
@@ -768,64 +993,74 @@ export function Wind({ width = 72 }: { width?: number }) {
 export function Condition({ code, size = 80, hideSun = false }: { code: ConditionCode; size?: number; hideSun?: boolean }) {
   switch (code) {
     case "clear":
-      return hideSun ? null : <Sun size={size * 0.8} />;
+      return hideSun ? null : (
+        <svg data-weather-icon="clear" aria-hidden="true" width={size * 0.8} height={size * 0.8} viewBox="0 0 100 100">
+          <SunG />
+        </svg>
+      );
     case "cloudy":
-      return <Cloud size={size} />;
+      return (
+        <svg data-weather-icon="cloudy" aria-hidden="true" width={size} height={size * 0.72} viewBox="0 0 100 72">
+          <CloudG tone="day" />
+        </svg>
+      );
     case "partly":
       return (
-        <div className="relative" style={{ width: size, height: size * 0.75 }}>
-          <div className="absolute top-0 right-2">
-            <Sun size={size * 0.5} />
-          </div>
-          <div className="absolute bottom-0 left-0">
-            <Cloud size={size * 0.85} />
-          </div>
+        <div data-weather-icon="partly" aria-hidden="true" className="relative" style={{ width: size, height: size * 0.75 }}>
+          <svg className="absolute top-0 right-1" width={size * 0.5} height={size * 0.5} viewBox="0 0 100 100">
+            <SunG />
+          </svg>
+          <svg className="absolute bottom-0 left-0" width={size * 0.85} height={size * 0.85 * 0.72} viewBox="0 0 100 72">
+            <CloudG tone="day" />
+          </svg>
         </div>
       );
     case "partly-night":
       return (
-        <div data-weather-icon="partly-night" className="relative" style={{ width: size, height: size * 0.75 }}>
-          <div className="absolute top-0 right-2">
-            <NightStars size={size * 0.5} />
-          </div>
-          <div className="absolute bottom-0 left-0">
-            <Cloud size={size * 0.85} tone="night" />
-          </div>
+        <div data-weather-icon="partly-night" aria-hidden="true" className="relative" style={{ width: size, height: size * 0.75 }}>
+          <svg className="absolute top-0 right-2" width={size * 0.5} height={size * 0.5} viewBox="0 0 48 48" fill="none">
+            <StarClusterG />
+          </svg>
+          <svg className="absolute bottom-0 left-0" width={size * 0.85} height={size * 0.85 * 0.72} viewBox="0 0 100 72">
+            <CloudG tone="night" />
+          </svg>
         </div>
       );
     case "rain":
       return (
-        <div className="relative" style={{ width: size, height: size }}>
-          <Cloud size={size} />
-          <div className="absolute inset-x-3 bottom-0 flex justify-between">
-            <Drop size={size * 0.18} />
-            <Drop size={size * 0.18} delay={0.3} />
-            <Drop size={size * 0.18} delay={0.6} />
-          </div>
-        </div>
+        <svg data-weather-icon="rain" aria-hidden="true" width={size} height={size} viewBox="0 0 100 100">
+          <g transform="translate(0 -4)">
+            <CloudG tone="day" />
+          </g>
+          <DropsG />
+        </svg>
       );
-      case "storm":
-        return (
-          <div className="relative" style={{ width: size, height: size }}>
-          <Cloud size={size} tone="night" />
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-0">
-            <Bolt size={size * 0.5} />
-          </div>
-        </div>
+    case "storm":
+      return (
+        <svg data-weather-icon="storm" aria-hidden="true" width={size} height={size} viewBox="0 0 100 100">
+          <g transform="translate(0 -4)">
+            <CloudG tone="night" />
+          </g>
+          <BoltG />
+        </svg>
       );
     case "snow":
       return (
-        <div data-weather-icon="snow" className="relative" style={{ width: size, height: size }}>
-          <Cloud size={size} />
-          <div className="absolute inset-x-4 bottom-0 flex justify-between">
-            <Flake size={size * 0.2} />
-            <Flake size={size * 0.16} />
-            <Flake size={size * 0.2} />
-          </div>
-        </div>
+        <svg data-weather-icon="snow" aria-hidden="true" width={size} height={size} viewBox="0 0 100 100">
+          <g transform="translate(0 -4)">
+            <CloudG tone="snow" />
+          </g>
+          <SnowflakeG x={32} y={74} />
+          <SnowflakeG x={52} y={84} />
+          <SnowflakeG x={70} y={74} />
+        </svg>
       );
     case "fog":
-      return <Fog width={size} />;
+      return (
+        <svg data-weather-icon="fog" aria-hidden="true" width={size} height={size * 0.6} viewBox="0 0 100 60">
+          <FogG />
+        </svg>
+      );
     case "night":
       return <NightStars size={size * 0.8} />;
   }

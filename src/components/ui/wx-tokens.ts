@@ -70,3 +70,24 @@ export const GLASS_NIGHT = GLASS
   .replace("rgba(255,255,255,0.26)", "rgba(255,255,255,0.36)")
   .replace("rgba(255,255,255,0.08)", "rgba(255,255,255,0.18)")
   .replace("border-white/[0.28]", "border-white/[0.40]");
+
+// Monster capsule palette (Amendment A3): the five segment colors every
+// Monster glyph (hero digits + condition icons) is built from, the darker
+// balloon-knot shades, the shared glint, and the face inks (dark-on-color,
+// per segment family, like the locked monster-v3 mockup). Raw hex lives
+// here — the allowlisted token file — so WxToys carries none of it.
+export const MONSTER = {
+  red: "#EF4D6F",
+  blue: "#2E6DB4",
+  purple: "#A98BDC",
+  orange: "#F6A83C",
+  teal: "#7DCDE4",
+  knotRed: "#C2304F",
+  knotOrange: "#DE8F2E",
+  knotPurple: "#8B6BC2",
+  glint: "#FFFFFF",
+  inkRed: "#5F1230",
+  inkBlue: "#10284A",
+  inkOrange: "#7A4A16",
+  pupil: "#101418",
+} as const;

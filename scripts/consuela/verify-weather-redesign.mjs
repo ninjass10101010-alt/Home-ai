@@ -167,7 +167,8 @@ async function newPage(vp) {
   });
   check(night.card, "card rendered at night", "card missing at night");
   if (night.card) {
-    check(night.skyBg?.includes("rgb(111, 116, 168"), `poster night sky active (${night.skyBg}…)`, `night sky wrong: ${night.skyBg}`);
+    // Monster flat night wash (Task 5): top stop #8b90c6 = rgb(139, 144, 198)
+    check(night.skyBg?.includes("rgb(139, 144, 198"), `poster night sky active (${night.skyBg}…)`, `night sky wrong: ${night.skyBg}`);
     check(night.tempColor === "rgb(30, 41, 59)", `slate hero numerals (${night.tempColor})`, `hero color ${night.tempColor}`);
   }
   check(errors.length === 0, "0 page errors", `page errors: ${errors.join(" | ")}`);

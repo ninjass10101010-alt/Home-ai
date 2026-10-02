@@ -80,6 +80,14 @@ function modalCondition(dialog: HTMLElement): Element | null {
   return dialog.querySelector('[data-testid="wx-modal-condition"]')?.firstElementChild ?? null;
 }
 
+// The hero temp renders as Monster capsule-digit SVGs — its glyphs are read
+// through the data-weather-digit hooks, not textContent.
+function heroDigitsText(root: Element | null | undefined): string {
+  return Array.from(root?.querySelectorAll('[data-testid="wx-hero-temp"] [data-weather-digit]') ?? [])
+    .map((node) => node.getAttribute("data-weather-digit") ?? "")
+    .join("");
+}
+
 function metricRow(dialog: HTMLElement, label: string): HTMLElement | undefined {
   return Array.from(dialog.querySelectorAll<HTMLElement>("div")).find((node) =>
     node.className.includes("flex items-baseline") && node.textContent?.trim().startsWith(label)
@@ -452,7 +460,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
       await settle();
 
       // card — 70°F, not 21°C
-      expect(el.querySelector('[data-testid="wx-hero-temp"]')?.textContent).toBe("70");
+      expect(heroDigitsText(el)).toBe("70");
       expect(el.textContent).toContain("H:75°");
 
       // no °F/°C toggle anywhere on the card
@@ -519,7 +527,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(svg.style.transform).toBe("rotate(70deg)");
   });
 
-  it("renders the day strip as an accessible slider with clay icons and precip labels when rain is likely", async () => {
+  it("renders the day strip as an accessible slider with capsule icons and precip labels when rain is likely", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ precip: 80 }));
     const el = render(<WeatherWidget />);
     await settle();
@@ -528,11 +536,12 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(strip).toBeTruthy();
     expect(strip!.textContent).toContain("NOW");
 
-    // one clay icon cell per hour instead of the old SVG curve…
+    // one Monster capsule icon cell per hour instead of the old SVG curve…
     expect(strip!.textContent).toContain("70°");
-    // …and rain shows as precip labels, not SVG rain ticks
+    // …and rain shows as precip labels, not SVG rain ticks — the cell icons
+    // are hooked capsule glyphs (their blob rects are icon anatomy, not ticks)
     expect(strip!.textContent).toContain("80%");
-    expect(strip!.querySelectorAll("svg rect").length).toBe(0);
+    expect((strip!.querySelectorAll("[data-weather-icon]") ?? []).length).toBeGreaterThan(0);
   });
 
   it("previews the next hour via keyboard and returns to now on Escape", async () => {
@@ -583,7 +592,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(strip.getAttribute("aria-valuenow")).toBe("1");
     expect(el.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("rain");
     expect((el.querySelector('.wx-sky[data-active="true"]') as HTMLElement).className).toContain("from-[#adb9d3]");
-    expect(el.querySelector('[data-testid="wx-hero-temp"]')?.textContent).toBe("70");
+    expect(heroDigitsText(el)).toBe("70");
 
     act(() => {
       strip.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -1728,7 +1737,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const el = render(<WeatherWidget />);
     await settle();
 
-    expect(el.querySelector('[data-testid="wx-hero-temp"]')?.textContent).toBe("70");
+    expect(heroDigitsText(el)).toBe("70");
     const strip = el.querySelector('[role="slider"][aria-label="Preview the rest of the day"]') as HTMLElement;
     act(() => strip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
 
@@ -2023,22 +2032,28 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const posterMoons = scene?.querySelectorAll('[data-weather-character="moon"]');
     expect(posterMoons).toHaveLength(1);
     expect(el.querySelector('[data-testid="wx-hero-icon"] [data-testid="wx-moon"]')).toBeNull();
-    expect(el.querySelector('[data-testid="wx-hero-icon"] [data-weather-icon="night-stars"]')).toBeTruthy();
+    // code 1 after dark renders the partly-night star badge — stars, never a
+    // second moon (the pure-clear night glyph stays night-stars, see below)
+    const heroGlyph = el.querySelector('[data-testid="wx-hero-icon"] [data-weather-icon]');
+    expect(heroGlyph?.getAttribute("data-weather-icon")).toBe("partly-night");
   });
 
-  it("renders a phase-lit poster moon with an illumination-tracked face", () => {
+  it("renders a phase-lit poster moon — illumination tracked, face deleted", () => {
     const full = render(<SceneLayers scene="night" showFog={false} showBirds={false} moonPhase={0.5} moonIllumination={1} />);
     const moonGroup = full.querySelector('[data-weather-character="moon"]');
     expect(full.querySelectorAll('[data-weather-character="moon"]').length).toBe(1);
     expect(moonGroup?.getAttribute("data-moon-phase")).toBe("0.5000");
     expect(moonGroup?.getAttribute("data-moon-illumination")).toBe("1.00");
     expect(moonGroup?.querySelector('[data-weather-shape="night-orbit"]')).toBeTruthy();
-    expect(moonGroup?.querySelector('[data-weather-face="moon"]')?.getAttribute("opacity")).toBe("1");
+    // Monster grammar: the moon is a sculptural disc — no face elements left
+    expect(moonGroup?.querySelector('[data-weather-face="moon"]')).toBeNull();
+    expect(full.querySelectorAll("[data-weather-face]").length).toBe(0);
 
     const quarter = render(<SceneLayers scene="night" showFog={false} showBirds={false} moonPhase={0.25} moonIllumination={0.5} />);
     const quarterMoon = quarter.querySelector('[data-weather-character="moon"]');
     expect(quarterMoon?.getAttribute("data-moon-phase")).toBe("0.2500");
-    expect(quarterMoon?.querySelector('[data-weather-face="moon"]')?.getAttribute("opacity")).toBe("0.5");
+    expect(quarterMoon?.getAttribute("data-moon-illumination")).toBe("0.50");
+    expect(quarter.querySelectorAll("[data-weather-face]").length).toBe(0);
   });
 
   it("keeps the sun character and swaps static rays for a rotating ray group", () => {
@@ -2067,7 +2082,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(moonGroup?.getAttribute("data-moon-phase")).toBe("0.5000");
   });
 
-  it("gives condition-backed poster scenes friendly geometric weather characters", async () => {
+  it("gives condition-backed poster scenes their scene objects — sun character stays, clouds render face-free", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 0, precip: 0 }));
     const clear = render(<WeatherWidget />);
     await settle();
@@ -2076,7 +2091,11 @@ describe("WeatherWidget — Not Boring redesign", () => {
     mockOpenMeteo(makeOpenMeteoPayload({ code: 61, cloud: 86, precip: 72 }));
     const rainy = render(<WeatherWidget />);
     await settle();
-    expect(rainy.querySelector('[data-testid="wx-poster-clouds"] [data-weather-character="cloud"]')).toBeTruthy();
+    // the measured front cloud still renders as a blob layer, but the cloud
+    // face SVG is gone (Monster grammar: scene puffs carry no faces)
+    expect(rainy.querySelector('[data-testid="wx-poster-clouds"] [data-cloud-layer="front"]')).toBeTruthy();
+    expect(rainy.querySelectorAll('[data-weather-character="cloud"]')).toHaveLength(0);
+    expect(rainy.querySelectorAll("[data-weather-face]")).toHaveLength(0);
   });
 
   it("maps clear-sky cloud visibility to 0% and 100% cover", () => {
@@ -2311,17 +2330,17 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.textContent).toContain("Partly Cloudy");
   });
 
-  it("hero shows the clay icon for the live condition when the poster has no sun", async () => {
+  it("hero shows the capsule icon for the live condition when the poster has no sun", async () => {
     // No solar interval → the poster paints no sun character, so the hero
-    // carries the condition disc itself.
+    // carries the condition glyph itself.
     mockOpenMeteo(makeOpenMeteoPayload({ code: 0, sunrise: null as unknown as string }));
     const el = render(<WeatherWidget />);
     await settle();
-    // code 0 by day → clear → clay sun disc with an inline clay gradient
+    // code 0 by day → clear → capsule sun glyph, one icon, no character hooks
     const icon = el.querySelector('[data-testid="wx-hero-icon"]');
     expect(icon).toBeTruthy();
-    const sun = icon!.firstChild as HTMLElement;
-    expect(sun.style.background).toContain("linear-gradient");
+    expect(icon?.querySelector('[data-weather-icon="clear"]')).toBeTruthy();
+    expect(icon?.querySelector("[data-weather-character]")).toBeNull();
   });
 
   it("renders one sun on a clear day — the poster's, never a second hero disc", async () => {
@@ -2373,7 +2392,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.querySelector(".mix-blend-overlay")).toBeTruthy();
   });
 
-  it("details modal shows the toy hero and clay icons, no emoji", async () => {
+  it("details modal shows the toy hero and capsule icons, no emoji", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ code: 61 }));
     const el = render(<WeatherWidget />);
     await settle();
@@ -2387,9 +2406,10 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const skies = Array.from(dialog.querySelectorAll('.wx-sky[data-active="true"]'));
     expect(skies.length).toBe(1);
     expect(skies[0].className).toContain("from-[#adb9d3]");
-    // hourly chips render clay icons (inline clay gradients) instead of emoji glyphs
+    // hourly chips render Monster capsule icons (one data-weather-icon svg per
+    // chip) instead of emoji glyphs
     const chips = dialog.querySelector('[role="list"]');
-    expect(chips?.innerHTML).toContain("linear-gradient");
+    expect((chips?.querySelectorAll("[data-weather-icon]") ?? []).length).toBeGreaterThan(0);
     expect(chips?.textContent).not.toMatch(/☀|🌤|⛅|☁|🌧|❄|⛈|🌫/);
   });
 
