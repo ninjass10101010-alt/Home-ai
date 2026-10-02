@@ -669,6 +669,47 @@ reads as a dead stream.
    dispatched before the message guard, `buildChatContext`, and the stream
    branch: parent session only, zero tools armed, grounded context pack,
    validated JSON, one repair retry, and it never reaches `persistChatPair`.
+10. **A SETTLED stream is un-stoppable, and `[DONE]` therefore promises
+    delivery rather than storage.** The terminator goes out **before**
+    `persistChatPair`, so `chat-stream.ts` resolves while the route is still
+    persisting. `chat-store` drops `abortController` at that resolve — not in
+    its `finally`, which runs after the reconcile round trip — so the always-
+    enabled stop button cannot abort a stream that has already produced
+    everything. Without that, a late stop tore the socket down, the route saw
+    `request.signal.aborted`, skipped the persist, and an answer the user was
+    reading in full reached no other device: not this one (it never got a
+    "Stopped.") and not the family's. Two narrower corrections to the older
+    phrasing: a **Clem** turn (`!isClem`) stores nothing at all, so for that
+    agent the terminator promises delivery and nothing more; and the promise is
+    conditional even for Consuela, because any abort before the persist guard
+    still suppresses the store. What is left is deliberately the narrow
+    condition: a stop landing after the last token but **before the client
+    processes `[DONE]`**, where dropping is the correct reading of the user's
+    intent. `streamInFlight` stays true until the `finally`, so the thread takes
+    no second turn mid-persist.
+11. **The live activity surfaces belong to the turn IN FLIGHT.** `chat-store`
+    publishes `liveTurnId` synchronously in `send()` and clears it in the
+    `finally`; `chat/page.tsx` gates the live chips and the live transcript on
+    *that* row owning `thinking` / `toolEvents`, not on the newest assistant row
+    in the thread. A finished turn keeps its display-only fields for the life of
+    the page (`stripVolatile` guards persistence, not the live tree), so a
+    thread-scoped gate hides turn 2's activity for its entire tool-gathering
+    phase. The handoff at finalize is still what makes the live copy go away, so
+    the two copies never coexist across the reconcile await. Tool activity is
+    keyed by tool **NAME**: a turn that calls the same tool twice shows one chip
+    carrying that tool's last state.
+12. **The calendar surfaces are partial-aware.** `mergedTodaysEvents` returns
+    `{ rows, googleUnavailable }`, not a bare array, and `get_todays_events` /
+    `get_dashboard_summary` add a **`google_unavailable`** leg beside the
+    existing `meals_error` / `tasks_error` / `events_error` legs. A single-source
+    failure returns the other source's rows — a dead Google sync must not blank
+    the family's own events — but a **partially-read day is never reported as a
+    clear one**, and school events live only in the Google collection. The flag
+    is false whenever the Google leg was read successfully, however empty it came
+    back: a day genuinely without school events is a real answer.
+    `liveEventsRange` (behind `get_calendar_range` and the assistant-context
+    calendar pack) still conflates a single-source failure; its `null` contract
+    with the pack is unchanged and is a separate wave.
 
 ---
 
