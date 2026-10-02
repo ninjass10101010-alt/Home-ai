@@ -892,9 +892,12 @@ describe("hermes chat — attempt frames", () => {
     // attempt frame would have nothing to reset. Asserting the PARSED shape —
     // not the absence of the string "event:" — is what also proves the body is
     // the parseable JSON chat-stream.ts reads `content` off, which a bare
-    // `data: {...}` token frame would silently break. The rest of the key set
-    // is left free: the route adds `proposals` when a tool round surfaced one,
-    // and pinning the exact shape would call that feature a regression.
+    // `data: {...}` token frame would silently break. Only `proposals` is
+    // tolerated beyond `content`: the route adds it when a tool round surfaced
+    // one, and pinning the exact shape would call that feature a regression.
+    // This fixture reasons about nothing, so the allowlist here cannot police a
+    // `reasoning` key — the reasoning-bearing fixture in "never puts a buffered
+    // round's reasoning on the response body" is what guards that.
     const keys = Object.keys(JSON.parse(body));
     expect(keys).toContain("content");
     expect(keys.filter((k) => k !== "content" && k !== "proposals")).toEqual([]);
@@ -1282,19 +1285,26 @@ describe("hermes chat — reasoning + tool activity frames", () => {
     expect(payloads(body, "message").map((p) => p.t)).toEqual(["Done."]);
   });
 
-  // `callAi` (the non-streaming call behind the buffered POST) read only
-  // `content` and `tool_calls`, so it could not tell a round whose reasoning ate
-  // the token budget from a dead provider. The buffered path has no frames to
-  // forward, so the reasoning rides the response body the client renders from —
-  // the sibling of the `proposals` array — and, like every reasoning string here,
-  // stays out of the persisted pair.
-  it("reports buffered-path reasoning on the response body, never in the persisted pair", async () => {
+  // `callAi` still reads `reasoning_content` — that read is what separates a
+  // round whose reasoning ate the token budget from a provider that never
+  // answered, and it is what a future consumer would build on. It does NOT put
+  // the transcript on the wire: this body is the shape `chat-stream.ts` parses,
+  // and it reads `content` and `proposals` and nothing else, so a reasoning round
+  // answers the same plain `{content}` shape a non-reasoning one does.
+  //
+  // The fixture really does return a transcript, so "no `reasoning` key" is not
+  // passing for the wrong reason the way the allowlist check above does on its
+  // no-reasoning fixture. `json.content` proving the fixture was parsed is what
+  // makes the allowlist below load-bearing rather than fixture-dependent.
+  it("never puts a buffered round's reasoning on the response body", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(
       JSON.stringify({ choices: [{ message: { role: "assistant", content: "Done.", reasoning_content: "thought about it" } }] }),
       { status: 200, headers: { "content-type": "application/json" } })));
     const res = await post({ message: "hi" });
     const json = await res.json();
-    expect(json.reasoning).toBe("thought about it");
+    expect(json.content).toBe("Done.");
+    expect("reasoning" in json).toBe(false);
+    expect(Object.keys(json).filter((k) => k !== "content" && k !== "proposals")).toEqual([]);
     expect(assistantRow()?.content).toBe("Done.");
     expect(JSON.stringify(mocks.insertChatMessage.mock.calls)).not.toContain("thought about it");
   });

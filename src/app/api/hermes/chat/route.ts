@@ -775,12 +775,11 @@ export async function POST(request: NextRequest) {
       // Final round = forced tool-free wrap-up (mirrors the streamed path).
       const wrapup = round === MAX_ROUNDS - 1;
       let content = "";
-      let reasoning = "";
       let tool_calls: ToolCall[] | undefined;
       for (const target of targets) {
         const callStarted = Date.now();
         try {
-          ({ content, reasoning, tool_calls } = await callAi(
+          ({ content, tool_calls } = await callAi(
             wrapup ? [...messages, { role: "system", content: WRAPUP_NOTE }] : messages,
             wrapup ? { target } : { tools, toolChoice: "auto", target },
           ));
@@ -812,15 +811,16 @@ export async function POST(request: NextRequest) {
           brain: ctx.brain,
           targets: ctx.targets,
         });
-        // The answering round's reasoning, if the model thought before replying —
-        // the buffered sibling of the streamed `reasoning` frame, and the sibling
-        // of `proposals`. Both keys stay absent when there is nothing to show, so
-        // the plain `{content}` shape is unchanged for a non-reasoning provider.
-        const display = {
-          ...(reasoning ? { reasoning } : {}),
+        // The buffered body is `content` plus `proposals` — the keys
+        // `chat-stream.ts` reads on this path, and the only ones it reads. A
+        // reasoning round answers the same shape a non-reasoning one does: the
+        // transcript reaches the client as `reasoning` FRAMES on the streamed
+        // path (`callAiStream`, which emits one whole frame for a buffered
+        // provider), never as a body key.
+        return NextResponse.json({
+          content,
           ...(proposals.length ? { proposals } : {}),
-        };
-        return NextResponse.json({ content, ...display });
+        });
       }
 
       const roundToolCalls = normalizeToolCallIds(tool_calls);
