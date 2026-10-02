@@ -1198,6 +1198,39 @@ function markReconciling(entry: TaskOutboxEntry, reason: string, message = ""): 
   return RETAINED;
 }
 
+/**
+ * A command that names a task id the server's snapshot does not hold is a
+ * STRANDED id, not a broken chore: the device kept an id the server re-keyed
+ * away (`recurringClone` issues each day's clone with a NEW id and the same
+ * title/assignee, "repeat last week" and delete-then-re-add re-create a row the
+ * same way), so the row is on screen but unaddressable.
+ *
+ * `markFailed` is terminal — the entry is never retried — so the old behaviour
+ * left a permanent outbox entry, a permanent "N couldn't be sent." banner, and
+ * a display-only optimistic hide that was released and put the row straight
+ * back. The family could never delete that chore from that device and could
+ * never clear the warning.
+ *
+ * The row cannot exist on the server, so drop it on the device: the user's
+ * intent ("this chore is not on my screen") becomes true, the entry leaves the
+ * outbox instead of accumulating, and the misleading failure disappears. This
+ * invents NO server state — there was nothing on the server to delete. It is
+ * deliberately narrow: only the exact `unknown_task` code, only a 404, and only
+ * when the payload carries a usable `taskId`. A named refusal
+ * (`unknown_task_owner`), a config leg, and a 401/403/409/5xx all keep their
+ * existing classification.
+ */
+function strandedTaskId(
+  entry: TaskOutboxEntry,
+  status: number,
+  body: TaskOutboxAcknowledgement,
+): number | null {
+  if (status !== 404) return null;
+  if (reasonOf(body) !== "unknown_task") return null;
+  const taskId = Number(entry.payload.taskId);
+  return Number.isSafeInteger(taskId) ? taskId : null;
+}
+
 async function acknowledge(
   entry: TaskOutboxEntry,
   body: TaskOutboxAcknowledgement,
@@ -1880,6 +1913,13 @@ async function processEntry(
       if (status === 409) return await classifyConflict(entry, body);
       if (status === 200) return markRetryable(entry, "projection", "unreconciled_success");
       return markReconciling(entry, reasonOf(body) || "projection_pending");
+    }
+    const stranded = strandedTaskId(entry, status, body);
+    if (stranded !== null) {
+      // `acknowledge()` needs the adoption seam; without it the row cannot
+      // actually leave the screen, and it degrades to "adoption_unavailable"
+      // rather than reporting a success that never happened.
+      return await acknowledge(entry, { ...body, taskId: stranded, deleted: true }, options);
     }
     return classifyFailure(entry, status, body);
   } catch {

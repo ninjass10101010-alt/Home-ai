@@ -599,18 +599,70 @@ export function mergeTasksSnapshot(
     // assignee match. Two members can share a chore title ("Walking Dogs" for
     // Bailey, Emily and Jasmine) — title-only dedupe silently dropped all but
     // the first; the same title on the SAME assignee is still one duplicate.
-    const sameLogical = (a: any, b: any) =>
-      a.id === b.id ||
-      (String(a.title ?? "") === String(b.title ?? "") &&
-        String(a.assignee ?? "") === String(b.assignee ?? ""));
+    const sameChore = (a: any, b: any) =>
+      String(a.title ?? "") === String(b.title ?? "") &&
+      String(a.assignee ?? "") === String(b.assignee ?? "");
+    const sameLogical = (a: any, b: any) => a.id === b.id || sameChore(a, b);
+
+    // A stale id is not a duplicate — it is an UNREACHABLE row. A server row
+    // that matches a local row by title+assignee but carries a different id
+    // means the server re-keyed that chore, and the device kept the old id
+    // forever: `recurringClone()` issues the day's clone with a NEW id and the
+    // SAME title/assignee (lineage IS title+cadence+owner), and "repeat last
+    // week" / delete-then-re-add re-create a row the same way. The stranded id
+    // is what every task command then sends, so the server's
+    // `liveSnapshotTasks()` does not contain it, `POST /api/tasks/manage`
+    // answers 404 `unknown_task`, the outbox marks the command failed, and the
+    // chore can never be deleted or completed from that device.
+    //
+    // The SERVER id is authority, so adopt it. Guards, because a wrong re-key
+    // is its own kind of corruption:
+    //   - never onto a tombstoned id (it is a deliberate removal);
+    //   - never onto an id a DIFFERENT live local row already holds (that would
+    //     collapse two visible chores into one);
+    //   - never from/to a non-integer id (an unusable id cannot be addressed);
+    //   - only on the title+assignee key, never on a title-only match.
+    const snapshotTombstones = new Set(
+      ((snapshot.deletedTaskIds || []) as any[]).map((n) => Number(n)),
+    );
+    const localIds = new Set(tasks.map((t: any) => Number(t.id)));
+    const rekey = new Map<number, number>();
+    // Iterate the RAW rows, never `restored`: a raw id that is not an integer
+    // has its id MINTED above (Date.now()+random), and re-keying onto that
+    // would swap a stale-but-real id for a second invented one. The server's
+    // own id decides validity.
+    for (const raw of (Array.isArray(snapshot.tasks) ? snapshot.tasks : []) as any[]) {
+      const serverId = Number(raw?.id);
+      if (!Number.isSafeInteger(serverId)) continue;
+      if (snapshotTombstones.has(serverId)) continue;
+      if (localIds.has(serverId)) continue;
+      const stale = tasks.find((p: any) => Number(p.id) !== serverId && sameChore(p, raw));
+      if (!stale) continue;
+      const staleId = Number(stale.id);
+      if (!Number.isSafeInteger(staleId)) continue;
+      rekey.set(staleId, serverId);
+      localIds.delete(staleId);
+      localIds.add(serverId);
+    }
+    if (rekey.size) {
+      // Only the id changes: every other local field survives, so a kid's
+      // un-landed tap keeps its completion/pending stamps and the existing
+      // proof gates below still arbitrate it against the snapshot.
+      tasks = tasks.map((t: any) => {
+        const next = rekey.get(Number(t.id));
+        return next === undefined ? t : { ...t, id: next };
+      });
+      tasksChanged = true;
+    }
+
     const fresh: any[] = [];
     for (const t of restored) {
-      const matchesLocal = currentTasks.some((p: any) => sameLogical(p, t));
+      const matchesLocal = tasks.some((p: any) => sameLogical(p, t));
       const matchesAccepted = fresh.some((f: any) => sameLogical(f, t));
       if (!matchesLocal && !matchesAccepted) fresh.push(t);
     }
     if (fresh.length) {
-      tasks = [...currentTasks, ...fresh];
+      tasks = [...tasks, ...fresh];
       tasksChanged = true;
     }
   }

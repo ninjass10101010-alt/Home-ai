@@ -251,6 +251,42 @@ route writes nothing to the server. **Do not fork the key or the entry shape** �
 import `TASK_OUTBOX_STORAGE_KEY` and the queue helpers, never re-implement a
 localStorage command buffer.
 
+**A task id is only meaningful while the snapshot still holds it — so the
+snapshot's id is authority and a stale local id must be healed, never
+addressed.** `mergeTasksSnapshot` matches rows by id **or** by
+`(title, assignee)`. A server row matching a local row on that second key with a
+**different** id means the server **re-keyed the chore**: `recurringClone()`
+(`src/lib/task-recurrence.ts`) issues each day's recurrence clone with a NEW id
+and the same title/assignee (a lineage IS title+cadence+owner), and "↻ Repeat
+last week" plus delete-then-re-add re-create a row the same way. The merge
+therefore **re-keys the local row onto the server's id** rather than freezing the
+stale one. Without that, the stranded id is what every command sends:
+`liveSnapshotTasks()` does not contain it, `POST /api/tasks/manage` answers `404
+unknown_task`, the outbox marked the entry `failed` (terminal, never retried),
+the display-only optimistic hide was released, and the chore could never be
+deleted or completed from that device while a permanent "couldn't be sent"
+banner sat above the list. The re-key is deliberately narrow — it fires **only**
+on the `(title, assignee)` key with a differing id, and never onto a tombstoned
+id, never onto an id a different live local row already holds, never from/to a
+non-integer id (validity is read from the **raw** snapshot row, because
+`restored` mints an id for a malformed one), and it changes **only** the id so a
+kid's un-landed completion/pending stamps survive for the existing proof gates
+to arbitrate.
+
+**A terminal `unknown_task` self-heals device-side.** `404 unknown_task` on a
+command carrying a usable `taskId` means the id was stranded, so the outbox
+tombstones it **on that device** and acknowledges the entry instead of failing
+it forever (`strandedTaskId` → `acknowledge` in
+`src/lib/task-operation-outbox.ts`). The row cannot exist on the server, so
+dropping it locally is the user's actual intent and invents no server state —
+there was nothing to delete. A named refusal (`unknown_task_owner`), a config
+leg with no `taskId`, and every 401/403/409/5xx keep their existing
+classification, and with no adoption seam the heal degrades to
+`adoption_unavailable` rather than reporting a success that never happened.
+**Honest trade-off:** a completion tap that lands in this window is dropped
+rather than replayed — the chore reappears under its true id, uncompleted, so
+the state is visible and retryable instead of silently paid or silently lost.
+
 **What the on-disk entry payload may contain.** A `/api/rewards/redeem` entry
 persists `{ rewardId, memberName, parentName }` in localStorage. `parentName` is
 the approver's **identity**, not a credential: `/api/rewards/redeem` re-resolves

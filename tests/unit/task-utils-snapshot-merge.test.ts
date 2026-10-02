@@ -75,8 +75,17 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
         { id: 99, title: "Laundry", assignee: "Alex" },
       ],
     });
-    expect(res.tasksChanged).toBe(false);
-    expect(res.tasks).toBe(local);
+    // Still ONE "Laundry" — that is what this test has always guarded. But the
+    // row now carries the SERVER's id (99), not the local 2: a title+assignee
+    // match against a different id means the server re-keyed the chore
+    // (`recurringClone`, "repeat last week", delete-then-re-add), and keeping
+    // the stale id is what made those chores permanently undeletable — the
+    // stranded id 404s `unknown_task` on every command. So `tasksChanged` is
+    // true and the array identity necessarily differs.
+    expect(res.tasks).toHaveLength(2);
+    expect(res.tasks.filter((t) => t.title === "Laundry")).toHaveLength(1);
+    expect(res.tasks.find((t) => t.title === "Laundry")?.id).toBe(99);
+    expect(res.tasksChanged).toBe(true);
   });
 
   it("dedupes WITHIN the snapshot — two id-less rows sharing a title land once", () => {
