@@ -2,8 +2,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AtmosphericProvider, useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-import { HOLIDAY_PALETTE } from "@/lib/holiday";
+import { AtmosphericProvider, useAtmosphericTheme, HOLIDAY_ATMOSPHERE } from "@/hooks/useAtmosphericTheme";
+import { HOLIDAY_PALETTE, HOLIDAY_STYLE } from "@/lib/holiday";
 
 vi.mock("@/hooks/useWeather", () => ({
   useWeatherConfig: () => ({
@@ -66,5 +66,14 @@ describe("AtmosphericProvider holiday resolution", () => {
     vi.setSystemTime(new Date("2026-01-20T12:00:00"));
     const { result } = renderAtmospheric();
     expect(result.current.holiday).toBe("none");
+  });
+
+  it("all 11 holiday accents are single-sourced across PALETTE, STYLE and ATMOSPHERE", () => {
+    const keys = Object.keys(HOLIDAY_PALETTE) as Array<keyof typeof HOLIDAY_PALETTE>;
+    expect(keys).toHaveLength(11);
+    for (const key of keys) {
+      expect(HOLIDAY_ATMOSPHERE[key]?.accentColor, `${key} atmosphere`).toBe(HOLIDAY_PALETTE[key].accent);
+      expect(HOLIDAY_STYLE[key]?.accent, `${key} style`).toBe(HOLIDAY_PALETTE[key].accent);
+    }
   });
 });

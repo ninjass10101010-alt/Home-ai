@@ -19,6 +19,18 @@ describe("detectAutoHoliday windows", () => {
     expect(detectAutoHoliday(d("2026-11-02"))).toBe("diadelosmuertos");
     expect(detectAutoHoliday(d("2026-11-03"))).toBe("none");
   });
+  it("christmas boundary: 12/14 out, 12/15 in", () => {
+    expect(detectAutoHoliday(d("2026-12-14"))).toBe("none");
+    expect(detectAutoHoliday(d("2026-12-15"))).toBe("christmas");
+  });
+  it("stpatricks boundary: 3/13 out, 3/14 in", () => {
+    expect(detectAutoHoliday(d("2026-03-13"))).toBe("none");
+    expect(detectAutoHoliday(d("2026-03-14"))).toBe("stpatricks");
+  });
+  it("thanksgiving boundary: 11/28 in, 11/29 out", () => {
+    expect(detectAutoHoliday(d("2026-11-28"))).toBe("thanksgiving");
+    expect(detectAutoHoliday(d("2026-11-29"))).toBe("none");
+  });
 });
 describe("HOLIDAY_PALETTE", () => {
   it("has 11 holiday entries", () => {
