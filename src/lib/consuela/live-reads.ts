@@ -16,7 +16,7 @@ import { withAdmin, getAuthedPB } from "@/lib/pb-auth";
 import { DEMO_USER_ID, sanitizeUserId } from "@/lib/auth";
 import { readUserCapsules } from "@/lib/time-capsule";
 import type { TimeCapsule } from "@/db/features/time-capsule";
-import type { SkillTreeProfile } from "@/db/features/skill-tree";
+import type { SkillTreeProfile, SkillBranch, Quest } from "@/db/features/skill-tree";
 import { localTodayISO, localWeekdayShort } from "@/lib/local-date";
 import { mergeTodaysEvents, mergeEventsRange } from "./todays-events";
 import { readSnapshotTasks, type SnapshotTask } from "@/lib/snapshot-tasks";
@@ -353,6 +353,26 @@ export async function liveTimeCapsules(userId: string): Promise<TimeCapsule[] | 
   try {
     const rows = await readUserCapsules(userId);
     return Array.isArray(rows) ? rows : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Skill branches + quests, read live, or null when EITHER read FAILED. Reads
+ *  PocketBase directly instead of calling skill-tree.ts's getSkillBranches /
+ *  getAllQuests — both of those `catch → []`, so an outage would answer with a
+ *  real profile beside `branches: []`, which reads as "no branches yet". Empty
+ *  arrays here mean the catalog is genuinely empty. */
+export async function liveSkillCatalog(): Promise<{ branches: SkillBranch[]; quests: Quest[] } | null> {
+  try {
+    const [branches, quests] = await Promise.all([
+      withAdmin(async (pb) => pb.collection("skill_branches").getFullList<SkillBranch>({ sort: "order", requestKey: null })),
+      withAdmin(async (pb) => pb.collection("quests").getFullList<Quest>({ sort: "branchId, order", requestKey: null })),
+    ]);
+    return {
+      branches: Array.isArray(branches) ? branches : [],
+      quests: Array.isArray(quests) ? quests : [],
+    };
   } catch {
     return null;
   }

@@ -102,7 +102,13 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/pb-auth", () => ({
-  withAdmin: async (fn: any) => fn(h.pb),
+  // The real withAdmin authenticates before handing over the client
+  // (ensureAuth), so expired/missing admin creds throw from it too — not just
+  // from getAuthedPB.
+  withAdmin: async (fn: any) => {
+    if (h.failAuth) throw new Error("pb auth down");
+    return fn(h.pb);
+  },
   getAuthedPB: async () => {
     if (h.failAuth) throw new Error("pb auth down");
     return h.pb;
@@ -256,6 +262,44 @@ describe("get_skill_tree — a kid always gets their OWN tree, read-only", () =>
     expect(res.profile.totalXP).toBe(500);
   });
 
+  it("reports a failed catalog read instead of a confident empty tree", async () => {
+    h.rows.skill_tree_profiles = [profile({ id: "emily-1", userId: "Emily", totalXP: 10 })];
+    h.rows.quests = [{ id: "q1", branchId: "b1", title: "Read a book", type: "read", difficulty: "easy", xpReward: 10, order: 0 }];
+    h.failReads.add("skill_branches");
+
+    const res = await runTool("get_skill_tree", {}, KID);
+
+    // "There are no branches yet" and "we could not look" must not read the same
+    // to a kid asking "what can I unlock?".
+    expect(res.error).toMatch(/do not guess/i);
+    expect(res.branches).toBeUndefined();
+    expect(res.quests).toBeUndefined();
+  });
+
+  it("treats a failed quest read as a failed catalog too", async () => {
+    h.rows.skill_tree_profiles = [profile({ id: "emily-1", userId: "Emily", totalXP: 10 })];
+    h.rows.skill_branches = [{ id: "b1", name: "Math Explorer", icon: "🔢", unlockLevel: 1, unlockXP: 0, prerequisiteBranches: [], order: 0 }];
+    h.failReads.add("quests");
+
+    const res = await runTool("get_skill_tree", {}, KID);
+
+    expect(res.error).toMatch(/do not guess/i);
+    expect(res.quests).toBeUndefined();
+  });
+
+  it("reports an honestly empty catalog (read succeeded) with no error", async () => {
+    h.rows.skill_tree_profiles = [profile({ id: "emily-1", userId: "Emily", totalXP: 10 })];
+    h.rows.skill_branches = [];
+    h.rows.quests = [];
+
+    const res = await runTool("get_skill_tree", {}, KID);
+
+    expect(res.error).toBeUndefined();
+    expect(res.branches).toEqual([]);
+    expect(res.quests).toEqual([]);
+    expect(res.profile.totalXP).toBe(10);
+  });
+
   it("fails closed when there is no caller — never falls back to the shared legacy row", async () => {
     h.rows.skill_tree_profiles = [profile({ id: "legacy-1", userId: "demo-user", totalXP: 999 })];
 
@@ -311,6 +355,52 @@ describe("readSkillTreeProfile — never creates, never serves the legacy namesp
 
     expect(res.id).toBe("emily-1");
     expect(res.totalXP).toBe(10);
+    expect(h.writes).toEqual([]);
+  });
+});
+
+describe("liveSkillCatalog — the honest catalog reader behind get_skill_tree", () => {
+  it("exists as a live reader", () => {
+    expect(typeof (liveReads as any).liveSkillCatalog).toBe("function");
+  });
+
+  it("returns null when the branches read fails", async () => {
+    h.failReads.add("skill_branches");
+
+    expect(await (liveReads as any).liveSkillCatalog()).toBeNull();
+    expect(h.writes).toEqual([]);
+  });
+
+  it("returns null when the quests read fails", async () => {
+    h.failReads.add("quests");
+
+    expect(await (liveReads as any).liveSkillCatalog()).toBeNull();
+  });
+
+  it("returns null when the PocketBase auth itself fails", async () => {
+    h.failAuth = true;
+
+    expect(await (liveReads as any).liveSkillCatalog()).toBeNull();
+  });
+
+  it("returns empty arrays — NOT null — for a genuinely empty catalog", async () => {
+    h.rows.skill_branches = [];
+    h.rows.quests = [];
+
+    const res = await (liveReads as any).liveSkillCatalog();
+
+    expect(res).not.toBeNull();
+    expect(res).toEqual({ branches: [], quests: [] });
+  });
+
+  it("returns the real rows when both reads succeed", async () => {
+    h.rows.skill_branches = [{ id: "b1", name: "Math Explorer", order: 0 }];
+    h.rows.quests = [{ id: "q1", branchId: "b1", title: "Read a book" }];
+
+    const res = await (liveReads as any).liveSkillCatalog();
+
+    expect(res.branches.map((b: any) => b.id)).toEqual(["b1"]);
+    expect(res.quests.map((q: any) => q.id)).toEqual(["q1"]);
     expect(h.writes).toEqual([]);
   });
 });

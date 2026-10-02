@@ -26,7 +26,6 @@ import {
   findSnapshotTask,
 } from "@/lib/snapshot-tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
-import { getSkillBranches, getAllQuests } from "@/lib/skill-tree";
 import { calculateXPProgress } from "@/db/features/skill-tree";
 import { getStoreLabel, groupByStore } from "@/lib/stores";
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
@@ -55,6 +54,7 @@ import {
   liveRewards,
   liveTimeCapsules,
   readSkillTreeProfile,
+  liveSkillCatalog,
   textEmoji,
   mealsForWeek,
   parseJSON,
@@ -78,6 +78,7 @@ export {
   liveRewards,
   liveTimeCapsules,
   readSkillTreeProfile,
+  liveSkillCatalog,
   textEmoji,
   formatEventTime,
   mealsForWeek,
@@ -2650,7 +2651,15 @@ const TOOLS: Tool[] = [
       if (profile === null) {
         return summarize({ error: "skill tree data unavailable — do not guess anyone's XP, retry later" });
       }
-      const [branches, quests] = await Promise.all([getSkillBranches(), getAllQuests()]);
+      // Same honesty rule for the CATALOG as for the profile: a PocketBase
+      // outage behind getSkillBranches/getAllQuests answered `[]` beside a real
+      // profile, which the model reads as "there are no branches yet" — a
+      // confident "no" to "what can I unlock?".
+      const catalog = await liveSkillCatalog();
+      if (catalog === null) {
+        return summarize({ error: "skill tree catalog unavailable — do not guess branches or quests, retry later" });
+      }
+      const { branches, quests } = catalog;
       const questsByBranch: Record<string, any[]> = {};
       for (const quest of quests) {
         (questsByBranch[quest.branchId] ??= []).push(quest);
