@@ -113,15 +113,16 @@ The admin tools work via internal HTTP calls from the tool handler (runs inside 
 
 ```
 User → Ask Consuela → POST /api/hermes/chat
-  → Consuela (Hermes agent) decides tool_call
+  → the dashboard-owned provider chain resolves the brain (resolveChatTargets → consuela_ai_providers)
+  → the chain's model decides a tool_call
   → Tool handler runs inside Next.js
     → Internal fetch to /api/admin/version, /api/admin/update, /api/admin/containers, /api/admin/restart
-  → Results formatted → Sent back to Hermes for natural response
-  → User sees natural-language answer
+  → Results formatted → fed back into the message stack for the next round
+  → User sees the natural-language answer (streamed — see §5.7 for the wire contract)
 ```
 
 **New API routes:**
-- `src/app/api/admin/containers/route.ts` — GET: lists three key containers (dashboard, PB, Hermes) with state, status, ports, image
+- `src/app/api/admin/containers/route.ts` — GET: lists three key containers (dashboard, PB, and the `hermes-agent-2` gateway container that still runs on the NAS — its **chat role** was retired 2026-09-07) with state, status, ports, image
 - `src/app/api/admin/restart/route.ts` — POST: restarts a named container from an allow-list
 
 **Env vars needed:**
@@ -352,13 +353,15 @@ scope.** Do not "migrate" any of the surfaces below; they are already on the
 seam and the notes that once said otherwise are retired. What each one rides
 now:
 
-- **Hermes/MUSE task tools (Tasks 5 + 6).** `complete_task` / `reopen_task` ride
+- **Chat/MUSE task tools (Tasks 5 + 6)** — chat reaches these through the
+  dashboard-owned provider chain (§5.7), MUSE through its own inbound surface;
+  neither is a Hermes container. `complete_task` / `reopen_task` ride
   the **claim** seam (`kind:"complete"` / `kind:"undo"`) and `add_task` /
   `update_task` / `delete_task` ride the **manage** seam
   (`kind:"add"|"update"|"delete"`) — none of them writes a snapshot, a tombstone
   or a mirror row itself, and the `mutateSnapshot` / `upsertSnapshotTask` /
   `deleteSnapshotTask` / `mirrorTaskToCollection` imports are gone from
-  `src/lib/hermes-tools.ts`.
+  `src/lib/hermes-tools.ts` (a retained filename — see §5.7).
 - **Reward redemption (Task 3).** `POST /api/rewards/redeem` runs through
   `applyWeekLedgerOperation` (`src/lib/ledger-operations.ts`) — the **shared**
   helper, under the same lock order (`week-ledger → snapshot-keyed`), with a
@@ -546,6 +549,126 @@ rotate/revoke are **not** written to the MUSE audit log (known v1 gap — the
    elsewhere.** The week rollover is its only writer; it keeps the newest four
    week keys (one-off completed defs for repeat-last-week), and every other
    surface reads it.
+
+### 5.7 Chat request path + SSE contract (2026-10-01)
+
+**The chat path is the dashboard-owned provider chain.** Since 2026-09-07 no
+gateway container answers chat. `resolveChatTargets()` (`src/lib/ai/targets.ts`)
+builds the chain from the `consuela_ai_providers` PocketBase collection —
+provider 0's first model is the brain, its remaining models then the other
+enabled providers are the failover order — resolved by `order` and cached for
+10 min (an **empty** chain caches only 30 s, so a PB blip cannot pin "no brain"
+for a just-configured provider). The retired `ai_fallback` service-config rows
+and the `FALLBACK_API_URL` / `FALLBACK_API_KEY` / `FALLBACK_MODELS` env names
+still bootstrap until a provider row exists (zero-migration cutover);
+`AI_PROVIDER_*` is the fresh-install path. Provider keys are decrypted
+server-side and no HTTP surface returns one — the Settings previews are a 2-char
+suffix (§2.3).
+
+**The route filename and URL stay `/api/hermes/chat` deliberately** — it is a
+retained name, not a description of the path. The rename was deferred because
+the URL is load-bearing for its callers, and they are the whole reason: **8
+literal call sites in `src/`** — the shared SSE client `src/lib/chat-stream.ts`,
+5 planner intents (`useMeals` ×2, `tasks/page.tsx` ×2, `ConsuelaWeekCard`), and
+2 buffered recipe-parse callers (`useRecipes.ts`, `api/recipes/ingest/route.ts`,
+the latter server-side behind the `HERMES_CHAT_URL` override) — plus the **2
+consumers of that client** (`src/lib/chat-store.ts` for the Ask Consuela thread,
+`src/components/meals/ClemAssistant.tsx` for the Clem sheet). Nine features in
+total; a rename moves all of them together and is a separate cosmetic pass.
+`hermes-agent-2` also remains in the admin container allowlists
+(`/api/admin/containers`, `/api/admin/restart`) because the container still runs
+on the NAS. `src/lib/hermes-tools.ts` and the `context.source` value `"hermes"`
+are retained names for the same reason — do not "correct" either one.
+
+**Wire contract (`body.stream === true`).** The route writes frames through
+`sseFrame()`; the client parses and dispatches them in `src/lib/chat-stream.ts`
+(`parseSSEFrames` → `streamConsuelaChat`), in this order: `status`, `error`,
+`[DONE]`, `attempt`, `reasoning`, `tool`, and anything else as a content token.
+
+| Frame | Payload | Meaning |
+| --- | --- | --- |
+| `data: {"t":"<delta>"}` | (default `message` event) | content token |
+| `event: attempt` | `data: {"round":N,"target":"tN"}` | a new **(round × target)** provider call is starting; the client resets the streamed bubble. `target` is the chain **index** (`t0`, `t1`, …) or the literal `"exhausted"` — never a model id, because this route sits on the middleware `API_EXEMPT` list and answers with no session at all |
+| `event: reasoning` | `data: {"r":"<delta>"}` | `reasoning_content` delta |
+| `event: tool` | `data: {"name","state"}` | `state` is `running` (one per announced call, all written **before** any call runs) then `ok`/`error` (one per call, in call order) |
+| `event: status` | `data: {"label"}` | the status line under the typing dots — the one-shot "thinking deeply" label, one per announced tool call, and the proposal label |
+| `event: status` | `data: {"label","proposal"}` | carries an inert proposal payload (`adjust_points` / `redeem_reward`) for the PIN-confirm chip |
+| `event: error` | `data: {"message"}` | terminal failure; the client renders the text **verbatim** |
+| `data: [DONE]` | | terminator |
+| `: ping\n\n` | | comment-frame heartbeat, 15 s; the parser needs a `data:` line, so it never enters the contract |
+
+Response headers: `Content-Type: text/event-stream`, `Cache-Control: no-cache,
+no-transform`, `Connection: keep-alive`, and **`X-Accel-Buffering: no`** —
+without it a buffering intermediary holds frames until its buffer fills, which
+reads as a dead stream.
+
+**Chat / SSE — CONTRACTS:**
+
+1. **Two per-call budgets.** A streamed upstream call gets
+   `AI_STREAM_TIMEOUT_MS` (120 s); the buffered chat call and every planner call
+   stay on `AI_TIMEOUT_MS` (60 s). The reasoning model legitimately needs the
+   larger budget to re-plan after a tool error, but only the streamed path holds
+   the connection open while it does.
+2. **A legitimate streamed turn can outrun the 5-minute client watchdog, and
+   that suppresses its persistence.** `streamConsuelaChat` composes the caller's
+   stop with `AbortSignal.timeout(300_000)` into one fetch signal, and that same
+   abort closes the socket. The route persists only when neither `clientGone`
+   nor `request.signal.aborted` is set, so a watchdog-killed turn reaches the
+   family thread **from no device at all** — and the requester does not keep it
+   either: the timeout is not a `RouteChatError`, so the client drops the partial
+   bubble and shows the offline/server copy instead. Widening the per-call timeout
+   widened this: a single-target chain's worst case is now ~12 min (`MAX_ROUNDS`
+   6 × 120 s), and a failover chain crosses the 5-minute cap inside **one** round
+   at 3 targets (3 × 120 s > 300 s) where 60 s needed 6. Dropping is deliberate —
+   resurrection of a cancelled reply was the bug the guard replaced — and a
+   cancel message the route awaits is the durable fix.
+3. **`displayed === persisted` is enforced by the `attempt` frame, keyed on
+   round × target — not on round.** Token frames are written from inside
+   `callAiStream`, so a failed-over target's tokens are already in the client's
+   bubble and cannot be retracted; the `attempt` frame is written **before** the
+   call and lets the client reset both accumulators. It must be per
+   (round × target) because a mid-turn target failover has no round boundary:
+   keying on round would leave the dead target's tokens on screen. The reset
+   stands even if the payload is malformed — leaving a superseded attempt's
+   tokens up is the worse failure. The exhaustion fallback gets its own
+   `attempt` frame (`target: "exhausted"`) so the synthesized answer replaces the
+   six tool rounds' tokens instead of appending to them.
+4. **Reasoning and tool activity are display-only.** `reasoning` deltas never
+   touch `content` (the buffered branch forwards a whole provider
+   `message.reasoning_content` as one frame), and `persistHistory()` strips both
+   `thinking` and `toolEvents` off every message before localStorage
+   (`stripVolatile`). `persistChatPair` writes the user line plus the answering
+   round's final content and nothing else.
+5. **The route's `event: error` text reaches the user verbatim.** It is thrown as
+   `RouteChatError` (discriminated by `name`, never `instanceof`, so the module
+   mock and any serialization boundary survive it) and `chat-store` renders
+   `error.message` as the reply, keeping `errorFor` so "Try again" still works.
+   Only non-route failures get the offline/server copy.
+6. **The stop-persistence guard is `request.signal.aborted` *and* `clientGone`,
+   and `request.signal` is the load-bearing one.** `clientGone` only flips when a
+   write fails, and the 15 s heartbeat means a stop in the final ≤15 s of a turn
+   is never observed by any write at all; `request.signal` fires as soon as the
+   socket closes. Neither is a cancel the route can await, so a requester that
+   stops reading while its socket stays open is still missed.
+7. **`tool_call_id` is normalized on the assistant message**, in one place
+   (`normalizeToolCallIds`): a provider id passes through verbatim, a gap is
+   filled with a synthesized id, and `type` defaults to `function`. The tool
+   replies read their id back off that same array, because a strict
+   OpenAI-compatible server validates a `role:"tool"` message's `tool_call_id`
+   against the ids on the **preceding** assistant entry — a gateway that omits
+   ids in stream deltas otherwise makes the next round 400.
+8. **The buffered branch is a real second mode, not a failure path.** The route
+   answers JSON (`{content, proposals?}`) when `stream` is absent, and
+   `streamConsuelaChat` falls back to `res.json()` whenever the response is not
+   `text/event-stream` (`streamed: false`, no token callbacks). Upstream, a
+   provider that ignores `stream:true` — or any `fallback` chain target — is read
+   buffered inside the streamed handler and still re-emitted as SSE frames so
+   the client contract holds either way; the first time that happens
+   `aiStreamingSupported` latches false until the process restarts.
+9. **The planner never rides any of this.** `body.agent === "planner"` is
+   dispatched before the message guard, `buildChatContext`, and the stream
+   branch: parent session only, zero tools armed, grounded context pack,
+   validated JSON, one repair retry, and it never reaches `persistChatPair`.
 
 ---
 
