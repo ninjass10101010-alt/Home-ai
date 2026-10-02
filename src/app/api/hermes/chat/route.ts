@@ -47,6 +47,13 @@ async function persistChatPair(request: NextRequest, userMessage: string, assist
 }
 
 const AI_TIMEOUT_MS = 60_000;
+// A reasoning model re-planning after a tool error legitimately needs longer than
+// a plain answer, and 60s is tight enough that the round died and the failover
+// loop handed the family the "hit a snag" fallback mid-think. Only the STREAMED
+// call gets the larger budget: the buffered and planner paths keep 60s, since
+// holding a non-streaming call for two minutes only makes a dead provider slower
+// to fail over.
+const AI_STREAM_TIMEOUT_MS = 120_000;
 // Comment-frame cadence for the streamed response. Kept comfortably under the
 // idle window of the proxies/tunnels in front of the app, so a silent think
 // never ages the connection out.
@@ -249,7 +256,7 @@ async function callAiStream(
   const res = await fetch(`${opts.target.url}/v1/chat/completions`, {
     method: "POST",
     headers,
-    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+    signal: AbortSignal.timeout(AI_STREAM_TIMEOUT_MS),
     body: JSON.stringify({
       model: opts.target.model,
       messages,

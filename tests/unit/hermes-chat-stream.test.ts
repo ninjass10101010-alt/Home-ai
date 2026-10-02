@@ -1023,3 +1023,104 @@ describe("hermes chat — a stopped turn persists nothing", () => {
       .toEqual([["user", "hi"], ["assistant", "Hello"]]);
   });
 });
+
+// Per-call provider timeout. `AI_TIMEOUT_MS` used to bound EVERY provider call,
+// which killed a streamed round while a reasoning model was still re-planning
+// after a tool error: the round died, the failover loop moved on, and a short
+// chain left the family with the "hit a snag" fallback — the reported
+// "if I had a tool call error, I do not get a response back". Only the STREAMED
+// call gets the longer budget; buffered and planner calls stay at 60s, because
+// holding a non-streaming call for two minutes only makes a dead provider slower
+// to fail over.
+//
+// Node's real `AbortSignal.timeout` rides libuv's internal timer list, which
+// `vi.useFakeTimers()` does not advance (a real 60s timeout is still unfired
+// after 90s of fake time — verified in this project), so a fake-timer test
+// written against it would pass before AND after the fix. The stand-in below
+// keeps the one observable contract that matters — the signal aborts `ms` from
+// now — and puts it on the faked clock, which is what lets 60s-vs-120s be
+// asserted as BEHAVIOUR (the answer arrives) rather than as a claim about a
+// constant's value.
+const realAbortSignalTimeout = AbortSignal.timeout;
+
+describe("hermes chat — per-call timeout budgets", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    AbortSignal.timeout = ((ms: number) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+        ms,
+      );
+      return controller.signal;
+    }) as typeof AbortSignal.timeout;
+  });
+
+  afterEach(() => {
+    AbortSignal.timeout = realAbortSignalTimeout;
+  });
+
+  /**
+   * A provider that sits on the request — no response headers, like a gateway
+   * holding a long reasoning turn behind a buffering intermediary — until
+   * `answerAtMs`, and honors the route's abort signal the way a real one does,
+   * so the round dies with the timeout instead of hanging.
+   */
+  function silentProvider(answerAtMs: number, answer: () => Response) {
+    vi.stubGlobal("fetch", vi.fn((_url: string, init: { signal: AbortSignal }) =>
+      new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(answer()), answerAtMs);
+        init.signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(init.signal.reason ?? new Error("aborted"));
+        }, { once: true });
+      })));
+  }
+
+  /** Fake time only moves when a timer fires, so the request lands at t=0. */
+  async function settleRequestToProvider() {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  }
+
+  it("keeps a streamed round alive past 60s when the model is still reasoning", async () => {
+    silentProvider(90_000, () => sseResponse([token("The slow answer."), DONE]));
+    const res = await post({ message: "hi", stream: true });
+    const bodyPromise = res.text();
+    await settleRequestToProvider();
+    await vi.advanceTimersByTimeAsync(90_000);
+    const body = await bodyPromise;
+    expect(body).toContain('data: {"t":"The slow answer."}');
+    expect(body).not.toContain("hit a snag");
+    expect(mocks.insertChatMessage.mock.calls.map((c: any[]) => [c[0].role, c[0].content]))
+      .toEqual([["user", "hi"], ["assistant", "The slow answer."]]);
+  });
+
+  it("gives up on the buffered path at 60s — the longer budget is streamed-only", async () => {
+    // Same provider, same 90s answer, buffered mode. Buffering a non-streaming
+    // call for two minutes only makes a dead provider slower to fail over, so
+    // this path must still be a snag.
+    silentProvider(90_000, () => new Response(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "plain" } }] }),
+      { status: 200, headers: { "content-type": "application/json" } }));
+    const pending = post({ message: "hi" });
+    await settleRequestToProvider();
+    await vi.advanceTimersByTimeAsync(90_000);
+    const json = await (await pending).json();
+    expect(json.content).toContain("hit a snag");
+    expect(mocks.insertChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("still gives up on a streamed round that is silent at 120s", async () => {
+    // The upper bound, so the widened budget can't drift into "wait forever".
+    silentProvider(130_000, () => sseResponse([token("Way too late."), DONE]));
+    const res = await post({ message: "hi", stream: true });
+    const bodyPromise = res.text();
+    await settleRequestToProvider();
+    await vi.advanceTimersByTimeAsync(120_000);
+    const body = await bodyPromise;
+    expect(body).toContain("event: error");
+    expect(body).not.toContain("Way too late.");
+    expect(mocks.insertChatMessage).not.toHaveBeenCalled();
+  });
+});
