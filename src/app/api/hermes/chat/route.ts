@@ -628,6 +628,22 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         brain: ctx.brain,
         targets: ctx.targets,
       });
+      // The terminator goes out BEFORE the store write, so a turn is delivered to
+      // the requester before it is stored. That is the whole ordering: chat-store
+      // settles on its success path the moment it sees `[DONE]` and renders
+      // "Stopped." only from its catch, so once the terminator is in a
+      // requester's hands there is no longer a contradiction to fix — an abort
+      // that arrives afterwards cannot put a stopped bubble over a row the
+      // server kept. Persisting first and re-checking the signals afterwards
+      // could not have closed this without a `deleteChatMessage`, which the
+      // chat_messages surface does not have.
+      //
+      // `[DONE]` therefore means "this answer is complete and will be stored",
+      // not "the row is already in PocketBase" — the two are now one or two PB
+      // round trips apart. Nothing in the shipped client depends on the stronger
+      // reading: the store's post-stream reconcile is `mergeThread`, which is
+      // add-only, and the bubble is already in local state and localStorage.
+      write(sseFrame("[DONE]"));
       // Stop is a promise: a requester who aborted is already looking at
       // "Stopped.", so storing the answer behind it only hands that row back on
       // the store's next reconcile and the cancelled reply reappears anyway.
@@ -653,7 +669,6 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       if (!isClem && !clientGone && !request.signal.aborted) {
         await persistChatPair(request, message, finalContent, sessionName || "");
       }
-      write(sseFrame("[DONE]"));
     } catch (error: any) {
       console.error("Consuela stream error:", error?.message || error);
       try {

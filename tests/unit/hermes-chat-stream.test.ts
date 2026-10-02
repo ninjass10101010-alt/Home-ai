@@ -1186,6 +1186,69 @@ describe("hermes chat — a stopped turn persists nothing", () => {
     expect(mocks.insertChatMessage.mock.calls.map((c: any[]) => [c[0].role, c[0].content]))
       .toEqual([["user", "hi"], ["assistant", "Hello"]]);
   });
+
+  // The guard reads both signals BEFORE it awaits the store write, so a stop
+  // landing inside that await was persisted anyway — the mirror image of the
+  // resurrection this whole block exists to prevent, on the same path. The
+  // window is one await of two PocketBase inserts, and undoing a written row is
+  // not available here: the chat_messages surface is `insertChatMessage` /
+  // `selectChatMessages` and nothing else, so the fix orders the two instead —
+  // the turn is TERMINATED for the requester first, and `[DONE]` is what settles
+  // chat-store on its success path. Its "Stopped." render lives only in the
+  // catch, so a requester already holding the terminator can never be shown a
+  // stopped bubble over a row the server kept.
+  it("terminates the turn for the requester before the store write, so a stop inside the persist window cannot contradict it", async () => {
+    const controller = new AbortController();
+    const provider = handCrankedProvider();
+    // The pair's two inserts hang until this test releases them, which is what
+    // makes "the store write has started and has not finished" expressible.
+    // `mockImplementationOnce` rather than `mockImplementation`: this file's
+    // beforeEach clears call history but NOT implementations, so a standing
+    // override would wedge every later test in the file on an insert that never
+    // resolves. The pair is deterministically two calls, so the queue drains here.
+    let releaseInserts = () => {};
+    const insertsInFlight = new Promise<void>((r) => { releaseInserts = () => r(); });
+    mocks.insertChatMessage.mockImplementationOnce(async () => {
+      await insertsInFlight;
+      return {};
+    });
+    mocks.insertChatMessage.mockImplementationOnce(async () => {
+      await insertsInFlight;
+      return {};
+    });
+
+    const res = await post({ message: "hi", stream: true }, controller.signal);
+    const reader = res.body!.getReader();
+    provider.emit("Hel");
+    const primed = await readUntil(reader, '"t":"Hel"');
+    provider.emit("lo");
+    provider.finish();
+
+    // The terminator has to reach the requester while the store write is still
+    // in flight. With the old order the route awaited the persist first, so
+    // nothing was written and this read ran out its deadline empty.
+    const terminator = await readUntil(reader, "data: [DONE]");
+    expect(terminator).toContain("data: [DONE]");
+    // Anti-vacuity: the terminator arrived DURING the persist window rather than
+    // after it. Both inserts are registered and neither has resolved, so the
+    // assertion above is about a half-written pair, not a finished turn.
+    expect(mocks.insertChatMessage).toHaveBeenCalledTimes(2);
+    // Everything the requester needs to settle the turn as answered — the first
+    // token landed in the priming read above, so both halves are read here.
+    expect(primed).toContain('data: {"t":"Hel"}');
+    expect(terminator).toContain('data: {"t":"lo"}');
+
+    controller.abort(); // the stop lands inside the persist window
+    releaseInserts();
+    await drain(reader);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // A turn already handed over as finished is stored like any other: one pair,
+    // byte-identical to the connected turn's. Dropping it here would be the
+    // reverse defect — an answer the user read in full, surviving nowhere else.
+    expect(mocks.insertChatMessage.mock.calls.map((c: any[]) => [c[0].role, c[0].content]))
+      .toEqual([["user", "hi"], ["assistant", "Hello"]]);
+  });
 });
 
 // Per-call provider timeout. `AI_TIMEOUT_MS` used to bound EVERY provider call,
