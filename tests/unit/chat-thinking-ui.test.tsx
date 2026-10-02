@@ -236,7 +236,68 @@ describe("ToolActivityChips", () => {
     // The state is carried by the glyph AND by data-state, never by colour alone.
     const error = el.querySelector('[data-state="error"]') as HTMLElement;
     expect(error.textContent).toContain("❌");
-    expect(error.getAttribute("aria-label")).toContain("Calendar range");
+  });
+
+  it("states the tool state as real screen-reader text, not as an attribute AT may drop", () => {
+    const el = render(
+      <ToolActivityChips
+        events={[
+          { name: "get_weather", state: "running" },
+          { name: "get_calendar_range", state: "error" },
+        ]}
+      />,
+    );
+    // The chip <span> carries no `role`, so it maps to implicit `generic` — and
+    // ARIA 1.2 marks naming PROHIBITED there, which means an `aria-label` on it
+    // is not something a browser/screen reader is obliged to announce at all.
+    // The old check asserted the attribute was present in the DOM, which is a
+    // statement about the markup and not about the experience. The state has to
+    // exist as TEXT, because `state: "error"` also covers routine refusals
+    // ("Already completed — waiting for parent approval") that must not read as
+    // a crash.
+    for (const state of ["running", "error"]) {
+      const chip = el.querySelector(`[data-state="${state}"]`) as HTMLElement;
+      expect(chip, `a ${state} chip rendered`).not.toBeNull();
+      expect(chip.hasAttribute("role"), "no role, so naming stays prohibited").toBe(false);
+
+      const spoken = chip.querySelector(".sr-only");
+      expect(spoken, `${state} carries screen-reader text`).not.toBeNull();
+      expect(spoken!.textContent).toContain(state);
+
+      // …and the glyph must not be what carries it: strip every aria-hidden
+      // node and the state word has to survive on its own.
+      const withoutGlyph = chip.cloneNode(true) as HTMLElement;
+      withoutGlyph.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
+      expect(withoutGlyph.textContent, `${state} survives without its glyph`).toContain(state);
+    }
+  });
+
+  it("keeps one DOM node per tool across a running→ok flip", () => {
+    // A state transition is a FIELD change, not a new element. Keying the chip
+    // on `state` made React unmount and remount the node on every running→ok
+    // flip, which throws away any state or animation the chip ever grows.
+    function Host({ state }: { state: "running" | "ok" }) {
+      return <ToolActivityChips events={[{ name: "get_pantry", state }]} />;
+    }
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const root = createRoot(el);
+    act(() => {
+      root.render(<Host state="running" />);
+    });
+    const first = el.querySelector("[data-state]");
+    expect(first, "the running chip rendered").not.toBeNull();
+
+    act(() => {
+      root.render(<Host state="ok" />);
+    });
+    const after = el.querySelector("[data-state]");
+    // Identity, not equality: a remount would have handed back a NEW node.
+    expect(after).toBe(first);
+    expect(after!.getAttribute("data-state")).toBe("ok");
+    act(() => {
+      root.unmount();
+    });
   });
 
   it("renders nothing at all when no tool ran", () => {
@@ -260,14 +321,16 @@ describe("ToolActivityChips", () => {
 describe("chat page — thinking transcript + tool activity wiring", () => {
   /** A stream that stays open so the LIVE surfaces are observable. */
   function pendingStream() {
-    const state: { opts: any; resolve: ((r: { content: string; streamed: boolean }) => void) | null } = {
-      opts: null,
-      resolve: null,
-    };
+    const state: {
+      opts: any;
+      resolve: ((r: { content: string; streamed: boolean }) => void) | null;
+      reject: ((e: unknown) => void) | null;
+    } = { opts: null, resolve: null, reject: null };
     streamMock.fn.mockImplementation((o: any) => {
       state.opts = o;
-      return new Promise((res) => {
+      return new Promise((res, rej) => {
         state.resolve = res;
+        state.reject = rej;
       });
     });
     return state;
@@ -364,5 +427,88 @@ describe("chat page — thinking transcript + tool activity wiring", () => {
       s.opts.onToolEvent({ name: "get_weather", state: "running" });
     });
     expect(scrollCalls).toBeGreaterThan(before);
+  });
+
+  it("buckets the think for auto-pin — a 512-char growth re-pins, a sub-bucket delta does not", async () => {
+    // The live think adds height without touching `messages`/`isTyping`, so the
+    // scroll effect depends on `thinkGrowthBucket` — but a transcript-length dep
+    // used whole would re-scroll on EVERY delta of a think that runs to
+    // thousands of characters. The bucket has to be coarse enough to avoid that
+    // and fine enough to keep the thread pinned as the transcript grows.
+    const s = pendingStream();
+    render(<ChatPage />);
+    act(() => {
+      void inputProps.current!.onSendMessage("hi");
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // Crossing a 512-char bucket → the thread follows the growth.
+    const beforeGrowth = scrollCalls;
+    act(() => {
+      s.opts.onReasoning("x".repeat(600), "x");
+    });
+    expect(scrollCalls, "crossing the growth bucket re-pins").toBeGreaterThan(beforeGrowth);
+
+    // Staying inside the bucket → no re-scroll, or a real think would fight the
+    // reader hundreds of times per turn.
+    const beforeDelta = scrollCalls;
+    act(() => {
+      s.opts.onReasoning("x".repeat(610), "x");
+    });
+    expect(scrollCalls, "a sub-512 delta does not re-pin").toBe(beforeDelta);
+  });
+
+  it("re-arms the live transcript on retry, not only on send", async () => {
+    // Only `sendMessage` re-armed `liveThinkingOpen`, and "Try again" goes
+    // onRetry → retryMessage → retry → send(), bypassing it entirely. So a
+    // retry the reader kicked off after collapsing the live think rendered
+    // already collapsed — the retry's reasoning was unreachable.
+    const s = pendingStream();
+    const el = render(<ChatPage />);
+    let send: Promise<void> | undefined;
+    act(() => {
+      send = inputProps.current!.onSendMessage("what's for dinner?");
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    act(() => {
+      s.opts.onReasoning("thinking about the pantry", "…");
+    });
+    // The reader collapses the live think mid-think.
+    expect(thinkingButton(el).getAttribute("aria-expanded")).toBe("true");
+    act(() => {
+      thinkingButton(el).click();
+    });
+    expect(thinkingButton(el).getAttribute("aria-expanded")).toBe("false");
+
+    // The turn errors → an honest error bubble with "Try again".
+    await act(async () => {
+      s.reject!(new Error("boom"));
+      await send;
+    });
+    const retryBtn = Array.from(el.querySelectorAll("button")).find((b) =>
+      /Try again/i.test(b.textContent || ""),
+    );
+    expect(retryBtn, "the error bubble offers Try again").toBeDefined();
+
+    // Re-arm the stream stub so the retry itself stays observable.
+    const s2 = pendingStream();
+    act(() => {
+      retryBtn!.click();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    act(() => {
+      s2.opts.onReasoning("thinking about the pantry again", "…");
+    });
+
+    const live = el.querySelector('[data-testid="thinking-transcript"]');
+    expect(live, "the retry's think is rendered").not.toBeNull();
+    expect(live!.textContent).toContain("thinking about the pantry again");
+    expect(thinkingButton(el).getAttribute("aria-expanded")).toBe("true");
   });
 });

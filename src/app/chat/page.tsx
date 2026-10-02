@@ -404,15 +404,19 @@ function ChatContent() {
 
   // Task 10 — the store owns the transcript TEXT; the page owns only whether it
   // is open. `liveThinkingOpen` covers the turn in flight (open for the whole
-  // think unless the reader closes it, re-armed by the next send);
-  // `disclosureOpen` is the explicit re-open of a FINISHED message, which must
-  // survive the next send.
+  // think unless the reader closes it, re-armed by the next send OR by a
+  // retry); `disclosureOpen` is the explicit re-open of a FINISHED message,
+  // which must survive the next send.
   const [liveThinkingOpen, setLiveThinkingOpen] = useState(true);
   const [disclosureOpen, setDisclosureOpen] = useState<Record<number, boolean>>({});
 
   // Stable identities: `MessageRow` is memoized, so an inline closure here
   // would re-render the whole thread on every store delta.
   const retryMessage = useCallback((failedText: string, failedId: number) => {
+    // "Try again" reaches the store directly (`retry` → `send()`), so it never
+    // passes through `sendMessage` and would otherwise inherit the reader's
+    // collapsed live transcript from the turn that failed.
+    setLiveThinkingOpen(true);
     retryChat(failedText, failedId, activeSpeaker);
   }, [activeSpeaker]);
   const onDisclosureToggle = useCallback((id: number, next: boolean) => {
