@@ -66,6 +66,7 @@ export {
   liveGoogleEvents,
   liveEventsRange,
   mergedTodaysEvents,
+  type MergedTodaysEvents,
   livePendingTasks,
   liveSchedules,
   liveMealRows,
@@ -583,18 +584,29 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const events = await mergedTodaysEvents();
-      if (events === null) {
+      const merged = await mergedTodaysEvents();
+      if (merged === null) {
         return summarize({ error: "calendar data unavailable — do not guess today's events", events: [] });
       }
-      return summarize(events.map((e) => ({
+      const rows = merged.rows.map((e) => ({
         title: e.title,
         time: e.time,
         member: e.member,
         emoji: e.emoji,
         color: e.color,
         source: e.source,
-      })));
+      }));
+      // Partial, never blanked: a dead Google sync must not take the family's
+      // own events away, but school events live ONLY in the Google collection,
+      // so an unflagged list here tells a kid their day is clear when the half
+      // that would have told them otherwise was never read.
+      if (merged.googleUnavailable) {
+        return summarize({
+          events: rows,
+          google_unavailable: "school calendar (Google) could not be read — today's events are incomplete, do not say the day is clear",
+        });
+      }
+      return summarize(rows);
     },
   },
   {
@@ -1684,7 +1696,8 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const eventRows = await mergedTodaysEvents();
+      const merged = await mergedTodaysEvents();
+      const eventRows = merged?.rows ?? null;
       const events = eventRows ?? [];
       const taskRows = await livePendingTasks();
       const tasks = taskRows ?? [];
@@ -1703,6 +1716,9 @@ const TOOLS: Tool[] = [
         ...(mealRows === null ? { meals_error: "meal data unavailable — do not guess" } : {}),
         ...(taskRows === null ? { tasks_error: "task data unavailable — do not guess" } : {}),
         ...(eventRows === null ? { events_error: "calendar data unavailable — do not guess today's events" } : {}),
+        // Its own leg, beside meals_error / tasks_error: events_error means the
+        // day was not read AT ALL, this means one of the two calendars was not.
+        ...(merged?.googleUnavailable ? { google_unavailable: "school calendar (Google) could not be read — today's events are incomplete, do not say the day is clear" } : {}),
         events: events.map((e) => ({ title: e.title, time: e.time, member: e.member, source: e.source })),
         pending_tasks: tasks.map((t: any) => ({
           title: t.title,

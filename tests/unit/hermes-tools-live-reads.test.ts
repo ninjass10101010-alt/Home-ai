@@ -76,12 +76,18 @@ describe("get_todays_events — live reads + Google merge", () => {
     expect(calls.some((c) => c.collection === "events")).toBe(true);
   });
 
-  it("google read failure degrades to family-only (no throw)", async () => {
+  it("answers with the family's own rows when Google holds none (no throw)", async () => {
+    // Renamed: this never exercised a Google read FAILURE. The mock returns []
+    // for a collection that is absent from `rows`, so this has always been the
+    // "Google is read fine and genuinely has nothing" case — the honest half.
+    // The real single-source failure is the case below in "honest degradation",
+    // which pins it with the gap flag.
     rows.events = [{ id: "e1", title: "Solo event", date: TODAY, time: "09:00" }];
     const out = JSON.parse(await getTool("get_todays_events")!.handler({}));
     const list = Array.isArray(out) ? out : out.events;
     expect(list).toHaveLength(1);
     expect(list[0].title).toBe("Solo event");
+    expect(out.google_unavailable).toBeUndefined();
   });
 });
 
@@ -182,7 +188,14 @@ describe("honest degradation — a failed read is never an empty answer", () => 
       expect(out.events).toEqual([]);
     });
 
-    it("still answers with the family's own events when only Google fails", async () => {
+    it("keeps the family's own events but NAMES the gap when only Google fails", async () => {
+      // REWRITTEN, deliberately. This case used to pin the opposite behaviour:
+      // the family's events came back with no signal at all, so a kid asking
+      // about their day was told the day was clear while every SCHOOL event
+      // (they live only in `consuela_google_calendar_events`) had simply never
+      // been read. The answer is still not blanked — a dead Google sync must
+      // not take the family's own events away — but it is now marked partial,
+      // so the day cannot read as complete.
       rows.events = [{ id: "e1", title: "Solo event", date: TODAY, time: "09:00" }];
       rows.consuela_google_calendar_events = null;
 
@@ -190,6 +203,8 @@ describe("honest degradation — a failed read is never an empty answer", () => 
 
       const list = Array.isArray(out) ? out : out.events;
       expect(list.map((e: any) => e.title)).toEqual(["Solo event"]);
+      expect(out.google_unavailable).toBeDefined();
+      expect(out.google_unavailable).toMatch(/do not say the day is clear/i);
     });
 
     it("reports a genuinely empty day as empty, with no error", async () => {
@@ -201,6 +216,23 @@ describe("honest degradation — a failed read is never an empty answer", () => 
       const list = Array.isArray(out) ? out : out.events;
       expect(list).toEqual([]);
       expect(out.error).toBeUndefined();
+      // A calendar that genuinely holds nothing is NOT a failed read, in either
+      // direction: no Google sync AND no family rows still reads as an empty day.
+      expect(out.google_unavailable).toBeUndefined();
+    });
+
+    it("carries no gap flag when Google is read fine and simply has nothing", async () => {
+      // The honest half of the seam. Flagging this would be the mirror defect:
+      // a school holiday with no entries is a real answer, and telling the model
+      // the calendar is unavailable would be a lie that trains it to hedge.
+      rows.events = [{ id: "e1", title: "Solo event", date: TODAY, time: "09:00" }];
+      rows.consuela_google_calendar_events = [];
+
+      const out = JSON.parse(await getTool("get_todays_events")!.handler({}));
+
+      const list = Array.isArray(out) ? out : out.events;
+      expect(list.map((e: any) => e.title)).toEqual(["Solo event"]);
+      expect(out.google_unavailable).toBeUndefined();
     });
   });
 
@@ -254,6 +286,26 @@ describe("honest degradation — a failed read is never an empty answer", () => 
 
       expect(out.events).toEqual([]);
       expect(out.events_error).toBeUndefined();
+      expect(out.google_unavailable).toBeUndefined();
+    });
+
+    it("names the Google leg separately when only that calendar could not be read", async () => {
+      // `events_error` means the day was not read at all. A partial read is a
+      // different failure and needs its own leg, mirroring meals_error /
+      // tasks_error: the summary is the first call ai/TOOLS.md tells the model
+      // to make, and school events exist ONLY in the Google collection, so a
+      // summary with no flag here is a day reported clear that was never read.
+      rows.events = [{ id: "e1", title: "Emily Orchestra", date: TODAY, time: "18:30", member: "Emily" }];
+      rows.consuela_google_calendar_events = null;
+
+      const out = JSON.parse(await getTool("get_dashboard_summary")!.handler({}));
+
+      expect((out.events ?? []).map((e: any) => e.title)).toEqual(["Emily Orchestra"]);
+      expect(out.events_error, "the family calendar WAS read").toBeUndefined();
+      expect(out.google_unavailable).toMatch(/do not say the day is clear/i);
+      // One dead collection must not blank the other legs.
+      expect(out.meals_error).toBeUndefined();
+      expect(out.tasks_error).toBeUndefined();
     });
   });
 

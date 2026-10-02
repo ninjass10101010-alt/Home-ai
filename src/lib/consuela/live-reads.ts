@@ -23,6 +23,14 @@ import { readSnapshotTasks, type SnapshotTask } from "@/lib/snapshot-tasks";
 
 export type CanonicalTaskSource = "snapshot" | "pb" | "unavailable";
 
+/** A merged day plus whether it is WHOLE. See `mergedTodaysEvents`. */
+export interface MergedTodaysEvents {
+  rows: ToolEvent[];
+  /** The Google leg FAILED, so `rows` is missing every school event. Never true
+   *  when the Google calendar was read successfully and held nothing. */
+  googleUnavailable: boolean;
+}
+
 export interface CanonicalTaskRead {
   tasks: SnapshotTask[];
   source: CanonicalTaskSource;
@@ -129,16 +137,25 @@ export function formatEventTime(time: string): string {
 /**
  * Today's events merged from the family collection + the Google calendar.
  *
- * Null when BOTH reads failed — same rule as `liveEventsRange`, so the two
- * calendar surfaces agree. A single-source failure returns the OTHER source's
- * rows: a dead Google sync must not blank the family's own events, and blanking
- * them would be a worse answer than a partial day. Callers that need to name the
- * gap can compare against the two readers directly.
+ * Null when BOTH reads failed (unavailable signal) — same rule as
+ * `liveEventsRange`, so the two calendar surfaces agree on "unreadable".
+ *
+ * A SINGLE-source failure returns the other source's rows, because a dead Google
+ * sync must not blank the family's own events — but it is marked partial rather
+ * than returned bare. School events exist ONLY in the Google collection, so a
+ * merged list that carries no signal is a day reported clear that was never
+ * read, and both call sites answer a child or the model's first overview call.
+ * `googleUnavailable` is the flag; it is false whenever the Google leg was read
+ * successfully, however empty it came back — a day genuinely without school
+ * events is a real answer and must not be dressed up as an outage.
  */
-export async function mergedTodaysEvents(dayISO = localTodayISO()): Promise<ToolEvent[] | null> {
+export async function mergedTodaysEvents(dayISO = localTodayISO()): Promise<MergedTodaysEvents | null> {
   const [family, google] = await Promise.all([liveEvents(dayISO), liveGoogleEvents(dayISO)]);
   if (family === null && google === null) return null;
-  return mergeTodaysEvents(family ?? [], google ?? [], dayISO);
+  return {
+    rows: mergeTodaysEvents(family ?? [], google ?? [], dayISO),
+    googleUnavailable: google === null,
+  };
 }
 
 function taskFromCollectionRow(row: Record<string, any>): SnapshotTask | null {
