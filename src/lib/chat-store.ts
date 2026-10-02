@@ -72,6 +72,13 @@ export interface ChatStoreState {
   thinking: string;
   /** The turn in flight, live, one entry per tool. Display-only. */
   toolEvents: ToolEvent[];
+  /** The id reserved for the turn in flight, set synchronously the moment a send
+   *  starts and cleared when it ends. This is the anchor the chat page needs to
+   *  tell "the turn gathering right now owns the activity" from "a finished turn
+   *  from earlier in this thread owns it" — a finished turn keeps its
+   *  display-only fields for the life of the page, so scanning the newest
+   *  assistant ROW would suppress the live surfaces from turn 2 onward. */
+  liveTurnId: number | null;
 }
 
 const CHAT_STORAGE_KEY = "consuela-chat-messages";
@@ -95,6 +102,7 @@ function freshState(): ChatStoreState {
     streaming: false,
     thinking: "",
     toolEvents: [],
+    liveTurnId: null,
   };
 }
 
@@ -382,6 +390,12 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
   setState({ isTyping: true, statusLine: null });
 
   const streamId = nextOptimisticId();
+  // Published with the turn, not at finalize: the chat page gates the live chips
+  // and the live transcript on "the turn in flight owns the activity", and that
+  // row does not exist yet — nothing materializes it before the first token.
+  // Written in the same synchronous block as the `streaming: true` above, so no
+  // render can observe one without the other.
+  setState({ liveTurnId: streamId });
   // +1 so the reply sorts after its request even if both land in the same ms.
   const streamAt = userAt + 1;
   let bubbleOpen = false;
@@ -657,7 +671,7 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
     // The live think belongs to the turn in flight only — a finished turn keeps
     // its transcript on its own message. Cleared here as well as at send start,
     // so the error paths (which drop the reply row entirely) cannot strand it.
-    setState({ streaming: false, thinking: "", toolEvents: [] });
+    setState({ streaming: false, thinking: "", toolEvents: [], liveTurnId: null });
   }
 }
 

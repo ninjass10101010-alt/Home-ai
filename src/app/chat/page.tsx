@@ -294,7 +294,7 @@ function ChatContent() {
   );
 
   const store = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const { messages, isTyping, statusLine, hydrated, streaming, thinking, toolEvents } = store;
+  const { messages, isTyping, statusLine, hydrated, streaming, thinking, toolEvents, liveTurnId } = store;
 
   // Hydrate once per page load (localStorage + today's PocketBase thread).
   // A remount re-attaches to the store; the store itself does a cheap
@@ -375,15 +375,20 @@ function ChatContent() {
   // whole duration with no chips anywhere on screen. This flag makes the handoff
   // atomic instead of overlapping the store's reconcile await (which lands
   // between the two writes), so the chips are never rendered twice.
-  const newestAssistantOwnsActivity = useMemo(() => {
-    for (let i = visibleMessages.length - 1; i >= 0; i--) {
-      const m = visibleMessages[i];
-      if (m.role !== "assistant") continue;
-      return !!m.thinking || !!m.toolEvents?.length;
-    }
-    return false;
-  }, [visibleMessages]);
-  const showLiveActivity = streaming && !newestAssistantOwnsActivity;
+  //
+  // The scan is anchored to the turn IN FLIGHT, not to the newest assistant row
+  // in the thread. A finished turn keeps its thinking and chips in memory for the
+  // life of the page — `stripVolatile` guards persistence, not the live tree — so
+  // from turn 2 onward the newest settled row always owns activity and the live
+  // surfaces would vanish for the whole tool-gathering phase, which is exactly
+  // when a kid waiting on an answer needs to see what Consuela is doing.
+  const liveTurnOwnsActivity = useMemo(
+    () =>
+      liveTurnId !== null &&
+      visibleMessages.some((m) => m.id === liveTurnId && (!!m.thinking || !!m.toolEvents?.length)),
+    [visibleMessages, liveTurnId],
+  );
+  const showLiveActivity = streaming && !liveTurnOwnsActivity;
 
   // Only auto-scroll while the reader is already near the bottom — never
   // fight someone scrolling back through history.

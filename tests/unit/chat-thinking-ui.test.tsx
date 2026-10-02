@@ -459,6 +459,82 @@ describe("chat page — thinking transcript + tool activity wiring", () => {
     expect(el.querySelector('[role="status"] .chat-dot')).toBeNull();
   });
 
+  it("shows the live chips and transcript on a SECOND turn while it gathers", async () => {
+    // Turn 1's chip and transcript live on its finished bubble for the life of
+    // the page — they are in-memory display state that only persistence strips
+    // (stripVolatile), never a clear. So from turn 2 onward the newest settled
+    // assistant row always "owns activity", and a gate that reads THAT row hides
+    // the live chips and the 💭 for turn 2's whole tool-gathering phase — exactly
+    // when a kid waiting on an answer needs to see what Consuela is doing.
+    // Every other case here drives ONE turn, which is why this slipped through.
+    const turn2: {
+      opts: any;
+      resolve: ((r: { content: string; streamed: boolean }) => void) | null;
+    } = { opts: null, resolve: null };
+    streamMock.fn
+      .mockImplementationOnce(async ({ onAttempt, onToolEvent, onToken }: any) => {
+        onAttempt({ round: 1, target: "t0" });
+        onToolEvent({ name: "get_weather", state: "running" });
+        onToolEvent({ name: "get_weather", state: "ok" });
+        onAttempt({ round: 2, target: "t0" });
+        onToken("Sunny and warm.", "Sunny and warm.");
+        return { content: "Sunny and warm.", streamed: true };
+      })
+      .mockImplementation((o: any) => {
+        turn2.opts = o;
+        return new Promise((res) => {
+          turn2.resolve = res;
+        });
+      });
+
+    const el = render(<ChatPage />);
+    await act(async () => {
+      await inputProps.current!.onSendMessage("what's the weather?");
+    });
+    // Turn 1 settled, and its chip is on the finished message.
+    expect(el.querySelectorAll('[data-testid="tool-activity"] [data-state]')).toHaveLength(1);
+    expect(el.querySelector('[data-state="ok"]')).not.toBeNull();
+
+    // Turn 2 opens and reaches for a tool before it says anything.
+    let send2: Promise<void> | undefined;
+    act(() => {
+      send2 = inputProps.current!.onSendMessage("and tomorrow?");
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    act(() => {
+      turn2.opts.onAttempt({ round: 1, target: "t0" });
+    });
+    act(() => {
+      turn2.opts.onReasoning("Turn two: check the calendar first.", "…");
+    });
+    act(() => {
+      turn2.opts.onToolEvent({ name: "get_calendar_range", state: "running" });
+    });
+
+    // Turn 2's LIVE chip is on screen beside turn 1's settled one…
+    expect(el.querySelectorAll('[data-testid="tool-activity"] [data-state]')).toHaveLength(2);
+    expect(el.querySelector('[data-state="running"]'), "turn 2's live chip").not.toBeNull();
+    // …and so is its live transcript, not only turn 1's finished one.
+    expect(el.textContent).toContain("Turn two: check the calendar first.");
+
+    // Turn 2's answer takes its chip over; turn 1's chip stays put.
+    act(() => {
+      turn2.opts.onAttempt({ round: 2, target: "t0" });
+    });
+    act(() => {
+      turn2.opts.onToken("Rain on Saturday.", "Rain on Saturday.");
+    });
+    await act(async () => {
+      turn2.resolve!({ content: "Rain on Saturday.", streamed: true });
+      await send2;
+    });
+    expect(el.querySelectorAll('[data-testid="tool-activity"] [data-state]')).toHaveLength(2);
+    expect(el.textContent).toContain("Sunny and warm.");
+    expect(el.textContent).toContain("Rain on Saturday.");
+  });
+
   it("a transcript-less turn leaves no disclosure header behind", async () => {
     streamMock.fn.mockResolvedValue({ content: "Straight answer.", streamed: true });
     const el = render(<ChatPage />);
