@@ -446,6 +446,63 @@ describe("chat-store core", () => {
     expect(getSnapshot().messages.some((m) => m.content === "story")).toBe(true);
   });
 
+  it("a stop after the answer is on screen cannot abort the turn the route is persisting", async () => {
+    // The route writes `[DONE]` BEFORE `await persistChatPair`, so between the
+    // terminator and the row actually being in PocketBase the answer is fully
+    // rendered for the requester and the server is still mid-persist. The store
+    // only nulled `abortController` in its `finally`, which runs after the
+    // reconcile round trip - so the always-enabled stop button aborted a stream
+    // that had already produced everything, the route saw request.signal.aborted
+    // and skipped the persist, and the family thread never got an answer the
+    // user was looking at in full. The window is the frame's flight time PLUS
+    // the reconcile round trip PLUS the two PB inserts.
+    //
+    // Parked on the reconcile read so the stop lands in that window rather than
+    // in a race with it. Keyed on the read COUNT, not on `since=`: the
+    // watermark is still empty here (hydration read nothing back), so the
+    // reconcile URL carries no `since=` either.
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    let reads = 0;
+    let parked = false;
+    let releaseReconcile!: () => void;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      reads += 1;
+      // Reads 1 = hydration, 2 = the send's post-stream reconcile.
+      if (reads === 2) {
+        parked = true;
+        return new Promise<Response>((res) => { releaseReconcile = () => res(json({ ok: true, messages: [] })); });
+      }
+      return Promise.resolve(json({ ok: true, messages: [] }));
+    }));
+    let streamSignal: AbortSignal | undefined;
+    streamMock.fn.mockImplementation(async ({ onToken, signal }: any) => {
+      streamSignal = signal;
+      onToken("We have chicken and rice.", "We have chicken and rice.");
+      return { content: "We have chicken and rice.", streamed: true };
+    });
+    await ensureHydrated();
+
+    const sending = send("what's for dinner?", SPEAKER);
+    for (let i = 0; i < 50 && !parked; i += 1) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(parked, "the store parked on its post-stream reconcile").toBe(true);
+    // Proof the stop below lands in the window and not before it: the answer is
+    // already on the message and the turn is still flagged streaming.
+    expect(getSnapshot().messages.some((m) => m.content === "We have chicken and rice.")).toBe(true);
+    expect(getSnapshot().streaming).toBe(true);
+
+    stop();
+
+    expect(streamSignal!.aborted, "a settled stream is un-stoppable").toBe(false);
+
+    releaseReconcile();
+    await sending;
+    expect(getSnapshot().messages.some((m) => m.content === "We have chicken and rice.")).toBe(true);
+    expect(getSnapshot().streaming).toBe(false);
+  });
+
   it("persists hydrated history to localStorage without the seed greeting", async () => {
     streamMock.fn.mockResolvedValue({ content: "saved-reply", streamed: true });
     await ensureHydrated();

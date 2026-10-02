@@ -541,6 +541,18 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
         );
       },
     });
+    // A SETTLED stream is un-stoppable. `streamConsuelaChat` resolves on the
+    // `[DONE]` terminator, which the route writes BEFORE it persists the pair —
+    // so from here on the answer is fully rendered and the server is holding the
+    // only copy that will reach the rest of the family. The route treats ANY
+    // client-side abort as "stop", and the composer's stop button is enabled
+    // for as long as `streaming` is true, so aborting inside the persist window
+    // made the route skip `persistChatPair` and silently drop an answer the user
+    // was looking at. Dropping the controller HERE — not in the finally, which
+    // runs after the reconcile round trip — means a stop pressed once the answer
+    // is on screen cannot reach the socket at all. `streamInFlight` stays true
+    // until the finally, so the thread still takes no second turn mid-persist.
+    abortController = null;
     // Buffered (non-streamed) path: proposals arrive as a top-level array.
     for (const p of Array.isArray(result.proposals) ? result.proposals : []) attachProposal(p);
     const { content, streamed } = result;
