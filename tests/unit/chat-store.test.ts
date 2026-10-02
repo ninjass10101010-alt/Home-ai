@@ -79,11 +79,12 @@ describe("chat-store core", () => {
     streamMock.fn.mockImplementation(({ onToken, signal }: any) => {
       onToken("partial ", "partial ");
       return new Promise((_res, rej) => {
-        signal.addEventListener("abort", () => {
-          const e = new Error("Generation stopped");
-          e.name = "AbortError";
-          rej(e);
-        });
+        // See the stop test below: attaching to an already-aborted signal hangs
+        // the suite rather than reporting it.
+        const e = new Error("Generation stopped");
+        e.name = "AbortError";
+        if (signal.aborted) rej(e);
+        else signal.addEventListener("abort", () => rej(e));
       });
     });
     await ensureHydrated();
@@ -370,12 +371,16 @@ describe("chat-store core", () => {
     vi.stubGlobal("fetch", fetchMock);
     streamMock.fn.mockImplementation(({ onToken, signal }: any) => {
       onToken("partial", "partial");
+      // `stop()` must have run before the mock is reached, or the listener below
+      // attaches to an already-aborted signal, never fires, and the await hangs
+      // until the suite times out instead of reporting. send() has no await
+      // between creating this controller and calling the stream, which is the
+      // invariant this test depends on — check, don't assume.
       return new Promise((_res, rej) => {
-        signal.addEventListener("abort", () => {
-          const e = new Error("Generation stopped");
-          e.name = "AbortError";
-          rej(e);
-        });
+        const e = new Error("Generation stopped");
+        e.name = "AbortError";
+        if (signal.aborted) rej(e);
+        else signal.addEventListener("abort", () => rej(e));
       });
     });
     await ensureHydrated();

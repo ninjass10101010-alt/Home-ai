@@ -578,6 +578,17 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       // `clientGone` needs a write to fail and `request.signal` needs the socket
       // to close — so a requester that stops reading while its socket stays open
       // is still missed. A cancel message the route awaits is the durable fix.
+      //
+      // ANY client-side abort suppresses persistence, not only a deliberate stop:
+      // chat-stream.ts composes the caller's stop with AbortSignal.timeout(300_000)
+      // into the one fetch signal, so a 5-minute watchdog expiry closes the same
+      // socket and arrives here identically. The route cannot tell them apart (the
+      // discriminator is client-side, `failError(stopSignal)`), and dropping is
+      // still the lesser evil — resurrection was the bug this replaced — but it is
+      // a behaviour change worth knowing: MAX_ROUNDS(6) × AI_TIMEOUT_MS(60s) is
+      // 6 minutes of legitimate worst case, above the cap, so a watchdog-killed
+      // turn's answer no longer reaches the family thread either, and the only
+      // device holding it is the one showing the offline copy.
       if (!isClem && !clientGone && !request.signal.aborted) {
         await persistChatPair(request, message, finalContent, sessionName || "");
       }

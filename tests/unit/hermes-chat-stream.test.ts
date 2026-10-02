@@ -57,7 +57,7 @@ async function post(body: Record<string, unknown>, signal?: AbortSignal) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      ...(signal ? { signal } : {}),
+      signal,
     })
   );
 }
@@ -916,7 +916,7 @@ describe("hermes chat — attempt frames", () => {
 // alone.
 describe("hermes chat — a stopped turn persists nothing", () => {
   /** Provider stream the test drives frame by frame, so "no frame after X" is expressible. */
-  function handCranedProvider() {
+  function handCrankedProvider() {
     const enc = new TextEncoder();
     let emit: ((s: string) => void) | null = null;
     let finish: (() => void) | null = null;
@@ -937,11 +937,18 @@ describe("hermes chat — a stopped turn persists nothing", () => {
   async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, needle: string) {
     const decoder = new TextDecoder();
     let seen = "";
+    // The deadline has to RACE the read, not merely bracket it: a read that
+    // never resolves would otherwise sit past the deadline and hang the suite
+    // instead of reporting, so the loop condition alone buys nothing.
     const deadline = Date.now() + 1000;
-    while (!seen.includes(needle) && Date.now() < deadline) {
-      const { value } = await reader.read();
+    for (;;) {
+      const { value } = await Promise.race([
+        reader.read(),
+        new Promise<{ value?: undefined }>((r) => setTimeout(() => r({}), Math.max(0, deadline - Date.now()))),
+      ]);
       if (!value) break;
       seen += decoder.decode(value);
+      if (seen.includes(needle)) break;
     }
     return seen;
   }
@@ -956,7 +963,7 @@ describe("hermes chat — a stopped turn persists nothing", () => {
 
   it("stores nothing when the request was aborted, even with no frame written after the stop", async () => {
     const controller = new AbortController();
-    const provider = handCranedProvider();
+    const provider = handCrankedProvider();
     const res = await post({ message: "hi", stream: true }, controller.signal);
     const reader = res.body!.getReader();
     provider.emit("Hel");
@@ -971,11 +978,20 @@ describe("hermes chat — a stopped turn persists nothing", () => {
     await drain(reader);
     await new Promise((r) => setTimeout(r, 20));
     expect(mocks.insertChatMessage).not.toHaveBeenCalled();
+    // Anti-vacuity: `not.toHaveBeenCalled()` alone is also satisfied by a turn
+    // that never got far enough to store anything — an error, or an exhaustion
+    // branch that answered something else. Exactly one outcome recorded as `ok`
+    // is the proof this turn ran to completion and reached the persist decision
+    // the guard sits on. (`clientGone` is provably false here, so `ok` also pins
+    // the deliberate split: persistence reads request.signal, health reads
+    // clientGone alone.)
+    expect(mocks.recordChatOutcome).toHaveBeenCalledTimes(1);
+    expect(mocks.recordChatOutcome.mock.calls[0][0].outcome).toBe("ok");
   });
 
   it("stores nothing when the client drops the stream and the next write rejects", async () => {
     const controller = new AbortController();
-    const provider = handCranedProvider();
+    const provider = handCrankedProvider();
     const res = await post({ message: "hi", stream: true }, controller.signal);
     const reader = res.body!.getReader();
     provider.emit("Hel");
