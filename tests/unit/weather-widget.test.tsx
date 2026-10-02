@@ -1153,7 +1153,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
   it.each([
     { name: "hidden tab", hidden: true, reducedMotion: false },
     { name: "reduced motion", hidden: false, reducedMotion: true },
-  ])("starts ambient and holiday motion disabled when mounted in a $name environment", async ({ hidden, reducedMotion }) => {
+  ])("starts ambient motion disabled and mounts no holiday layers when mounted in a $name environment", async ({ hidden, reducedMotion }) => {
     const descriptor = Object.getOwnPropertyDescriptor(document, "hidden");
     Object.defineProperty(document, "hidden", { configurable: true, value: hidden });
     vi.stubGlobal("matchMedia", vi.fn(() => ({
@@ -1179,17 +1179,32 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
       expect(initialMotion).toBe("paused");
       await settle(300);
-      const art = document.querySelector("[data-weather-art-motion]") as HTMLElement | null;
-      const particles = document.querySelector("[data-weather-particle-motion]") as HTMLElement | null;
-      expect(art?.getAttribute("data-weather-art-motion")).toBe("paused");
-      if (hidden) {
-        expect(particles).toBeNull();
-      } else {
-        expect(particles?.getAttribute("data-weather-particle-motion")).toBe("paused");
-      }
+      // The holiday tint is dashboard-wide now — the weather card mounts no
+      // weather-exclusive holiday artwork or particles in any environment.
+      expect(document.querySelector("[data-weather-art-motion]")).toBeNull();
+      expect(document.querySelector("[data-weather-particle-motion]")).toBeNull();
     } finally {
       if (descriptor) Object.defineProperty(document, "hidden", descriptor);
       else delete (document as any).hidden;
+      localStorage.removeItem("home-ai-weather-config");
+    }
+  });
+
+  it("mounts no weather-exclusive holiday layers on Día de los Muertos (2026-11-01)", async () => {
+    vi.setSystemTime(new Date(2026, 10, 1, 12, 0, 0));
+    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "day", season: "autumn", holidayOverride: "auto" }));
+    try {
+      mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 10 }));
+      const el = render(<WeatherWidget />);
+      await settle(300);
+
+      // The badge still labels the holiday — the art/particles are gone.
+      expect(el.textContent).toContain("Día de los Muertos");
+      expect(el.querySelector(".weather-art-motion")).toBeNull();
+      expect(el.querySelector("[data-weather-art-motion]")).toBeNull();
+      expect(el.querySelector(".weather-particle-motion")).toBeNull();
+      expect(el.querySelector("[data-weather-particle-motion]")).toBeNull();
+    } finally {
       localStorage.removeItem("home-ai-weather-config");
     }
   });
@@ -1261,38 +1276,6 @@ describe("WeatherWidget — Not Boring redesign", () => {
     } finally {
       if (descriptor) Object.defineProperty(document, "hidden", descriptor);
       else delete (document as any).hidden;
-    }
-  });
-
-  it("pauses holiday season artwork when the tab is hidden", async () => {
-    vi.stubGlobal("matchMedia", vi.fn(() => ({
-      matches: false,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-    })));
-    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "day", season: "autumn", holidayOverride: "halloween" }));
-    try {
-      mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 10 }));
-      const el = render(<WeatherWidget />);
-      await settle(250);
-      const art = el.querySelector("[data-weather-art-motion]") as HTMLElement | null;
-      expect(art).toBeTruthy();
-      expect(art!.getAttribute("data-weather-art-motion")).toBe("running");
-      const descriptor = Object.getOwnPropertyDescriptor(document, "hidden");
-      Object.defineProperty(document, "hidden", { configurable: true, value: true });
-      try {
-        act(() => document.dispatchEvent(new Event("visibilitychange")));
-        await settle();
-        expect(art!.getAttribute("data-weather-art-motion")).toBe("paused");
-        expect(art!.querySelector("animate")).toBeNull();
-      } finally {
-        if (descriptor) Object.defineProperty(document, "hidden", descriptor);
-        else delete (document as any).hidden;
-      }
-    } finally {
-      localStorage.removeItem("home-ai-weather-config");
     }
   });
 
@@ -1518,9 +1501,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
       expect(shower.textContent).toContain("Snow Showers");
       expect(shower.textContent).not.toContain("Big snow");
-      expect(shower.querySelector("[data-weather-art-motion]")).toBeTruthy();
       expect(heavy.textContent).toContain("Big snow today — boots by the door");
-      expect(heavy.querySelector("[data-weather-art-motion]")).toBeNull();
     } finally {
       localStorage.removeItem("home-ai-weather-config");
     }

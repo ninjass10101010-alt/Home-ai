@@ -2,7 +2,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import dynamic from "next/dynamic";
 import { useWeatherConfig } from "@/hooks/useWeather";
 import { HolidayOverride } from "@/lib/weather-config";
 import { detectAutoHoliday, HOLIDAY_STYLE } from "@/lib/holiday";
@@ -19,9 +18,6 @@ import { useWallMode } from "@/hooks/useWallMode";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook, InsightEvent } from "@/lib/weather-insights";
 import { classifyReadError, type ReadFailure } from "@/lib/read-state";
-
-const SeasonHolidayArt = dynamic(() => import("./WeatherSeasonArt"), { ssr: false });
-const HolidayParticles = dynamic(() => import("./WeatherParticles"), { ssr: false });
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -1007,8 +1003,6 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     if (kind === "snow") return snowAdvice(weatherData.severeEndISO, isKid);
     return null;
   }, [weatherData, isKid]);
-  const isSevere = !!rawSkin.severe;
-
   const minutesSinceUpdate = updatedAt === null
     ? null
     : Math.max(0, Math.floor(((clockTick || updatedAt) - updatedAt) / 60_000));
@@ -1124,15 +1118,6 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         </div>
         {fetchError && !weatherData && (
           <div className="pointer-events-none absolute inset-0 z-[1] bg-[rgba(120,128,145,0.38)] backdrop-blur-[1px]" aria-hidden="true" />
-        )}
-
-        {mounted && !isSevere && activeHoliday !== "none" && activeHoliday !== "auto" && (
-          <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-            <SeasonHolidayArt season={season} tod={sceneIsDay ? "day" : "night"} activeHoliday={activeHoliday} backdrop={false} motionOk={artworkMotionOk} />
-          </div>
-        )}
-        {mounted && !isSevere && !tabHidden && holidayStyle && (
-          <HolidayParticles type={holidayStyle.particle} tod={sceneIsDay ? "day" : "night"} motionOk={artworkMotionOk} />
         )}
 
         <div
