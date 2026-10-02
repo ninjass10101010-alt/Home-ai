@@ -320,6 +320,13 @@ export async function ensureHydrated(): Promise<void> {
     // MERGE (never replace): a send that raced this read must survive.
     const saved = loadChatHistory();
     if (saved.length > 0) setMessages((prev) => mergeThread(prev, saved));
+    // Seeded HERE, not after the server read below. The merge above is what puts
+    // the stale rows on screen, and the composer is live for the whole function
+    // (`sendDisabled` rides `streaming`, not `hydrated`), so a send landing in
+    // the await's window would allocate straight onto an id a stale row already
+    // holds — the overwrite this scheme exists to prevent. The reseed is
+    // monotonic and range-filtered, so running it again below costs nothing.
+    reseedOptimisticCounter(state.messages);
     const { messages: pbMsgs, latest } = await fetchPBThread();
     if (latest) lastPBCreated = latest;
     setMessages((prev) => mergeThread(prev, pbMsgs.length > 0 ? pbMsgs : loadChatHistory()));

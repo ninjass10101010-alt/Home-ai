@@ -336,6 +336,49 @@ describe("chat-store core", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it("seeds stale rows before the server read, so a send inside that window cannot overwrite one", async () => {
+    // The reported bug, reproduced through the window it survives in: the store
+    // merges the stale localStorage rows and then AWAITS the PocketBase read
+    // before reseeding the counter, and the composer is live the whole time. A
+    // send landing in that window allocates 101/102 — the exact ids the stale
+    // rows hold — and the bubble overwrites them.
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    let reads = 0;
+    let releaseHydrationFetch!: () => void;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      reads += 1;
+      // ONLY hydration's read is parked. Keyed on the URL instead would not
+      // work: the watermark is still empty while hydration is in flight, so the
+      // send's own reconcile carries no `since=` either and would park too.
+      if (reads === 1) return new Promise<Response>((res) => { releaseHydrationFetch = () => res(json({ ok: true, messages: [] })); });
+      return Promise.resolve(json({ ok: true, messages: [] }));
+    }));
+    localStorage.setItem("consuela-chat-messages", JSON.stringify([
+      { id: 101, role: "assistant", content: "stale answer", timestamp: "Yesterday", at: 1 },
+      { id: 102, role: "assistant", content: "another stale row", timestamp: "Yesterday", at: 2 },
+    ]));
+    streamMock.fn.mockImplementation(async ({ onToken }: any) => {
+      onToken("today's answer", "today's answer");
+      return { content: "today's answer", streamed: true };
+    });
+
+    // Not awaited: the send must land while hydration's server read is still
+    // in flight, which is the whole window.
+    const hydrating = ensureHydrated();
+    const sending = send("hello", SPEAKER);
+    releaseHydrationFetch();
+    await hydrating;
+    await sending;
+
+    const msgs = getSnapshot().messages;
+    expect(msgs.find((m) => m.id === 101)?.content).toBe("stale answer");
+    expect(msgs.find((m) => m.id === 102)?.content).toBe("another stale row");
+    expect(msgs.filter((m) => m.content === "today's answer")).toHaveLength(1);
+    const ids = msgs.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it("does not re-issue an id reserved by a send that raced hydration", async () => {
     const json = (body: unknown) =>
       new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
