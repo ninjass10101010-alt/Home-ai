@@ -1,13 +1,25 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useRef, useEffect, useMemo, Suspense, useSyncExternalStore } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  useCallback,
+  memo,
+  Suspense,
+  useSyncExternalStore,
+} from "react";
 import Avatar from "@/components/ui/Avatar";
 import { EmojiText } from "@/components/ui/EmojiText";
 import PageShell from "@/components/ui/PageShell";
 import Modal from "@/components/ui/Modal";
 import { UnifiedInput } from "@/components/chat/UnifiedInput";
 import AdjustPointsChip from "@/components/chat/AdjustPointsChip";
+import ThinkingDisclosure from "@/components/chat/ThinkingDisclosure";
+import ToolActivityChips from "@/components/chat/ToolActivityChips";
+import type { Message } from "@/lib/chat-store";
 import { FamilyBrief } from "./FamilyBrief";
 import { OpenLoopChips } from "./OpenLoopChips";
 import { messageOrigin, stripForSpeech } from "@/lib/consuela/chat-context";
@@ -84,6 +96,128 @@ function renderContent(text: string) {
   return nodes;
 }
 
+interface SpeakerFace {
+  name: string;
+  emoji: string;
+  color: string;
+}
+
+/**
+ * One thread row.
+ *
+ * MEMOIZED, and every prop below is deliberately primitive or identity-stable.
+ * `onReasoning` writes the whole store on every delta and the page subscribes
+ * to all of it via `useSyncExternalStore`, so an unmemoized row re-parsed the
+ * entire thread — `renderContent` escapes + regexes every line of every
+ * message — hundreds of times over a single GLM-class think. `msg` identity is
+ * stable across a thinking-only update (the store copies `messages` only when a
+ * row actually changes), so the settled rows now skip that work entirely.
+ */
+const MessageRow = memo(function MessageRow({
+  msg,
+  speaker,
+  currentUserName,
+  onRetry,
+  disclosureOpen,
+  onDisclosureToggle,
+}: {
+  msg: Message;
+  speaker: SpeakerFace;
+  currentUserName: string | undefined;
+  onRetry: (failedText: string, failedId: number) => void;
+  disclosureOpen: boolean;
+  onDisclosureToggle: (id: number, next: boolean) => void;
+}) {
+  return (
+    <div className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+      {msg.role === "assistant" && (
+        <div className="w-8 h-8 rounded-2xl flex items-center justify-center text-sm shrink-0 mt-0.5"
+          style={{
+            background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 30%, transparent), color-mix(in srgb, var(--color-accent-selected) 15%, transparent))",
+            boxShadow: "0 0 12px color-mix(in srgb, var(--color-accent-selected) 15%, transparent)",
+          }}
+        >
+          ✨
+        </div>
+      )}
+      {msg.role === "user" && (
+        <Avatar name={msg.speaker || speaker.name}
+          color={speaker.color || "green"}
+          emoji={msg.speakerEmoji || speaker.emoji}
+          size="sm" variant="emoji" />
+      )}
+      <div className={`max-w-[82%] min-w-0 space-y-2 ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col`}>
+        {msg.role === "user" && (messageOrigin(msg) ? (
+          <span className="text-xs text-text-secondary px-1">{messageOrigin(msg)}</span>
+        ) : msg.speaker ? (
+          <span className="text-xs text-text-secondary px-1">{msg.speaker.split(" ")[0]}</span>
+        ) : null)}
+        <div
+          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${
+            msg.role === "user"
+              ? "text-white rounded-tr-md"
+              : "rounded-tl-md text-text-primary"
+          }`}
+          style={
+            msg.role === "user"
+              ? { background: "linear-gradient(135deg, var(--color-accent-button), color-mix(in srgb, var(--color-accent-button) 72%, white))" }
+              : {
+                  background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 18%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 8%, transparent) 100%)",
+                  backdropFilter: "blur(16px)",
+                  WebkitBackdropFilter: "blur(16px)",
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.12)",
+                }
+          }
+        >
+          {renderContent(msg.content)}
+        </div>
+
+        {msg.role === "assistant" && msg.errorFor && (
+          <button
+            onClick={() => msg.errorFor && onRetry(msg.errorFor, msg.id)}
+            className="tap-sm relative inline-flex min-h-[44px] items-center gap-1.5 self-start rounded-full glass-subtle px-4 py-2.5 text-xs font-semibold text-[var(--color-accent-selected)]"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Try again
+          </button>
+        )}
+
+        {/* Task 10 — the turn's display-only activity stays on its own bubble:
+            in memory only, never persisted, so this row is its last home. */}
+        {msg.role === "assistant" && !!msg.toolEvents?.length && (
+          <ToolActivityChips events={msg.toolEvents} />
+        )}
+        {msg.role === "assistant" && (
+          <ThinkingDisclosure
+            text={msg.thinking ?? ""}
+            open={disclosureOpen}
+            onOpenChange={(next) => onDisclosureToggle(msg.id, next)}
+          />
+        )}
+
+        {/* Task 15 — point adjustments move ONLY behind a parent's PIN. */}
+        {msg.role === "assistant" && msg.proposals && msg.proposals.length > 0 && (
+          <div className="flex flex-wrap gap-2 self-start" data-testid="point-proposals">
+            {msg.proposals.map((p, i) => (
+              <AdjustPointsChip
+                key={`${p.args.member}|${p.args.delta}|${p.args.reason}|${i}`}
+                proposal={p}
+                actorName={currentUserName ?? null}
+              />
+            ))}
+          </div>
+        )}
+
+        <span className="text-xs text-text-secondary px-1">{msg.timestamp}</span>
+      </div>
+    </div>
+  );
+});
+
 function ChatContent() {
   // Live roster: bump a version on consuela-members-updated so the speaker
   // picker re-reads the roster when the members cache refreshes (60s
@@ -140,12 +274,20 @@ function ChatContent() {
   };
 
   const { currentUser, isLoggedIn } = useAuth();
-  const activeSpeaker = isLoggedIn && currentUser
-    ? { name: currentUser.name, emoji: currentUser.emoji, color: currentUser.color }
-    : currentSpeaker;
+  const activeSpeaker = useMemo<SpeakerFace>(
+    () =>
+      isLoggedIn && currentUser
+        ? { name: currentUser.name, emoji: currentUser.emoji, color: currentUser.color }
+        : currentSpeaker,
+    // Field-level deps, not the `currentUser` object: `useAuth` hands back a
+    // fresh context value often enough that an object dep would rebuild this on
+    // every render and defeat the `MessageRow` memo below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isLoggedIn, currentUser?.name, currentUser?.emoji, currentUser?.color, currentSpeaker],
+  );
 
   const store = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const { messages, isTyping, statusLine, hydrated, streaming } = store;
+  const { messages, isTyping, statusLine, hydrated, streaming, thinking, toolEvents } = store;
 
   // Hydrate once per page load (localStorage + today's PocketBase thread).
   // A remount re-attaches to the store; the store itself does a cheap
@@ -213,6 +355,13 @@ function ChatContent() {
     if (speaking && !isSpeechSupported()) setSpeaking(false);
   }, [speaking]);
 
+  // Task 10 — the live think and the tool chips add height BELOW the last
+  // message without touching `messages` / `isTyping`, so without these two deps
+  // the thread stops auto-pinning the moment either appears. The think is
+  // BUCKETED, not used whole: a transcript string dep would re-scroll on every
+  // one of a think's hundreds of deltas.
+  const thinkGrowthBucket = Math.floor(thinking.length / 512);
+
   // Only auto-scroll while the reader is already near the bottom — never
   // fight someone scrolling back through history.
   useEffect(() => {
@@ -221,7 +370,7 @@ function ChatContent() {
       behavior: reducedMotionRef.current ? "auto" : "smooth",
       block: "end",
     });
-  }, [messages, isTyping, pinnedToBottom]);
+  }, [messages, isTyping, pinnedToBottom, toolEvents.length, thinkGrowthBucket]);
 
   const handleMessagesScroll = () => {
     const el = scrollAreaRef.current;
@@ -253,13 +402,27 @@ function ChatContent() {
 
   const stopGenerating = stopChat;
 
-  const retryMessage = (failedText: string, failedId: number) => {
+  // Task 10 — the store owns the transcript TEXT; the page owns only whether it
+  // is open. `liveThinkingOpen` covers the turn in flight (open for the whole
+  // think unless the reader closes it, re-armed by the next send);
+  // `disclosureOpen` is the explicit re-open of a FINISHED message, which must
+  // survive the next send.
+  const [liveThinkingOpen, setLiveThinkingOpen] = useState(true);
+  const [disclosureOpen, setDisclosureOpen] = useState<Record<number, boolean>>({});
+
+  // Stable identities: `MessageRow` is memoized, so an inline closure here
+  // would re-render the whole thread on every store delta.
+  const retryMessage = useCallback((failedText: string, failedId: number) => {
     retryChat(failedText, failedId, activeSpeaker);
-  };
+  }, [activeSpeaker]);
+  const onDisclosureToggle = useCallback((id: number, next: boolean) => {
+    setDisclosureOpen((prev) => (prev[id] === next ? prev : { ...prev, [id]: next }));
+  }, []);
 
   const sendMessage = (text: string) => {
     // Sending always re-pins the thread to the newest message.
     setPinnedToBottom(true);
+    setLiveThinkingOpen(true);
     return sendChat(text, activeSpeaker);
   };
 
@@ -478,87 +641,36 @@ function ChatContent() {
             );
           }
           return (
-          <div
-            key={msg.id}
-            className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
-          >
-            {msg.role === "assistant" && (
-              <div className="w-8 h-8 rounded-2xl flex items-center justify-center text-sm shrink-0 mt-0.5"
-                style={{
-                  background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 30%, transparent), color-mix(in srgb, var(--color-accent-selected) 15%, transparent))",
-                  boxShadow: "0 0 12px color-mix(in srgb, var(--color-accent-selected) 15%, transparent)",
-                }}
-              >
-                ✨
-              </div>
-            )}
-            {msg.role === "user" && (
-              <Avatar name={msg.speaker || activeSpeaker.name}
-                color={activeSpeaker.color || "green"}
-                emoji={msg.speakerEmoji || activeSpeaker.emoji}
-                size="sm" variant="emoji" />
-            )}
-            <div className={`max-w-[82%] min-w-0 space-y-2 ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col`}>
-              {msg.role === "user" && (messageOrigin(msg) ? (
-                <span className="text-xs text-text-secondary px-1">{messageOrigin(msg)}</span>
-              ) : msg.speaker ? (
-                <span className="text-xs text-text-secondary px-1">{msg.speaker.split(" ")[0]}</span>
-              ) : null)}
-              <div
-                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${
-                  msg.role === "user"
-                    ? "text-white rounded-tr-md"
-                    : "rounded-tl-md text-text-primary"
-                }`}
-                style={
-                  msg.role === "user"
-                    ? { background: "linear-gradient(135deg, var(--color-accent-button), color-mix(in srgb, var(--color-accent-button) 72%, white))" }
-                    : {
-                        background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 18%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 8%, transparent) 100%)",
-                        backdropFilter: "blur(16px)",
-                        WebkitBackdropFilter: "blur(16px)",
-                        border: "1px solid rgba(255,255,255,0.10)",
-                        boxShadow: "0 4px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.12)",
-                      }
-                }
-              >
-                {renderContent(msg.content)}
-              </div>
-
-              {msg.role === "assistant" && msg.errorFor && (
-                <button
-                  onClick={() => msg.errorFor && retryMessage(msg.errorFor, msg.id)}
-                  className="tap-sm relative inline-flex min-h-[44px] items-center gap-1.5 self-start rounded-full glass-subtle px-4 py-2.5 text-xs font-semibold text-[var(--color-accent-selected)]"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-                    <path d="M21 12a9 9 0 1 1-2.64-6.36" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Try again
-                </button>
-              )}
-
-              {/* Task 15 — point adjustments move ONLY behind a parent's PIN. */}
-              {msg.role === "assistant" && msg.proposals && msg.proposals.length > 0 && (
-                <div className="flex flex-wrap gap-2 self-start" data-testid="point-proposals">
-                  {msg.proposals.map((p, i) => (
-                    <AdjustPointsChip
-                      key={`${p.args.member}|${p.args.delta}|${p.args.reason}|${i}`}
-                      proposal={p}
-                      actorName={currentUser?.name ?? null}
-                    />
-                  ))}
-                </div>
-              )}
-
-              <span className="text-xs text-text-secondary px-1">{msg.timestamp}</span>
-            </div>
-          </div>
+            <MessageRow
+              key={msg.id}
+              msg={msg}
+              speaker={activeSpeaker}
+              currentUserName={currentUser?.name}
+              onRetry={retryMessage}
+              disclosureOpen={disclosureOpen[msg.id] === true}
+              onDisclosureToggle={onDisclosureToggle}
+            />
           );
         })}
 
         {isTyping && (
-          <div role="status" aria-live="polite" className="flex gap-2.5">
+          <div className="flex flex-col gap-2">
+            {/* Live tool activity + the reasoning transcript, deliberately
+                OUTSIDE the `role="status"` region below: a transcript that grows
+                by one delta at a time inside a polite live region would
+                re-announce the entire think on every frame. */}
+            <div className="flex gap-2.5">
+              <div className="w-8 shrink-0" aria-hidden />
+              <div className="min-w-0 max-w-[82%] flex flex-col gap-2">
+                <ToolActivityChips events={toolEvents} />
+                <ThinkingDisclosure
+                  text={thinking}
+                  open={liveThinkingOpen}
+                  onOpenChange={setLiveThinkingOpen}
+                />
+              </div>
+            </div>
+            <div role="status" aria-live="polite" className="flex gap-2.5">
             <div className="w-8 h-8 rounded-2xl flex items-center justify-center text-sm shrink-0"
               style={{
                 background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 30%, transparent), color-mix(in srgb, var(--color-accent-selected) 15%, transparent))",
@@ -583,6 +695,7 @@ function ChatContent() {
               {[0, 1, 2].map((i) => (
                 <div key={i} className="chat-dot chat-dot-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
               ))}
+            </div>
             </div>
           </div>
         )}
