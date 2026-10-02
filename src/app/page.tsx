@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import PageShell from "@/components/ui/PageShell";
 import Avatar, { type AvatarSize } from "@/components/ui/Avatar";
 import WeatherWidget from "@/components/ui/WeatherWidget";
@@ -13,8 +13,9 @@ import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 import { db } from "@/db";
 import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
-import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
+import { AtmosphericProvider, useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
+import { HOLIDAY_PALETTE } from "@/lib/holiday";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useWallMode } from "@/hooks/useWallMode";
 import { WIDGET_SPANS, homeGridClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK, WALL_GRID_CLASS, PHONE_WIDGET_FOLD } from "@/lib/layout-config";
@@ -133,6 +134,30 @@ function MorningBriefingSlot({ span }: { span: string }) {
         onRetry={retry}
         className="h-full"
       />
+    </div>
+  );
+}
+
+// HomeShell — the Home page's shell boundary. Resolves the active holiday at
+// the shell and injects the --holiday-* CSS vars Task 3's cards consume, plus a
+// data-holiday hook for holiday-scoped CSS. The attribute + a display:contents
+// wrapper carry them because PageShell forwards no unknown props; `contents`
+// adds no box, so the shell layout is unchanged.
+function HomeShell({ children, wall }: { children: ReactNode; wall: boolean }) {
+  const { holiday, accentColor, glowColor } = useAtmosphericTheme();
+  const activeHoliday = holiday !== "none" && holiday !== "auto" ? holiday : null;
+  const pal = activeHoliday ? HOLIDAY_PALETTE[activeHoliday] : undefined;
+  return (
+    <div className="contents" data-holiday={activeHoliday ?? undefined}>
+      <PageShell
+        style={{
+          backgroundColor: "transparent",
+          ...(pal ? ({ "--holiday-accent": accentColor, "--holiday-glow": glowColor, "--holiday-surface": pal.surfaceTint } as CSSProperties) : {}),
+        }}
+        contentClassName={wall ? "wall-home-fit" : ""}
+      >
+        {children}
+      </PageShell>
     </div>
   );
 }
@@ -513,7 +538,7 @@ export default function HomePage() {
       <AtmosphericProvider>
         <AnimationBudgetProvider>
         <FogBackground />
-        <PageShell style={{ backgroundColor: "transparent" }} contentClassName={wall ? "wall-home-fit" : ""}>
+        <HomeShell wall={wall}>
           <EmergencyButton />
 
           <div className="relative z-10 px-4 pt-10 pb-6">
@@ -1026,7 +1051,7 @@ export default function HomePage() {
           <Toast open={Boolean(notification)} tone="neutral">
             {notification}
           </Toast>
-        </PageShell>
+        </HomeShell>
         </AnimationBudgetProvider>
       </AtmosphericProvider>
   );

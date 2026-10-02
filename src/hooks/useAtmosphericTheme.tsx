@@ -9,6 +9,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { useWeatherConfig } from "@/hooks/useWeather";
 import { type HolidayOverride } from "@/lib/weather-config";
+import { detectAutoHoliday } from "@/lib/holiday";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -170,6 +171,60 @@ const HOLIDAY_ATMOSPHERE: Partial<Record<HolidayOverride, Omit<AtmosphericTheme,
     bridgeGradient: "linear-gradient(180deg, rgba(234,179,8,0.20) 0%, rgba(30,27,75,0.22) 50%, rgba(15,23,42,0.12) 100%)",
     bridgeGlow: "rgba(234,179,8,0.06)",
   },
+  stpatricks: {
+    accentColor: "#22c55e",
+    glowColor: "rgba(34,197,94,0.28)",
+    bgGradient: "linear-gradient(180deg, #04140a 0%, #0a2f14 30%, #061a0d 60%, #111827 100%)",
+    particleEmoji: "🍀",
+    atmosphereOpacity: 0.12,
+    bridgeGradient: "linear-gradient(180deg, rgba(34,197,94,0.22) 0%, rgba(10,47,20,0.20) 50%, rgba(6,26,13,0.14) 100%)",
+    bridgeGlow: "rgba(34,197,94,0.07)",
+  },
+  cincodemayo: {
+    accentColor: "#f59e0b",
+    glowColor: "rgba(245,158,11,0.28)",
+    bgGradient: "linear-gradient(180deg, #1c0a00 0%, #3f1c05 30%, #241000 60%, #111827 100%)",
+    particleEmoji: "🪅",
+    atmosphereOpacity: 0.11,
+    bridgeGradient: "linear-gradient(180deg, rgba(245,158,11,0.20) 0%, rgba(63,28,5,0.20) 50%, rgba(36,16,0,0.14) 100%)",
+    bridgeGlow: "rgba(245,158,11,0.07)",
+  },
+  thanksgiving: {
+    accentColor: "#d97706",
+    glowColor: "rgba(217,119,6,0.28)",
+    bgGradient: "linear-gradient(180deg, #1a0e00 0%, #38200a 30%, #241305 60%, #111827 100%)",
+    particleEmoji: "🦃",
+    atmosphereOpacity: 0.13,
+    bridgeGradient: "linear-gradient(180deg, rgba(217,119,6,0.22) 0%, rgba(56,32,10,0.20) 50%, rgba(36,19,5,0.14) 100%)",
+    bridgeGlow: "rgba(217,119,6,0.07)",
+  },
+  diadelosmuertos: {
+    accentColor: "#ec4899",
+    glowColor: "rgba(236,72,153,0.28)",
+    bgGradient: "linear-gradient(180deg, #2d0a24 0%, #4a0f3d 30%, #1a0530 60%, #111827 100%)",
+    particleEmoji: "💀",
+    atmosphereOpacity: 0.12,
+    bridgeGradient: "linear-gradient(180deg, rgba(236,72,153,0.22) 0%, rgba(74,15,61,0.20) 50%, rgba(26,5,48,0.14) 100%)",
+    bridgeGlow: "rgba(236,72,153,0.07)",
+  },
+  mexicanindependence: {
+    accentColor: "#22c55e",
+    glowColor: "rgba(34,197,94,0.25)",
+    bgGradient: "linear-gradient(180deg, #051405 0%, #14350a 30%, #3d0a0a 60%, #111827 100%)",
+    particleEmoji: "🔔",
+    atmosphereOpacity: 0.10,
+    bridgeGradient: "linear-gradient(180deg, rgba(34,197,94,0.20) 0%, rgba(20,53,10,0.22) 50%, rgba(61,10,10,0.14) 100%)",
+    bridgeGlow: "rgba(34,197,94,0.06)",
+  },
+  virginguadalupe: {
+    accentColor: "#0d9488",
+    glowColor: "rgba(13,148,136,0.25)",
+    bgGradient: "linear-gradient(180deg, #03110f 0%, #06302b 30%, #041a18 60%, #111827 100%)",
+    particleEmoji: "🌹",
+    atmosphereOpacity: 0.10,
+    bridgeGradient: "linear-gradient(180deg, rgba(13,148,136,0.20) 0%, rgba(6,48,43,0.20) 50%, rgba(4,26,24,0.14) 100%)",
+    bridgeGlow: "rgba(13,148,136,0.06)",
+  },
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -185,18 +240,6 @@ function getRealSeason(): SeasonKey {
 function getRealTod(): boolean {
   const h = new Date().getHours();
   return h < 6 || h >= 19;
-}
-
-function detectAutoHoliday(): HolidayOverride {
-  const now = new Date();
-  const month = now.getMonth();
-  const day = now.getDate();
-  if (month === 11 && day >= 15) return "christmas";
-  if (month === 0 && day <= 7) return "newyears";
-  if (month === 1 && day >= 10 && day <= 16) return "valentines";
-  if (month === 6 && day >= 1 && day <= 7) return "july4th";
-  if (month === 9 && day >= 25) return "halloween";
-  return "none";
 }
 
 // ─── Context ────────────────────────────────────────────────────────────────

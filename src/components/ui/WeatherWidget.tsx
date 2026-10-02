@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useWeatherConfig } from "@/hooks/useWeather";
 import { HolidayOverride } from "@/lib/weather-config";
+import { detectAutoHoliday, HOLIDAY_STYLE } from "@/lib/holiday";
 import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
 import { useAuth } from "@/hooks/useAuth";
 import Skeleton from "@/components/ui/Skeleton";
@@ -17,7 +18,6 @@ import { SceneLayers, Condition, wmoToScene, dayCondition, conditionPresentation
 import { useWallMode } from "@/hooks/useWallMode";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook, InsightEvent } from "@/lib/weather-insights";
-import type { ParticleKind } from "./WeatherParticles";
 import { classifyReadError, type ReadFailure } from "@/lib/read-state";
 
 const SeasonHolidayArt = dynamic(() => import("./WeatherSeasonArt"), { ssr: false });
@@ -191,38 +191,6 @@ function getRealSeason(): SeasonKey {
   if (month >= 8 && month <= 10) return "autumn";
   return "winter";
 }
-
-function detectAutoHoliday(): HolidayOverride {
-  const now = new Date();
-  const month = now.getMonth();
-  const day = now.getDate();
-  if (month === 11 && day >= 15) return "christmas";
-  if (month === 0 && day <= 7) return "newyears";
-  if (month === 1 && day >= 10 && day <= 16) return "valentines";
-  if (month === 2 && day >= 14 && day <= 17) return "stpatricks";
-  if (month === 4 && day >= 3 && day <= 6) return "cincodemayo";
-  if (month === 8 && day >= 15 && day <= 16) return "mexicanindependence";
-  if (month === 9 && day >= 25 && day <= 30) return "halloween";
-  if ((month === 9 && day === 31) || (month === 10 && day >= 1 && day <= 2)) return "diadelosmuertos";
-  if (month === 6 && day >= 1 && day <= 7) return "july4th";
-  if (month === 10 && day >= 22 && day <= 28) return "thanksgiving";
-  if (month === 11 && day >= 11 && day <= 13) return "virginguadalupe";
-  return "none";
-}
-
-const HOLIDAY_STYLE: Partial<Record<HolidayOverride, { accent: string; particle: ParticleKind; label: string }>> = {
-  christmas: { accent: "#ef4444", particle: "christmas-snow", label: "🎄 Christmas" },
-  halloween: { accent: "#f97316", particle: "bat", label: "🎃 Halloween" },
-  july4th: { accent: "#ef4444", particle: "spark", label: "🎆 4th of July" },
-  valentines: { accent: "#f43f5e", particle: "heart", label: "💝 Valentine's" },
-  newyears: { accent: "#eab308", particle: "spark", label: "🥂 New Year's" },
-  cincodemayo: { accent: "#f59e0b", particle: "confetti", label: "🪅 Cinco de Mayo" },
-  thanksgiving: { accent: "#d97706", particle: "harvest", label: "🦃 Thanksgiving" },
-  stpatricks: { accent: "#22c55e", particle: "shamrock", label: "🍀 St. Patrick's" },
-  diadelosmuertos: { accent: "#ec4899", particle: "marigold", label: "💀 Día de los Muertos" },
-  mexicanindependence: { accent: "#22c55e", particle: "tricolor-sparks", label: "🔔 Independence Day" },
-  virginguadalupe: { accent: "#0d9488", particle: "holy-roses", label: "🌹 Virgin of Guadalupe" },
-};
 
 function validSolarInterval(sunriseISO: string | null | undefined, sunsetISO: string | null | undefined): SolarInterval | null {
   if (typeof sunriseISO !== "string" || typeof sunsetISO !== "string") return null;
@@ -886,7 +854,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
 
   const rawHoliday = weather.holidayOverride ?? "auto";
   const activeHoliday: HolidayOverride = rawHoliday === "auto" ? detectAutoHoliday() : rawHoliday;
-  const holidayStyle = activeHoliday !== "none" ? HOLIDAY_STYLE[activeHoliday] ?? null : null;
+  const holidayStyle = activeHoliday !== "none" && activeHoliday !== "auto" ? HOLIDAY_STYLE[activeHoliday] ?? null : null;
 
   const stripHours = useMemo(() => {
     if (!weatherData) return [] as HourPoint[];
