@@ -570,6 +570,26 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
+/* Holiday glaze — active only when the Home shell sets data-holiday + the
+   --holiday-* vars (HomeShell injects the pair together, or not at all), per
+   the Monster-wx holiday-tint plan §2. Subtle tint + accent shift. The card
+   material is layered gradients over a backdrop blur, so the glaze is a
+   translucent background-color added beneath those layers — an opaque
+   surface mix would defeat the glass — and the border picks up an 18% wash.
+   The :not([data-theme="dark"]) companion out-ranks the light-theme card
+   rules (which reset background-color through the background shorthand) and
+   keeps the glaze alive under the hover resonance, which repaints
+   background the same way. */
+[data-holiday] .widget-card,
+:root:not([data-theme="dark"]) [data-holiday] .widget-card {
+  background-color: color-mix(in srgb, var(--holiday-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--holiday-accent) 18%, rgba(255, 255, 255, 0.10));
+}
+
+[data-holiday] .home-widget-icon {
+  --home-widget-icon-accent: color-mix(in srgb, var(--holiday-accent) 22%, var(--color-accent-selected));
+}
+
 [data-contrast="boost"] .widget-card {
   border-width: 1.5px;
 }
