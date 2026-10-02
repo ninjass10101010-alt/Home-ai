@@ -18,7 +18,7 @@ import { readUserCapsules } from "@/lib/time-capsule";
 import type { TimeCapsule } from "@/db/features/time-capsule";
 import type { SkillTreeProfile, SkillBranch, Quest } from "@/db/features/skill-tree";
 import { localTodayISO, localWeekdayShort } from "@/lib/local-date";
-import { mergeTodaysEvents, mergeEventsRange } from "./todays-events";
+import { mergeTodaysEvents, mergeEventsRange, type ToolEvent } from "./todays-events";
 import { readSnapshotTasks, type SnapshotTask } from "@/lib/snapshot-tasks";
 
 export type CanonicalTaskSource = "snapshot" | "pb" | "unavailable";
@@ -28,9 +28,10 @@ export interface CanonicalTaskRead {
   source: CanonicalTaskSource;
 }
 
-/** Family events for `dayISO` (default today), read live. Degrades to [] when
- *  PB is unreachable. */
-export async function liveEvents(dayISO = localTodayISO()): Promise<any[]> {
+/** Family events for `dayISO` (default today), read live. Null = the read
+ *  FAILED — `[]` means PB is genuinely empty, and a caller that conflates the
+ *  two tells a kid their day is clear when it was never read. */
+export async function liveEvents(dayISO = localTodayISO()): Promise<any[] | null> {
   try {
     const rows = await withAdmin(async (pb) => {
       const evts = await pb.collection("events").getFullList({
@@ -55,14 +56,14 @@ export async function liveEvents(dayISO = localTodayISO()): Promise<any[]> {
     });
     return Array.isArray(rows) ? rows : [];
   } catch {
-    return [];
+    return null;
   }
 }
 
-/** Google-synced calendar rows for `dayISO`, read live. Degrades to [] when
- *  the collection is unreachable — a dead Google sync must not blank the
- *  family's own events. */
-export async function liveGoogleEvents(dayISO = localTodayISO()): Promise<any[]> {
+/** Google-synced calendar rows for `dayISO`, read live. Null = the read FAILED.
+ *  A dead Google sync must not blank the family's own events, so a caller may
+ *  fall back to the family rows — but it must know it is doing so. */
+export async function liveGoogleEvents(dayISO = localTodayISO()): Promise<any[] | null> {
   try {
     const rows = await withAdmin(async (pb) => {
       return pb.collection("consuela_google_calendar_events").getFullList({
@@ -72,7 +73,7 @@ export async function liveGoogleEvents(dayISO = localTodayISO()): Promise<any[]>
     });
     return Array.isArray(rows) ? rows : [];
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -125,10 +126,19 @@ export function formatEventTime(time: string): string {
   return `${h12}:${m[2]} ${h24 < 12 ? "AM" : "PM"}`;
 }
 
-/** Today's events merged from the family collection + the Google calendar. */
-export async function mergedTodaysEvents(dayISO = localTodayISO()) {
+/**
+ * Today's events merged from the family collection + the Google calendar.
+ *
+ * Null when BOTH reads failed — same rule as `liveEventsRange`, so the two
+ * calendar surfaces agree. A single-source failure returns the OTHER source's
+ * rows: a dead Google sync must not blank the family's own events, and blanking
+ * them would be a worse answer than a partial day. Callers that need to name the
+ * gap can compare against the two readers directly.
+ */
+export async function mergedTodaysEvents(dayISO = localTodayISO()): Promise<ToolEvent[] | null> {
   const [family, google] = await Promise.all([liveEvents(dayISO), liveGoogleEvents(dayISO)]);
-  return mergeTodaysEvents(family, google, dayISO);
+  if (family === null && google === null) return null;
+  return mergeTodaysEvents(family ?? [], google ?? [], dayISO);
 }
 
 function taskFromCollectionRow(row: Record<string, any>): SnapshotTask | null {
@@ -209,8 +219,10 @@ export async function livePendingTasksForPack(): Promise<any[] | null> {
   return livePendingTasks();
 }
 
-/** Today's routine schedule, read live. Degrades to [] when PB is down. */
-export async function liveSchedules(): Promise<any[]> {
+/** Today's routine schedule, read live. Null = the read FAILED. This answers a
+ *  kid asking what the routine is, so "PB is down" must never read as "you have
+ *  no routine". */
+export async function liveSchedules(): Promise<any[] | null> {
   try {
     const rows = await withAdmin(async (pb) => {
       const [schedRows, members] = await Promise.all([
@@ -233,7 +245,7 @@ export async function liveSchedules(): Promise<any[]> {
     });
     return Array.isArray(rows) ? rows : [];
   } catch {
-    return [];
+    return null;
   }
 }
 

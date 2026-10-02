@@ -570,6 +570,9 @@ const TOOLS: Tool[] = [
     },
     handler: async () => {
       const events = await mergedTodaysEvents();
+      if (events === null) {
+        return summarize({ error: "calendar data unavailable — do not guess today's events", events: [] });
+      }
       return summarize(events.map((e) => ({
         title: e.title,
         time: e.time,
@@ -741,6 +744,9 @@ const TOOLS: Tool[] = [
     },
     handler: async () => {
       const sched = await liveSchedules();
+      if (sched === null) {
+        return summarize({ error: "routine data unavailable — do not guess today's routine", schedule: [] });
+      }
       return summarize(sched.map((s: any) => ({
         title: s.title,
         time: s.time,
@@ -1664,7 +1670,8 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const events = await mergedTodaysEvents();
+      const eventRows = await mergedTodaysEvents();
+      const events = eventRows ?? [];
       const taskRows = await livePendingTasks();
       const tasks = taskRows ?? [];
       const mealRows = await liveMealRows();
@@ -1681,6 +1688,7 @@ const TOOLS: Tool[] = [
         family_timezone: familyTimeZone(),
         ...(mealRows === null ? { meals_error: "meal data unavailable — do not guess" } : {}),
         ...(taskRows === null ? { tasks_error: "task data unavailable — do not guess" } : {}),
+        ...(eventRows === null ? { events_error: "calendar data unavailable — do not guess today's events" } : {}),
         events: events.map((e) => ({ title: e.title, time: e.time, member: e.member, source: e.source })),
         pending_tasks: tasks.map((t: any) => ({
           title: t.title,
@@ -2036,6 +2044,15 @@ const TOOLS: Tool[] = [
         // event's start) — pinned by hermes-tools-calendar-range tests.
         const dayISO = String(args.start || "").slice(0, 10) || localTodayISO();
         const family = await liveEvents(dayISO);
+        // A read failure must not answer "no conflict". ai/TOOLS.md tells the
+        // model to run this BEFORE add_event, so a false negative here silently
+        // GATES a write on a read nobody managed to do.
+        if (family === null) {
+          return JSON.stringify({
+            error: "family calendar unavailable — do not guess conflicts, check the calendar another way",
+            checked: false,
+          });
+        }
         const mapped = family.map((e: any) =>
           familyRowToConflictEvent({ id: e.id, title: e.title, date: dayISO, time: e.time }));
         const result = await wouldConflict({
