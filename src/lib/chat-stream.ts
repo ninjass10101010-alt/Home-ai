@@ -115,11 +115,12 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
     res = await fetch("/api/hermes/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Client-side watchdog: the server's 60s per-Hermes-call timeout covers the
-      // common hang and always emits a frame; this cap bounds the whole exchange
-      // — pre-frame route hangs and wedged body reads (e.g. PB auth/config
-      // wedged). The longest legitimate flow (trigger_update) restarts the server
-      // anyway, which drops the connection regardless.
+      // Client-side watchdog: the server's per-Hermes-call timeout covers the
+      // common hang and always emits a frame (60s on the buffered/planner calls,
+      // 120s on the streamed one the UI always uses); this cap bounds what that
+      // per-call timeout does not — pre-frame route hangs and wedged body reads
+      // (e.g. PB auth/config wedged). The longest legitimate flow (trigger_update)
+      // restarts the server anyway, which drops the connection regardless.
       signal: failSignal,
       body: JSON.stringify({
         message: opts.message,

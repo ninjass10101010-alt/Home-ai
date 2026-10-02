@@ -1122,5 +1122,29 @@ describe("hermes chat — per-call timeout budgets", () => {
     expect(body).toContain("event: error");
     expect(body).not.toContain("Way too late.");
     expect(mocks.insertChatMessage).not.toHaveBeenCalled();
+    // The honest terminal state: a round the budget killed is a `snag`, not an
+    // `exhausted` or a silent abort, so Settings → AI Models reads it as an
+    // LLM timeout.
+    expect(mocks.recordChatOutcome.mock.calls[0][0].outcome).toBe("snag");
+  });
+
+  // The sibling test proves the buffered budget is ≤ 90s, which no narrowing of
+  // AI_TIMEOUT_MS(60s) could trip — 30s would pass it too. Pin the budget itself:
+  // alive one tick before it, dead at it.
+  it("gives up on the buffered path exactly at AI_TIMEOUT_MS(60s)", async () => {
+    silentProvider(120_000, () => new Response(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "plain" } }] }),
+      { status: 200, headers: { "content-type": "application/json" } }));
+    let settled = false;
+    const pending = post({ message: "hi" }).then((r) => { settled = true; return r; });
+    await settleRequestToProvider();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    // Assert the settle before awaiting, so a WIDENED budget reports a failure
+    // instead of hanging the suite on a response that never comes.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(true);
+    expect((await (await pending).json()).content).toContain("hit a snag");
   });
 });
