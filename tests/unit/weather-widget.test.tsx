@@ -677,7 +677,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     });
     expect(rainy.querySelectorAll("[data-weather-precip]").length).toBeGreaterThan(0);
     expect((rainy.querySelector('[data-testid="wx-scene-layers"]') ?? rainy).getAttribute("data-wind")).toBe("28");
-    expect((rainy.querySelector("[data-cloud-layer]") as HTMLElement).style.animation).toContain("18s");
+    expect((rainy.querySelector("[data-cloud-layer]") as HTMLElement).style.animation).toContain("12s");
   });
 
   it("does not invent unknown or zero poster measurements", () => {

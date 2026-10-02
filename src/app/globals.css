@@ -1863,7 +1863,7 @@ a.widget-accent-text {
 
 @keyframes wx-bob {
   0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-4px); }
+  50%      { transform: translateY(-3px); }
 }
 
 @keyframes wx-fall {
@@ -1877,8 +1877,8 @@ a.widget-accent-text {
 }
 
 @keyframes wx-sway {
-  from { margin-left: -12px; }
-  to   { margin-left: 12px; }
+  from { margin-left: -9px; }
+  to   { margin-left: 9px; }
 }
 
 @keyframes wx-fogdrift {
@@ -1887,15 +1887,15 @@ a.widget-accent-text {
 }
 
 @keyframes wx-bolt {
-  0%, 41.5%, 46.5%, 100% { opacity: 0; }
-  42%   { opacity: 1; }
-  43%   { opacity: 0.3; }
-  44.5% { opacity: 1; }
+  0%, 21.5%, 26.5%, 100% { opacity: 0; }
+  22%   { opacity: 1; }
+  23%   { opacity: 0.3; }
+  24.5% { opacity: 1; }
 }
 
 @keyframes wx-shoot {
-  0%, 92% { opacity: 0; transform: translate(0, 0) rotate(-24deg); }
-  93%     { opacity: 1; }
+  0%, 90% { opacity: 0; transform: translate(0, 0) rotate(-24deg); }
+  91%     { opacity: 1; }
   100%    { opacity: 0; transform: translate(-220px, 120px) rotate(-24deg); }
 }
 
@@ -1905,10 +1905,10 @@ a.widget-accent-text {
 }
 
 @keyframes wxLightning {
-  0%, 40.9%, 43.1%, 44.9%, 46.1%, 100% { opacity: 0; }
-  41.5% { opacity: 0.55; }
-  44%   { opacity: 0.28; }
-  45.5% { opacity: 0.65; }
+  0%, 20.9%, 23.1%, 24.9%, 26.1%, 100% { opacity: 0; }
+  21.5% { opacity: 0.55; }
+  24%   { opacity: 0.28; }
+  25.5% { opacity: 0.65; }
 }
 
 @keyframes wxFadeIn {

@@ -74,7 +74,7 @@ export function CloudPuff({ className = "", style, tone = "day", layer, variant 
       <svg
         viewBox="0 0 200 120"
         className="h-full w-full overflow-visible"
-        style={bob ? { animation: "wx-bob 7s ease-in-out infinite", transformBox: "fill-box", transformOrigin: "center" } : undefined}
+        style={bob ? { animation: "wx-bob 4.2s ease-in-out infinite", transformBox: "fill-box", transformOrigin: "center" } : undefined}
       >
         <defs>
           <linearGradient id={`${uid}-cloud`} x1="0" y1="0" x2="0" y2="1">
@@ -104,9 +104,9 @@ export function CloudPuff({ className = "", style, tone = "day", layer, variant 
 // so the flap unmounts under reduced-motion) ──
 
 const BIRDS = [
-  { a: 44, b: 12, dur: 17, delay: -3, size: 14, flap: 0.9 },
-  { a: 58, b: 16, dur: 23, delay: -11, size: 11, flap: 1.1 },
-  { a: 50, b: 14, dur: 20, delay: -16, size: 12, flap: 1.0 },
+  { a: 44, b: 12, dur: 15, delay: -2, size: 14, flap: 0.75 },
+  { a: 58, b: 16, dur: 19, delay: -9, size: 11, flap: 0.95 },
+  { a: 50, b: 14, dur: 17, delay: -14, size: 12, flap: 0.85 },
 ];
 
 function BirdGlyph({ size, flap, color, flapping }: { size: number; flap: number; color: string; flapping: boolean }) {
@@ -209,7 +209,7 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
       preserveAspectRatio="xMidYMid slice"
       className="absolute inset-0 h-full w-full"
       aria-hidden="true"
-      style={motionOk ? { animation: "wxFadeIn 0.85s ease both" } : undefined}
+      style={motionOk ? { animation: "wxFadeIn 0.55s ease both" } : undefined}
     >
       <defs>
         <clipPath id={`${uid}-moonclip`}>
@@ -327,7 +327,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
   const cloudTone = heavySnow ? "heavy-snow" : scene === "clear" ? "poster" : scene === "night" ? "night" : "day";
   const frontCloudOpacity = cloudCount > 0 ? (scene === "clear" ? cover * 0.009 : Math.min(0.9, 0.25 + cover * 0.0065)) : 0;
   const backCloudOpacity = cloudCount > 1 ? (scene === "clear" ? Math.max(0, (cover - 20) / 100) * 0.72 : Math.min(0.72, 0.18 + cover * 0.0054)) : 0;
-  const driftDuration = numericWind != null && numericWind > 0 ? Math.max(16, 46 - numericWind) : null;
+  const driftDuration = numericWind != null && numericWind > 0 ? Math.max(12, 34 - numericWind) : null;
   const driftAnimation = motionOk && driftDuration != null;
   const isWet = scene === "rain" || scene === "storm";
   const rainCount = isWet && normalizedPrecipitation != null && normalizedPrecipitation > 0
@@ -366,7 +366,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
                 top: `${(i * 53) % 45}%`,
                 width: 2 + (i % 3),
                 height: 2 + (i % 3),
-                animation: motionOk ? `wxStarTwinkle ${2.5 + (i % 4)}s ease-in-out ${i * 0.3}s infinite` : undefined,
+                animation: motionOk ? `wxStarTwinkle ${1.8 + (i % 3)}s ease-in-out ${i * 0.3}s infinite` : undefined,
               }}
             />
           ))}
@@ -379,7 +379,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
                 top: "12%",
                 transform: "rotate(-24deg)",
                 opacity: 0,
-                animation: motionOk ? "wx-shoot 11s ease-in 5s infinite" : undefined,
+                animation: motionOk ? "wx-shoot 8s ease-in 3s infinite" : undefined,
               }}
             />
           )}
@@ -418,7 +418,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
                 height: 14 + ((i * 7) % 3) * 6,
                 opacity: 0.45 + ((i * 13) % 40) / 100,
                 animation: motionOk
-                  ? `wx-fall ${0.6 + ((i * 17) % 40) / 100}s linear ${-(((i * 31) % 100) / 50)}s infinite`
+                  ? `wx-fall ${0.5 + ((i * 17) % 34) / 100}s linear ${-(((i * 31) % 100) / 50)}s infinite`
                   : undefined,
                 ["--travel" as string]: "115cqh",
               } as CSSProperties}
@@ -441,7 +441,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
               opacity: 0.55 + ((i * 9) % 45) / 100,
               filter: (i * 3) % 10 > 7 ? "blur(1.2px)" : undefined,
               animation: motionOk
-                ? `wx-snowfall ${6.5 + ((i * 7) % 6)}s linear ${-((i * 11) % 13)}s infinite, wx-sway ${3 + ((i * 3) % 4)}s ease-in-out ${-((i * 11) % 13)}s infinite alternate`
+                ? `wx-snowfall ${5.6 + ((i * 7) % 5)}s linear ${-((i * 11) % 13)}s infinite, wx-sway ${2.6 + ((i * 3) % 3)}s ease-in-out ${-((i * 11) % 13)}s infinite alternate`
                 : undefined,
               ["--travel" as string]: "115cqh",
             } as CSSProperties}
@@ -451,7 +451,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
       {scene === "storm" && (
         <div
           className="absolute inset-0 bg-white mix-blend-overlay"
-          style={motionOk ? { animation: "wxLightning 9s linear infinite" } : undefined}
+          style={motionOk ? { animation: "wxLightning 6.5s linear infinite" } : undefined}
         />
       )}
       {scene === "storm" && (
@@ -463,7 +463,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
             left: "62%",
             opacity: 0,
             filter: "drop-shadow(0 0 8px rgba(255,255,255,0.95)) drop-shadow(0 0 22px rgba(170,190,255,0.9))",
-            animation: motionOk ? "wx-bolt 9s linear infinite" : undefined,
+            animation: motionOk ? "wx-bolt 6.5s linear infinite" : undefined,
           }}
         >
           <path d="M22 0 L6 56 L18 56 L10 120 L36 44 L23 44 L34 0 Z" fill="#FFFDF0" stroke="rgba(190,205,255,0.9)" strokeWidth="1.5" />
@@ -474,15 +474,15 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
         <div data-testid="wx-fog" data-fog-opacity={fogOpacity.toFixed(2)}>
           <div
             className="absolute inset-x-[-10%] bottom-0 h-40 bg-gradient-to-t from-white/60 to-transparent blur-xl"
-            style={motionOk ? { animation: "wx-fogdrift 30s ease-in-out infinite alternate" } : undefined}
+            style={motionOk ? { animation: "wx-fogdrift 22s ease-in-out infinite alternate" } : undefined}
           />
           <div
             className="absolute inset-x-[-20%] bottom-10 h-32 bg-gradient-to-t from-white/45 to-transparent blur-xl"
-            style={motionOk ? { animation: "wx-fogdrift 26s ease-in-out -9s infinite alternate" } : undefined}
+            style={motionOk ? { animation: "wx-fogdrift 19s ease-in-out -7s infinite alternate" } : undefined}
           />
           <div
             className="absolute inset-x-[-15%] bottom-20 h-28 bg-gradient-to-t from-white/35 to-transparent blur-xl"
-            style={motionOk ? { animation: "wx-fogdrift 40s ease-in-out -20s infinite alternate" } : undefined}
+            style={motionOk ? { animation: "wx-fogdrift 28s ease-in-out -15s infinite alternate" } : undefined}
           />
         </div>
       )}
