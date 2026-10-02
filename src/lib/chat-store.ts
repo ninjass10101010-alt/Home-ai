@@ -326,6 +326,10 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
   // +1 so the reply sorts after its request even if both land in the same ms.
   const streamAt = userAt + 1;
   let bubbleOpen = false;
+  // An attempt has been announced and none of its tokens have landed yet, so
+  // the thread shows no live text and the thinking affordance is what belongs
+  // on screen. Distinct from `bubbleOpen`: the row survives a blank.
+  let awaiting = false;
   // Whatever streamed before a stop/failure — a stopped reply keeps its words.
   let streamedSoFar = "";
   // Proposals surfaced during THIS turn. Inert: only the chip's PIN flow writes.
@@ -372,10 +376,14 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
       // bubble renders only from onToken — so without this the dead target's
       // words stay on screen through the next attempt's silent reasoning phase,
       // and survive a failure as an orphan (nothing is persisted on that path).
-      // Gated on bubbleOpen: before the first token the reply is still owned by
-      // `isTyping`, and clearing here would leave an empty bubble as a hole.
+      // The blank is honest; the silence around it is not — chat/page renders
+      // every row unconditionally and gates the thinking dots on isTyping alone,
+      // so the affordance goes back UP here and the attempt's own status label
+      // replaces the dead one.
       onAttempt: () => {
         streamedSoFar = "";
+        awaiting = true;
+        setState({ isTyping: true, statusLine: null });
         if (!bubbleOpen) return;
         setMessages((prev) =>
           prev.map((m) => (m.id === streamId ? { ...m, content: "" } : m)),
@@ -383,10 +391,15 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
       },
       onToken: (full: string) => {
         streamedSoFar = full;
-        if (!bubbleOpen) {
-          bubbleOpen = true;
+        // Gated on `awaiting || !bubbleOpen`, never on the row alone: a failover
+        // re-arms the affordance above on a row that has been open since the
+        // first token, so `!bubbleOpen` alone would leave the dots bouncing
+        // under a finished reply.
+        if (awaiting || !bubbleOpen) {
+          awaiting = false;
           setState({ isTyping: false });
         }
+        bubbleOpen = true;
         setMessages((prev) =>
           prev.some((m) => m.id === streamId)
             ? prev.map((m) => (m.id === streamId ? { ...m, content: full } : m))
@@ -485,7 +498,10 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
       // errorFor is kept so "Try again" still works: retrying is the right move
       // after the parent configures a provider.
       setMessages((prev) => [
-        ...prev,
+        // The row the last attempt frame blanked carries nothing worth showing —
+        // and mergeThread only appends, `retry` filters only this bubble's id, so
+        // leaving it would keep an empty ✨ bubble above the copy for the session.
+        ...prev.filter((m) => m.id !== streamId),
         {
           id: nextOptimisticId(),
           role: "assistant",
@@ -502,7 +518,7 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
         ? "You're offline — I can't reach the family server right now. Check the connection and try again."
         : "I couldn't reach the family server just now. Your message is still here — try again in a moment.";
       setMessages((prev) => [
-        ...prev,
+        ...prev.filter((m) => m.id !== streamId),
         {
           id: nextOptimisticId(),
           role: "assistant",

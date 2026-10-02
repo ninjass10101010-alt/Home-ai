@@ -123,6 +123,38 @@ describe("chat-store core", () => {
     expect(msgs.some((m) => m.content.includes("orphaned half"))).toBe(false);
   });
 
+  it("keeps the thinking affordance up between an attempt frame and that attempt's first token", async () => {
+    // The blank row IS the honest state (the words under it were superseded),
+    // but chat/page renders every row unconditionally and gates the thinking
+    // dots on isTyping alone — so an attempt frame that blanks without re-arming
+    // it leaves a padded empty bubble for the whole reasoning phase.
+    const gap: { isTyping: boolean; statusLine: string | null; blank: number }[] = [];
+    const answering: (string | null)[] = [];
+    streamMock.fn.mockImplementation(async ({ onToken, onStatus, onAttempt }: any) => {
+      onAttempt?.({ round: 1, target: "t0" });
+      onToken("orphaned half", "orphaned half");
+      onStatus("Reading the pantry…");
+      onAttempt?.({ round: 1, target: "t1" });
+      gap.push({
+        isTyping: getSnapshot().isTyping,
+        // The dead attempt's label goes with it; the new one re-arms the line.
+        statusLine: getSnapshot().statusLine,
+        blank: assistantBubbles().filter((m) => m.content === "").length,
+      });
+      onStatus("Checking the pantry…");
+      answering.push(getSnapshot().statusLine);
+      onToken("Final answer.", "Final answer.");
+      return { content: "Final answer.", streamed: true };
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(gap).toEqual([{ isTyping: true, statusLine: null, blank: 1 }]);
+    // The answering attempt's own label still reaches the line it renders on.
+    expect(answering).toEqual(["Checking the pantry…"]);
+    expect(getSnapshot().isTyping).toBe(false);
+    expect(getSnapshot().statusLine).toBeNull();
+  });
+
   it("leaves no orphan text in the thread when the stream fails after a failover", async () => {
     streamMock.fn.mockImplementation(async ({ onToken, onAttempt }: any) => {
       onAttempt?.({ round: 1, target: "t0" });
@@ -136,6 +168,25 @@ describe("chat-store core", () => {
     expect(msgs.some((m) => m.content.includes("orphaned half"))).toBe(false);
     // The honest failure copy still lands, with its retry affordance.
     expect(msgs.some((m) => m.errorFor === "hi")).toBe(true);
+    // ...and the row the attempt frame blanked is gone with it: mergeThread only
+    // appends and `retry` filters only the error bubble's id, so an empty row
+    // would sit above the copy for the rest of the session — including on Try
+    // again.
+    expect(assistantBubbles()).toHaveLength(1);
+    expect(assistantBubbles()[0].errorFor).toBe("hi");
+  });
+
+  it("drops the blanked row on the route's own error path too", async () => {
+    streamMock.fn.mockImplementation(async ({ onToken, onAttempt }: any) => {
+      onAttempt?.({ round: 1, target: "t0" });
+      onToken("orphaned half", "orphaned half");
+      onAttempt?.({ round: 1, target: "t1" });
+      throw Object.assign(new Error("I hit a snag doing that"), { name: "RouteChatError" });
+    });
+    await ensureHydrated();
+    await send("hi", SPEAKER);
+    expect(assistantBubbles()).toHaveLength(1);
+    expect(assistantBubbles()[0].content).toBe("I hit a snag doing that");
   });
 
   it("writes an honest error bubble with errorFor when the stream fails", async () => {

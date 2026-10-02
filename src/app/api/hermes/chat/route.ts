@@ -484,6 +484,15 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         write(sseFrame(JSON.stringify({ message: "My brain isn't configured yet — add a provider in Settings → AI Models." }), "error"));
         return;
       }
+      // One attempt = one (round × target) provider call, and its attempt frame
+      // goes out BEFORE the call: token frames are written inside callAiStream,
+      // so a failed-over target's tokens are already in the client's bubble and
+      // cannot be retracted — the frame is what lets the client reset, which is
+      // what keeps displayed === persisted (only the answering round is stored).
+      // `target` is the CHAIN INDEX, never the model: this route sits on the
+      // middleware API_EXEMPT list and answers with no session at all, while the
+      // model id is parent-gated everywhere else it surfaces (providers GET,
+      // health ring via ctx.brain).
       for (let round = 0; round < MAX_ROUNDS; round++) {
         ctx.rounds = round + 1;
         // Final round = forced tool-free wrap-up: no tools are offered, so the
@@ -495,15 +504,6 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         for (const [targetIndex, target] of targets.entries()) {
           const callStarted = Date.now();
           try {
-            // One attempt = one (round × target) provider call. Token frames are
-            // written INSIDE callAiStream, so a failed-over target's tokens are
-            // already in the client's bubble and cannot be retracted. Announcing
-            // the attempt lets the client reset, which is what keeps
-            // displayed === persisted: only the answering round is stored.
-            // `target` is the CHAIN INDEX, never the model: this route sits on
-            // the middleware API_EXEMPT list and answers with no session at all,
-            // while the model id is parent-gated everywhere else it surfaces
-            // (providers GET, health ring via ctx.brain).
             write(sseFrame(JSON.stringify({ round: round + 1, target: `t${targetIndex}` }), "attempt"));
             ({ content, tool_calls } = await callAiStream(
               wrapup ? [...messages, { role: "system", content: WRAPUP_NOTE }] : messages,

@@ -891,7 +891,11 @@ describe("hermes chat — attempt frames", () => {
     // attempt frame would have nothing to reset. Asserting the PARSED shape —
     // not the absence of the string "event:" — is what also proves the body is
     // the parseable JSON chat-stream.ts reads `content` off, which a bare
-    // `data: {...}` token frame would silently break.
-    expect(Object.keys(JSON.parse(body))).toEqual(["content"]);
+    // `data: {...}` token frame would silently break. The rest of the key set
+    // is left free: the route adds `proposals` when a tool round surfaced one,
+    // and pinning the exact shape would call that feature a regression.
+    const keys = Object.keys(JSON.parse(body));
+    expect(keys).toContain("content");
+    expect(keys.filter((k) => k !== "content" && k !== "proposals")).toEqual([]);
   });
 });

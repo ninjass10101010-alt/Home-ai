@@ -28,6 +28,15 @@ interface ClemMessage {
   content: string;
 }
 
+/**
+ * The row a send renders mid-stream is always last, and a superseded one is the
+ * only thing that can end a turn without an answer — so removing the trailing
+ * assistant row is what "no text on screen" means in this sheet.
+ */
+function dropStreamingRow(prev: ClemMessage[]): ClemMessage[] {
+  return prev[prev.length - 1]?.role === "assistant" ? prev.slice(0, -1) : prev;
+}
+
 const QUICK_PROMPTS: { label: string; send?: string; toast?: string }[] = [
   { label: "What should I order?", send: "What should I order?" },
   { label: "Compare store prices", toast: "💰 Use the Compare Prices button above the list!" },
@@ -80,6 +89,14 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
         system: systemPrompt,
         agent: "clem",
         onStatus: (label) => setStatusText(label),
+        // The route persists only the ANSWERING round, so an attempt frame means
+        // the words already in the sheet are dead. Dropping the row (rather than
+        // blanking it) is safe here because `onToken` re-appends whenever
+        // streamingRef is false — and it is reset below, before that token.
+        onAttempt: () => {
+          streamingRef.current = false;
+          setMessages(dropStreamingRow);
+        },
         onToken: (full) => {
           setLoading(false);
           setMessages((prev) => {
@@ -103,6 +120,9 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
     } catch {
       streamingRef.current = false;
       setLoading(false);
+      // Nothing is persisted for Clem, so a row caught mid-answer would sit in
+      // the sheet forever as an answer that was never given.
+      setMessages(dropStreamingRow);
       showToast("Couldn't reach Clem right now, try again");
     } finally {
       streamInFlightRef.current = false;
