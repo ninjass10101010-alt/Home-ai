@@ -3055,7 +3055,15 @@ const TOOLS: Tool[] = [
       const reward = matches[0];
       // The same `cost ?? points ?? 0` fallback get_rewards quotes, so the price
       // on the chip cannot disagree with the cost the redeem route charges off
-      // the stored row.
+      // the stored row. A row carrying neither field has no price the route
+      // could charge (`Number(row.cost ?? row.points)` → invalid_cost), so it
+      // is refused here rather than offered as a chip that can only fail.
+      if (reward.cost === undefined && reward.points === undefined) {
+        return summarize({
+          ok: false,
+          error: `"${titleOf(reward)}" has no cost set — a parent should price it in Settings → Rewards first`,
+        });
+      }
       const cost = reward.cost ?? reward.points ?? 0;
       return summarize({
         ok: true,

@@ -205,17 +205,21 @@ function toolStatusLabel(name?: string): string {
 // Chat never moves points or redeems a reward. A successful proposal tool
 // round yields an INERT proposal; the loop surfaces it to the client
 // (streamed: extra `status` frame; buffered: top-level `proposals` array) so the
-// chat page can render the parent-PIN confirm chip. Refusals (ok:false / no
+// chat page can render the PIN confirm chip. Refusals (ok:false / no
 // proposal) surface nothing extra.
 //
 // One map is the whole registry: a tool name declares the inner
 // `proposal.tool` it may produce and the label its chip frame carries, so a
-// second proposal type adds a row instead of a fourth hardcoding. A proposal
-// tool NEVER writes; the PIN-gated server route is the only path that moves
-// points or redeems a reward.
+// second proposal type adds a row instead of a fourth hardcoding. The label is
+// what the family reads while the chip forms, so it must not name a PIN owner
+// the gated route never consults: an adjustment is confirmed by a PARENT's PIN,
+// a redemption by the reward OWNER's (a parent's is only additionally required
+// above the parent-approval threshold), so only the adjustment row names one.
+// A proposal tool NEVER writes; the PIN-gated server route is the only path that
+// moves points or redeems a reward.
 const PROPOSAL_TOOLS: Record<string, { expectTool: string; label: string }> = {
   propose_point_adjustment: { expectTool: "adjust_points", label: "Waiting for a parent's PIN to confirm…" },
-  propose_reward_redemption: { expectTool: "redeem_reward", label: "Waiting for a parent's PIN to confirm…" },
+  propose_reward_redemption: { expectTool: "redeem_reward", label: "Waiting for a PIN to confirm…" },
 };
 function extractProposal(name: string | undefined, result: string): { proposal: unknown; label: string } | null {
   const entry = name ? PROPOSAL_TOOLS[name] : undefined;

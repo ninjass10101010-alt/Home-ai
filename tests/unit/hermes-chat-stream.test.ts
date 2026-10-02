@@ -560,7 +560,11 @@ describe("hermes chat — the PROPOSAL_TOOLS map serves every proposal type", ()
       .map((chunk) => JSON.parse(/data: (\{[^\n]*\})/.exec(chunk)![1]));
   }
 
-  it("streams a redemption proposal frame with its own PIN-waiting label", async () => {
+  // The label is the string the family reads while the chip forms, so it must
+  // not name a PIN owner the redeem route never consults: the reward OWNER's
+  // PIN confirms every redemption, and a parent's is only additionally required
+  // above the parent-approval threshold.
+  it("streams a redemption proposal frame with a PIN-waiting label that names no wrong owner", async () => {
     mocks.getTool.mockImplementation((name: string) =>
       name === "propose_reward_redemption"
         ? { handler: vi.fn(async () => redeemJson({ tool: "redeem_reward", operationId: "task-op-abc", args: REDEEM_ARGS })) }
@@ -579,7 +583,7 @@ describe("hermes chat — the PROPOSAL_TOOLS map serves every proposal type", ()
     expect(frames.length).toBe(1);
     expect(frames[0].proposal.tool).toBe("redeem_reward");
     expect(frames[0].proposal.args).toEqual(REDEEM_ARGS);
-    expect(frames[0].label).toBe("Waiting for a parent's PIN to confirm…");
+    expect(frames[0].label).toBe("Waiting for a PIN to confirm…");
   });
 
   it("buffered mode carries a redemption proposal in the same top-level array", async () => {
@@ -632,6 +636,28 @@ describe("hermes chat — the PROPOSAL_TOOLS map serves every proposal type", ()
     }
   });
 
+  // The `!entry` early return is the other half of the guard: membership in the
+  // map is what opts a tool into surfacing anything, so a tool that is not a
+  // row here cannot smuggle a chip out just by returning a well-formed proposal.
+  it("surfaces nothing for a tool that is not in the map at all", async () => {
+    mocks.getTool.mockImplementation((name: string) =>
+      name === "remember_fact"
+        ? { handler: vi.fn(async () => redeemJson({ tool: "adjust_points", args: { member: "Emily G", delta: 500, reason: "not mine to spend" } })) }
+        : undefined);
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "remember_fact", parameters: {} } },
+    ] as any);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "remember_fact", "{}")]))
+      .mockImplementationOnce(async () => sseResponse([token("Noted."), DONE])));
+
+    const res = await post({ message: "remember something", stream: true });
+    const body = await res.text();
+
+    expect(proposalFramesOf(body).length).toBe(0);
+    expect(body).toContain("Noted.");
+  });
+
   // A turn that burns every round on tool calls ends on the exhaustion response.
   // Dropping `proposals` there silently threw away a PIN chip the family had
   // already been shown.
@@ -653,8 +679,10 @@ describe("hermes chat — the PROPOSAL_TOOLS map serves every proposal type", ()
         ] } }],
       }),
       { status: 200, headers: { "content-type": "application/json" } });
-    // Every round — the tool-free wrap-up included — comes back demanding a tool,
-    // so the loop runs out of rounds instead of answering.
+    // The gateway keeps answering with tool calls and no prose. On the final
+    // round those tool_calls are force-discarded (a wrap-up round executes no
+    // tools), so what is left is empty content — the empty-round path, and the
+    // loop ends in exhaustion instead of an answer.
     vi.stubGlobal("fetch", vi.fn(async () => bufferedToolRound()));
 
     const res = await post({ message: "add points, then look something up, then…" });

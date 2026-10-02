@@ -663,6 +663,21 @@ describe("propose_reward_redemption", () => {
 
     expect(res.proposal.args.cost).toBe(15);
     expect(res.proposal.args.cost).toBe(listed.cost);
+    expect(h.writes).toEqual([]);
+  });
+
+  // A row with neither field has no price the redeem route could charge
+  // (`Number(row.cost ?? row.points)` → NaN → "invalid_cost"), so offering a
+  // chip for it spends the family's attention on a redemption that must fail.
+  it("refuses a reward the shop cannot price instead of proposing a 0-pt redemption", async () => {
+    seedReward({ name: "Ghost entry", cost: undefined, points: undefined });
+
+    const res = await propose({ member: "Emily", reward: "Ghost entry", reason: "x" });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/no cost/i);
+    expect(res.proposal).toBeUndefined();
+    expect(h.writes).toEqual([]);
   });
 
   it("refuses an unknown reward and names the tool that lists the real set", async () => {
@@ -684,6 +699,7 @@ describe("propose_reward_redemption", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/get_family_members/);
     expect(res.proposal).toBeUndefined();
+    expect(h.writes).toEqual([]);
   });
 
   it("reports a failed catalog read instead of proposing a redemption it cannot price", async () => {
@@ -727,6 +743,7 @@ describe("propose_reward_redemption", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/2 rewards/);
     expect(res.proposal).toBeUndefined();
+    expect(h.writes).toEqual([]);
   });
 
   // The handler takes NO caller gate (deliberately — it moves no points), so the
