@@ -2165,9 +2165,10 @@ describe("WeatherWidget — Not Boring redesign", () => {
     }
   });
 
-  it("keeps cloudy, rain, and snow poster accents visibly distinct", () => {
+  it("keeps rain and snow poster accents visibly distinct (cloudy bars retired)", () => {
+    const cloudy = render(<SceneLayers scene="cloudy" showFog={false} showBirds={false} cloudCover={80} precipitation={80} />);
+    expect(cloudy.querySelector('[data-weather-shape="cloud-bars"]')).toBeNull();
     const cases = [
-      { scene: "cloudy" as const, shape: "cloud-bars", background: "#A1CDE5" },
       { scene: "rain" as const, shape: "rain-diamonds", background: "#A9B6D1" },
       { scene: "snow" as const, shape: "snow-diamonds", background: "#F3F2F8" },
     ];

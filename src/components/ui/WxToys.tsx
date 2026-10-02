@@ -192,7 +192,6 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
   const horizon = posterHorizon(sunProgress);
   const numericCloud = finiteMeasurement(cloudCover);
   const numericPrecipitation = finiteMeasurement(precipitation);
-  const cloudAccentOpacity = numericCloud == null || numericCloud <= 0 ? 0 : Math.min(1, 0.35 + numericCloud / 100);
   const precipitationAccentOpacity = numericPrecipitation == null || numericPrecipitation <= 0 ? 0 : Math.min(1, 0.35 + numericPrecipitation / 100);
   const rainAccentCount = numericPrecipitation == null || numericPrecipitation <= 0 ? 0 : Math.max(1, Math.min(4, Math.round(numericPrecipitation / 25)));
   const snowAccentCount = numericPrecipitation == null || numericPrecipitation <= 0 ? 0 : Math.max(1, Math.min(4, Math.round(numericPrecipitation / 25)));
@@ -253,9 +252,8 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
           {horizon && <path data-weather-shape="poster-horizon" d={horizon} fill={WX_POSTER.cloudMid} opacity="0.2" />}
         </>
       )}
-      {scene === "cloudy" && cloudAccentOpacity > 0 && (
-        <path data-weather-shape="cloud-bars" d="M24 42h62M48 66h92M18 90h54" stroke="#0F6673" strokeWidth="9" strokeLinecap="round" opacity={cloudAccentOpacity} />
-      )}
+      {/* cloudy keeps its wash free of decorative bars — Monster clouds carry
+          the cover signal themselves (bars removed with the v3 skin lock). */}
       {scene === "rain" && rainAccentCount > 0 && (
         <g data-weather-shape="rain-diamonds" stroke="#244A8F" strokeWidth="4" strokeLinecap="round" opacity={precipitationAccentOpacity}>
           {["M34 18l-8 20", "M82 52l-8 20", "M260 24l-8 20", "M294 82l-8 20"].slice(0, rainAccentCount).map((path) => <path key={path} d={path} />)}
@@ -881,8 +879,13 @@ export function Wind({ width = 72 }: { width?: number }) {
 // sleeping face (or, for the hero's single peering digit, an eyeball).
 
 const DIGIT_VIEW_W = 200;
-const DIGIT_VIEW_H = 320;
-const DIGIT_ASPECT = DIGIT_VIEW_W / DIGIT_VIEW_H;
+// Glyphs are drawn in a 200×320 frame, but their ink lives roughly y38–298;
+// cropping the viewBox to that band makes the numerals ~17% larger at the
+// same 1em box height, so the hero reads poster-scale without changing the
+// card's layout math.
+const DIGIT_BOX_Y = 28;
+const DIGIT_BOX_H = 272;
+const DIGIT_ASPECT = DIGIT_VIEW_W / DIGIT_BOX_H;
 
 function DigitSleepFace({ x, y, ink, rotate = 0 }: { x: number; y: number; ink: string; rotate?: number }) {
   return (
@@ -945,16 +948,18 @@ const MONSTER_DIGITS: Record<string, DigitGlyph> = {
       {peering ? <DigitEye x={128} y={136} r={20} /> : <DigitSleepFace x={96} y={68} ink={MONSTER.inkOrange} />}
     </>
   ),
-  // 3 — two open arc capsules (red upper bowl, blue lower bowl) + teal joint
+  // 3 — two right-opening bowl capsules (red upper, blue lower) + teal joint
   "3": (peering) => (
     <>
-      <path d="M84 158 C 145 158, 145 66, 84 66" stroke={MONSTER.red} strokeWidth="42" fill="none" strokeLinecap="round" />
-      <path d="M88 162 C 152 162, 152 258, 88 258" stroke={MONSTER.blue} strokeWidth="44" fill="none" strokeLinecap="round" />
-      <circle cx="86" cy="160" r="30" fill={MONSTER.teal} />
-      <circle cx="84" cy="66" r="9" fill={MONSTER.knotRed} />
-      <circle cx="118" cy="92" r="5.5" fill={MONSTER.glint} opacity="0.5" />
-      <circle cx="128" cy="242" r="5" fill={MONSTER.glint} opacity="0.5" />
-      {peering ? <DigitEye x={136} y={200} r={20} /> : <DigitSleepFace x={134} y={192} ink={MONSTER.inkBlue} rotate={90} />}
+      {peering && <DigitEye x={138} y={208} r={21} />}
+      <path d="M84 76 C 166 76, 166 148, 90 152" stroke={MONSTER.red} strokeWidth="46" fill="none" strokeLinecap="round" />
+      <path d="M90 168 C 166 172, 166 244, 84 244" stroke={MONSTER.blue} strokeWidth="46" fill="none" strokeLinecap="round" />
+      <circle cx="88" cy="160" r="28" fill={MONSTER.teal} />
+      <circle cx="84" cy="76" r="9" fill={MONSTER.knotRed} />
+      <circle cx="84" cy="244" r="13" fill={MONSTER.teal} />
+      <circle cx="130" cy="98" r="5.5" fill={MONSTER.glint} opacity="0.5" />
+      <circle cx="132" cy="226" r="5" fill={MONSTER.glint} opacity="0.5" />
+      {!peering && <DigitSleepFace x={130} y={192} ink={MONSTER.inkBlue} rotate={90} />}
     </>
   ),
   // 4 — mockup "4": teal roof, red/blue pillars, purple crossbar, orange foot
@@ -974,21 +979,23 @@ const MONSTER_DIGITS: Record<string, DigitGlyph> = {
       {peering ? <DigitEye x={134} y={190} r={20} /> : <DigitSleepFace x={58} y={156} ink={MONSTER.inkRed} />}
     </>
   ),
-  // 5 — mockup "5": orange bar + teal nub, red shoulder + blob, blue belly;
-  //     the locked glyph keeps BOTH the sleeping bar face and the peering eye
+  // 5 — v3 reference: orange bar + teal nub, red shoulder + belly, teal
+  //     spine, blue foot. The spine is what makes the bowl read as a 5.
+  //     The locked glyph keeps the sleeping bar face AND the peering eye.
   "5": (peering) => (
     <>
-      {peering && <DigitEye x={102} y={174} r={24} />}
-      <line x1="22" y1="54" x2="124" y2="54" stroke={MONSTER.orange} strokeWidth="50" strokeLinecap="round" />
-      <circle cx="22" cy="54" r="26" fill={MONSTER.teal} />
-      <line x1="46" y1="76" x2="46" y2="140" stroke={MONSTER.red} strokeWidth="48" strokeLinecap="round" />
-      <circle cx="64" cy="152" r="33" fill={MONSTER.red} />
-      <path d="M68 168 C 144 178, 140 248, 48 256" stroke={MONSTER.blue} strokeWidth="48" fill="none" strokeLinecap="round" />
-      <path d="M79 50 q9 9 18 0 M86 66 q6 6 12 0" stroke={MONSTER.inkOrange} strokeWidth="5" fill="none" strokeLinecap="round" />
-      <rect x="36" y="42" width="18" height="9" rx="4.5" fill={MONSTER.glint} opacity="0.5" />
-      <circle cx="110" cy="212" r="5" fill={MONSTER.glint} opacity="0.5" />
-      <circle cx="124" cy="54" r="12" fill={MONSTER.knotOrange} />
-      <circle cx="46" cy="140" r="9" fill={MONSTER.knotRed} />
+      {peering && <DigitEye x={128} y={212} r={21} />}
+      <line x1="40" y1="64" x2="160" y2="64" stroke={MONSTER.orange} strokeWidth="52" strokeLinecap="round" />
+      <circle cx="40" cy="64" r="26" fill={MONSTER.teal} />
+      <line x1="70" y1="90" x2="70" y2="150" stroke={MONSTER.red} strokeWidth="50" strokeLinecap="round" />
+      <circle cx="86" cy="176" r="32" fill={MONSTER.red} />
+      <line x1="158" y1="100" x2="158" y2="232" stroke={MONSTER.teal} strokeWidth="44" strokeLinecap="round" />
+      <path d="M74 250 C 126 260, 156 252, 160 234" stroke={MONSTER.blue} strokeWidth="48" fill="none" strokeLinecap="round" />
+      <path d="M97 60 q9 9 18 0 M104 76 q6 6 12 0" stroke={MONSTER.inkOrange} strokeWidth="5" fill="none" strokeLinecap="round" />
+      <rect x="54" y="52" width="18" height="9" rx="4.5" fill={MONSTER.glint} opacity="0.5" />
+      <circle cx="110" cy="160" r="5" fill={MONSTER.glint} opacity="0.5" />
+      <circle cx="160" cy="64" r="12" fill={MONSTER.knotOrange} />
+      <circle cx="70" cy="150" r="9" fill={MONSTER.knotRed} />
     </>
   ),
   // 6 — blue loop + red tail capsule, red balloon knot at the tail tip
@@ -1051,8 +1058,8 @@ const MONSTER_DIGITS: Record<string, DigitGlyph> = {
 
 export function MonsterDigit({ digit, size, eye = false }: { digit: string; size?: number; eye?: boolean }) {
   const glyph = MONSTER_DIGITS[digit];
-  // Without `size` the box tracks the parent font-size (0.625em × 1em), so
-  // the hero's responsive text classes drive 64/80/96px digit boxes.
+  // Without `size` the box tracks the parent font-size (DIGIT_ASPECT em wide,
+  // 1em tall), so the hero's responsive text classes drive 64/80/96px boxes.
   const box: CSSProperties = size
     ? { width: size * DIGIT_ASPECT, height: size }
     : { width: `${DIGIT_ASPECT}em`, height: "1em" };
@@ -1061,7 +1068,7 @@ export function MonsterDigit({ digit, size, eye = false }: { digit: string; size
     <svg
       data-weather-digit={digit}
       aria-hidden="true"
-      viewBox={`0 0 ${DIGIT_VIEW_W} ${DIGIT_VIEW_H}`}
+      viewBox={`0 ${DIGIT_BOX_Y} ${DIGIT_VIEW_W} ${DIGIT_BOX_H}`}
       className="block shrink-0"
       style={box}
     >
