@@ -1,5 +1,7 @@
 import { WX_POSTER } from "./wx-tokens";
 import { parseHexColor, formatHexColor, mixHexColor, contrastRatio, type Rgb } from "@/lib/weather-contrast";
+import { WEATHER_MATERIAL } from "@/lib/weather-skins/types";
+export { WEATHER_MATERIAL };
 
 export type SeasonKey = "spring" | "summer" | "autumn" | "winter";
 
