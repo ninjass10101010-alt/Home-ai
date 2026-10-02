@@ -359,6 +359,43 @@ describe("chat-store core", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it("leaves a stopped reply standing: the stop path reconciles nothing over it", async () => {
+    // The route stores a turn's user+assistant rows all-or-nothing, so a stopped
+    // turn leaves PocketBase with nothing to reconcile over the stopped bubble.
+    // This pins the store half of that contract: the stop path must not fetch the
+    // server thread after the turn, and the words the user was left looking at
+    // must survive a reload on their own. (The route half — refusing to store the
+    // pair — is tests/unit/hermes-chat-stream.test.ts.)
+    const fetchMock = okFetch([]);
+    vi.stubGlobal("fetch", fetchMock);
+    streamMock.fn.mockImplementation(({ onToken, signal }: any) => {
+      onToken("partial", "partial");
+      return new Promise((_res, rej) => {
+        signal.addEventListener("abort", () => {
+          const e = new Error("Generation stopped");
+          e.name = "AbortError";
+          rej(e);
+        });
+      });
+    });
+    await ensureHydrated();
+    const readsBeforeSend = fetchMock.mock.calls.length;
+    const sending = send("story", SPEAKER);
+    stop();
+    await sending;
+    // No server-thread read of its own: the stop path never reconciles, so the
+    // only thing that could replace these words is a later hydrate.
+    expect(fetchMock.mock.calls.length).toBe(readsBeforeSend);
+
+    // Reload: localStorage carries the stopped bubble, and the server thread
+    // holds this turn's user row but no answer — so nothing replaces it.
+    __resetChatStoreForTests();
+    vi.stubGlobal("fetch", okFetch([{ role: "user", content: "story", createdAt: new Date().toISOString() }]));
+    await ensureHydrated();
+    expect(assistantBubbles().map((m) => m.content)).toEqual(["partial"]);
+    expect(getSnapshot().messages.some((m) => m.content === "story")).toBe(true);
+  });
+
   it("persists hydrated history to localStorage without the seed greeting", async () => {
     streamMock.fn.mockResolvedValue({ content: "saved-reply", streamed: true });
     await ensureHydrated();

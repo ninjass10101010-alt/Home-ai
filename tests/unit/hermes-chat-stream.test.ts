@@ -51,12 +51,13 @@ const toolCallRound = (id: string | undefined, name: string, args: string, index
   DONE,
 ].join("");
 
-async function post(body: Record<string, unknown>) {
+async function post(body: Record<string, unknown>, signal?: AbortSignal) {
   return POST(
     new NextRequest("http://localhost/api/hermes/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
     })
   );
 }
@@ -897,5 +898,106 @@ describe("hermes chat — attempt frames", () => {
     const keys = Object.keys(JSON.parse(body));
     expect(keys).toContain("content");
     expect(keys.filter((k) => k !== "content" && k !== "proposals")).toEqual([]);
+  });
+});
+
+// A stop is a promise. The client aborts its fetch and renders "Stopped." with
+// whatever streamed, so if the route stores the answer anyway the store's next
+// reconcile hands that row straight back and the reply the user cancelled
+// reappears anyway — the one divergence no `attempt` frame can cover, because
+// there is no frame left to send to a requester who has gone.
+//
+// Two disconnect signals exist, and neither is a cancel message the route
+// awaits: `request.signal` (Next 16 App Router builds it from the response
+// socket's `close`, so it fires without the route writing anything) and the
+// route's own `write()` rejection (`clientGone`). The first test below is
+// shaped so `clientGone` CANNOT flip — the silent phase of a long reasoning
+// turn — so it fails if the guard ever regresses to the write-rejection signal
+// alone.
+describe("hermes chat — a stopped turn persists nothing", () => {
+  /** Provider stream the test drives frame by frame, so "no frame after X" is expressible. */
+  function handCranedProvider() {
+    const enc = new TextEncoder();
+    let emit: ((s: string) => void) | null = null;
+    let finish: (() => void) | null = null;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        emit = (s) => c.enqueue(enc.encode(token(s)));
+        finish = () => { c.enqueue(enc.encode(DONE)); c.close(); };
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    })));
+    return { emit: (s: string) => emit!(s), finish: () => finish!() };
+  }
+
+  /** Read until `needle` lands, so the abort happens strictly after that write. */
+  async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, needle: string) {
+    const decoder = new TextDecoder();
+    let seen = "";
+    const deadline = Date.now() + 1000;
+    while (!seen.includes(needle) && Date.now() < deadline) {
+      const { value } = await reader.read();
+      if (!value) break;
+      seen += decoder.decode(value);
+    }
+    return seen;
+  }
+
+  /** writer.close() runs in the route's finally, so a finished read is past the persist decision. */
+  async function drain(reader: ReadableStreamDefaultReader<Uint8Array>) {
+    for (;;) {
+      const { done } = await reader.read();
+      if (done) return;
+    }
+  }
+
+  it("stores nothing when the request was aborted, even with no frame written after the stop", async () => {
+    const controller = new AbortController();
+    const provider = handCranedProvider();
+    const res = await post({ message: "hi", stream: true }, controller.signal);
+    const reader = res.body!.getReader();
+    provider.emit("Hel");
+    // Every frame so far (the attempt reset and this token) was consumed, so no
+    // write ever rejected. Nothing else is written before the persist decision
+    // either — the provider ends on DONE with no further content, and the [DONE]
+    // frame goes out after it. `clientGone` therefore stays false for the whole
+    // turn and only `request.signal` can know the requester left.
+    expect(await readUntil(reader, '"t":"Hel"')).toContain('"t":"Hel"');
+    controller.abort();
+    provider.finish();
+    await drain(reader);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mocks.insertChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("stores nothing when the client drops the stream and the next write rejects", async () => {
+    const controller = new AbortController();
+    const provider = handCranedProvider();
+    const res = await post({ message: "hi", stream: true }, controller.signal);
+    const reader = res.body!.getReader();
+    provider.emit("Hel");
+    await readUntil(reader, '"t":"Hel"');
+    await reader.cancel(); // client is gone
+    provider.emit("lo");
+    provider.finish();
+    await new Promise((r) => setTimeout(r, 60));
+    expect(mocks.insertChatMessage).not.toHaveBeenCalled();
+    // The health log keeps its own vocabulary: a gone requester is client_gone,
+    // never a model outcome — the turn was abandoned, not answered badly.
+    expect(mocks.recordChatOutcome).toHaveBeenCalledTimes(1);
+    expect(mocks.recordChatOutcome.mock.calls[0][0].outcome).toBe("client_gone");
+  });
+
+  it("stores the pair when the client stays connected through [DONE]", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([token("Hello"), DONE])));
+    // A signal that exists but never aborts is the normal turn's shape; the
+    // guard must read it without mistaking it for a stop.
+    const res = await post({ message: "hi", stream: true }, new AbortController().signal);
+    expect(await res.text()).toContain("data: [DONE]");
+    expect(mocks.insertChatMessage.mock.calls.map((c: any[]) => [c[0].role, c[0].content]))
+      .toEqual([["user", "hi"], ["assistant", "Hello"]]);
   });
 });

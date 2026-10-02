@@ -571,7 +571,16 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         brain: ctx.brain,
         targets: ctx.targets,
       });
-      if (!isClem) await persistChatPair(request, message, finalContent, sessionName || "");
+      // Stop is a promise: a requester who aborted is already looking at
+      // "Stopped.", so storing the answer behind it only hands that row back on
+      // the store's next reconcile and the cancelled reply reappears anyway.
+      // Both signals are inferences, not a cancel the route can await —
+      // `clientGone` needs a write to fail and `request.signal` needs the socket
+      // to close — so a requester that stops reading while its socket stays open
+      // is still missed. A cancel message the route awaits is the durable fix.
+      if (!isClem && !clientGone && !request.signal.aborted) {
+        await persistChatPair(request, message, finalContent, sessionName || "");
+      }
       write(sseFrame("[DONE]"));
     } catch (error: any) {
       console.error("Consuela stream error:", error?.message || error);
