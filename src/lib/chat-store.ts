@@ -20,6 +20,14 @@ import {
   isPointAdjustmentProposal,
   type PointAdjustmentProposal,
 } from "@/components/chat/AdjustPointsChip";
+import {
+  isRewardRedemptionProposal,
+  type RewardRedemptionProposal,
+} from "@/components/chat/RedeemRewardChip";
+
+/** Inert chat proposals. Neither becomes real in chat: points move and rewards
+ *  are spent ONLY through the PIN flow on the chip the page renders. */
+export type ChatProposal = PointAdjustmentProposal | RewardRedemptionProposal;
 
 export interface Message {
   id: number;
@@ -33,8 +41,9 @@ export interface Message {
   errorFor?: string;
   /** Telegram-mirrored row — wears an origin badge in the thread. */
   source?: "telegram";
-  /** Inert point-adjustment proposals; points move only via the chip's PIN. */
-  proposals?: PointAdjustmentProposal[];
+  /** Inert point-adjustment and reward-redemption proposals; points move and
+   *  rewards are spent only via each chip's PIN. */
+  proposals?: ChatProposal[];
   /**
    * The turn's reasoning transcript, IN MEMORY ONLY. Display-only (spec §4.2 /
    * §8): `persistHistory()` strips it, so it reaches neither localStorage nor
@@ -87,6 +96,14 @@ function freshState(): ChatStoreState {
     thinking: "",
     toolEvents: [],
   };
+}
+
+/** The dedupe key is per-tool: an adjustment and a redemption can share a member
+ *  and a reason while being two separate things to confirm. */
+function proposalKey(p: ChatProposal): string {
+  return p.tool === "redeem_reward"
+    ? `redeem|${p.args.member}|${p.args.rewardId}|${p.args.reason}`
+    : `adjust|${p.args.member}|${p.args.delta}|${p.args.reason}`;
 }
 
 let state: ChatStoreState = freshState();
@@ -380,17 +397,17 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
     ...(turnToolEvents.length ? { toolEvents: [...turnToolEvents] } : {}),
   });
   // Proposals surfaced during THIS turn. Inert: only the chip's PIN flow writes.
-  const turnProposals: PointAdjustmentProposal[] = [];
+  const turnProposals: ChatProposal[] = [];
   const attachProposal = (value: unknown) => {
-    if (!isPointAdjustmentProposal(value)) return;
-    const dupe = turnProposals.some(
-      (p) =>
-        p.args.member === value.args.member &&
-        p.args.delta === value.args.delta &&
-        p.args.reason === value.args.reason,
-    );
+    const proposal = isPointAdjustmentProposal(value)
+      ? value
+      : isRewardRedemptionProposal(value)
+        ? value
+        : null;
+    if (!proposal) return;
+    const dupe = turnProposals.some((p) => proposalKey(p) === proposalKey(proposal));
     if (dupe) return;
-    turnProposals.push(value);
+    turnProposals.push(proposal);
     setMessages((prev) =>
       prev.some((m) => m.id === streamId)
         ? prev.map((m) => (m.id === streamId ? { ...m, proposals: [...turnProposals] } : m))

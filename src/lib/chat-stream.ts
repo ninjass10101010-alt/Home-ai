@@ -54,9 +54,9 @@ export interface StreamConsuelaChatOptions {
    *  result frame per call in call order. */
   onToolEvent?: (ev: ToolEvent) => void;
   /** Called with a friendly label and the parsed frame payload (a
-   *  propose_point_adjustment status carries `proposal` — the chat page renders
-   *  the parent-PIN confirm chip from it). The second argument is optional, so
-   *  existing (label) callers keep compiling. */
+   *  propose_point_adjustment or propose_reward_redemption status carries
+   *  `proposal` — the chat page renders the PIN-confirm chip from it). The
+   *  second argument is optional, so existing (label) callers keep compiling. */
   onStatus?: (label: string, data?: Record<string, unknown>) => void;
   /** Called when the route announces a new (round × target) provider call. The
    *  tokens received so far are superseded — the accumulator has been reset, so
@@ -68,8 +68,9 @@ export interface StreamConsuelaChatResult {
   content: string;
   /** false = the route answered buffered (Hermes streaming unavailable). */
   streamed: boolean;
-  /** Buffered-path sibling of a streamed proposal status frame (Task 15):
-   *  inert point-adjustment proposals awaiting a parent's PIN in the UI. */
+  /** Buffered-path sibling of a streamed proposal status frame (Tasks 15 + 14):
+   *  inert point-adjustment and reward-redemption proposals awaiting a PIN in
+   *  the UI. */
   proposals?: unknown[];
 }
 

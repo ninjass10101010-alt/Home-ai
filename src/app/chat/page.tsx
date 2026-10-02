@@ -17,6 +17,7 @@ import PageShell from "@/components/ui/PageShell";
 import Modal from "@/components/ui/Modal";
 import { UnifiedInput } from "@/components/chat/UnifiedInput";
 import AdjustPointsChip from "@/components/chat/AdjustPointsChip";
+import RedeemRewardChip from "@/components/chat/RedeemRewardChip";
 import ThinkingDisclosure from "@/components/chat/ThinkingDisclosure";
 import ToolActivityChips from "@/components/chat/ToolActivityChips";
 import type { Message } from "@/lib/chat-store";
@@ -199,16 +200,22 @@ const MessageRow = memo(function MessageRow({
           />
         )}
 
-        {/* Task 15 — point adjustments move ONLY behind a parent's PIN. */}
+        {/* Task 15/14 — point adjustments move and rewards are spent ONLY
+            behind a PIN: the reward OWNER's, plus a parent's above 100 pts. */}
         {msg.role === "assistant" && msg.proposals && msg.proposals.length > 0 && (
           <div className="flex flex-wrap gap-2 self-start" data-testid="point-proposals">
-            {msg.proposals.map((p, i) => (
-              <AdjustPointsChip
-                key={`${p.args.member}|${p.args.delta}|${p.args.reason}|${i}`}
-                proposal={p}
-                actorName={currentUserName ?? null}
-              />
-            ))}
+            {msg.proposals.map((p, i) =>
+              p.tool === "redeem_reward" ? (
+                <div key={`redeem|${p.args.member}|${p.args.rewardId}|${p.args.reason}|${i}`} data-testid="redeem-proposals">
+                  <RedeemRewardChip proposal={p} actorName={currentUserName ?? null} />
+                </div>
+              ) : (
+                <AdjustPointsChip
+                  key={`${p.args.member}|${p.args.delta}|${p.args.reason}|${i}`}
+                  proposal={p}
+                  actorName={currentUserName ?? null} />
+              ),
+            )}
           </div>
         )}
 
