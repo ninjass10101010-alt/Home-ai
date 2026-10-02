@@ -418,7 +418,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
                 height: 14 + ((i * 7) % 3) * 6,
                 opacity: 0.45 + ((i * 13) % 40) / 100,
                 animation: motionOk
-                  ? `wx-fall ${0.5 + ((i * 17) % 34) / 100}s linear ${-(((i * 31) % 100) / 50)}s infinite`
+                  ? `wx-fall ${0.5 + ((i * 15) % 34) / 100}s linear ${-(((i * 31) % 100) / 50)}s infinite`
                   : undefined,
                 ["--travel" as string]: "115cqh",
               } as CSSProperties}
@@ -441,7 +441,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
               opacity: 0.55 + ((i * 9) % 45) / 100,
               filter: (i * 3) % 10 > 7 ? "blur(1.2px)" : undefined,
               animation: motionOk
-                ? `wx-snowfall ${5.6 + ((i * 7) % 5)}s linear ${-((i * 11) % 13)}s infinite, wx-sway ${2.6 + ((i * 3) % 3)}s ease-in-out ${-((i * 11) % 13)}s infinite alternate`
+                ? `wx-snowfall ${5.6 + ((i * 7) % 5)}s linear ${-((i * 11) % 13)}s infinite, wx-sway ${2.6 + ((i * 3) % 4)}s ease-in-out ${-((i * 11) % 13)}s infinite alternate`
                 : undefined,
               ["--travel" as string]: "115cqh",
             } as CSSProperties}
