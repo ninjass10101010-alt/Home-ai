@@ -11,11 +11,16 @@ import type {
 import { getDaysUntilUnlock, isCapsuleUnlocked } from '@/db/features/time-capsule';
 
 /**
- * Get all time capsules for a user.
+ * Get all time capsules for a user, PROPAGATING a read failure.
+ *
+ * The one place the visibility filter lives. Callers that must not confuse a
+ * failed read with an empty collection (the chat tools' `live*` readers) call
+ * this; a PocketBase outage then surfaces as a thrown error instead of a
+ * confident "you have no capsules".
  */
-export async function getUserCapsules(userId: string): Promise<TimeCapsule[]> {
+export async function readUserCapsules(userId: string): Promise<TimeCapsule[]> {
   const pb = await getAuthedPB();
-  
+
   try {
     // F8a — a member sees capsules they created/were sent under their session
     // name AND any legacy demo-user capsules (creator or recipient).
@@ -24,10 +29,22 @@ export async function getUserCapsules(userId: string): Promise<TimeCapsule[]> {
       filter: `(createdBy = "${memberId}" || createdBy = "${DEMO_USER_ID}") || (recipients ?~ "${memberId}" || recipients ?~ "${DEMO_USER_ID}") || isFamilyWide = true`,
       sort: '-created',
     });
-    
+
     return records;
   } catch (error) {
     console.error('Failed to get user capsules:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all time capsules for a user. Returns [] when the read FAILS — callers
+ * that cannot distinguish the two conditions must use {@link readUserCapsules}.
+ */
+export async function getUserCapsules(userId: string): Promise<TimeCapsule[]> {
+  try {
+    return await readUserCapsules(userId);
+  } catch {
     return [];
   }
 }

@@ -12,7 +12,11 @@
 // (a separate PB collection only the Calendar page merges). Tool handlers
 // must read PB live at call time instead.
 
-import { withAdmin } from "@/lib/pb-auth";
+import { withAdmin, getAuthedPB } from "@/lib/pb-auth";
+import { DEMO_USER_ID, sanitizeUserId } from "@/lib/auth";
+import { readUserCapsules } from "@/lib/time-capsule";
+import type { TimeCapsule } from "@/db/features/time-capsule";
+import type { SkillTreeProfile } from "@/db/features/skill-tree";
 import { localTodayISO, localWeekdayShort } from "@/lib/local-date";
 import { mergeTodaysEvents, mergeEventsRange } from "./todays-events";
 import { readSnapshotTasks, type SnapshotTask } from "@/lib/snapshot-tasks";
@@ -339,6 +343,63 @@ export async function liveRewards(): Promise<any[] | null> {
   } catch {
     return null;
   }
+}
+
+/** Time capsules visible to `userId`, or null when the read FAILED. Wraps
+ *  readUserCapsules, NOT getUserCapsules — the latter returns [] for both "no
+ *  capsules" and "read failed", so an outage would read as a confident "you
+ *  have none". */
+export async function liveTimeCapsules(userId: string): Promise<TimeCapsule[] | null> {
+  try {
+    const rows = await readUserCapsules(userId);
+    return Array.isArray(rows) ? rows : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read-only skill-tree profile. Null = the read FAILED. Never creates a row
+ *  (the packaged getSkillTreeProfile CREATES on a miss) and never returns the
+ *  legacy `demo-user` row, whose XP belongs to whoever wrote it before the
+ *  per-member identity migration. A brand-new member gets a synthesized ZERO
+ *  profile — a read must not leave a row behind. */
+export async function readSkillTreeProfile(userId: string): Promise<SkillTreeProfile | null> {
+  const memberId = sanitizeUserId(userId);
+  // sanitizeUserId maps a blank id to the legacy namespace, so a blank or
+  // explicitly-legacy id is refused BEFORE the query, not resolved to it.
+  if (!memberId || memberId === DEMO_USER_ID) return null;
+  try {
+    const pb = await getAuthedPB();
+    const exact = await pb.collection("skill_tree_profiles").getList<SkillTreeProfile>(1, 1, {
+      filter: `userId = "${memberId}"`,
+    });
+    if (exact.items.length > 0) return exact.items[0];
+    return zeroSkillTreeProfile(memberId);
+  } catch {
+    return null;
+  }
+}
+
+/** The profile a brand-new member WOULD have. Mirrors skill-tree.ts's
+ *  newProfileData field-for-field, minus its write — the same shape, never
+ *  persisted. */
+function zeroSkillTreeProfile(memberId: string): SkillTreeProfile {
+  return {
+    id: "",
+    userId: memberId,
+    totalXP: 0,
+    level: 1,
+    xpToNextLevel: 100,
+    unlockedBranches: [],
+    completedQuests: [],
+    activeQuests: [],
+    achievementCount: 0,
+    currentStreak: 0,
+    longestStreak: 0,
+    lastActivityDate: new Date().toISOString(),
+    createdAt: "",
+    updatedAt: "",
+  };
 }
 
 /** Week convention shared with useMeals/PlanTab/CurrentMealWidget: legacy

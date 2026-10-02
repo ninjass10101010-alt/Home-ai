@@ -273,6 +273,8 @@ they spend more time chatting.
 
 ## Kid Toolset (the only tools a child session receives)
 
-`get_dashboard_summary`, `get_family_members`, `get_todays_events`, `get_calendar_range`, `get_todays_schedule`, `get_pending_tasks`, `get_completed_tasks`, `get_weekly_meals`, `get_recipes`, `get_grocery_list`, `get_pantry`, `get_leaderboard`, `get_weather`, `get_proactive_suggestions`, `get_family_routines`, `get_past_weeks`, `get_rewards`
+`get_dashboard_summary`, `get_family_members`, `get_todays_events`, `get_calendar_range`, `get_todays_schedule`, `get_pending_tasks`, `get_completed_tasks`, `get_weekly_meals`, `get_recipes`, `get_grocery_list`, `get_pantry`, `get_leaderboard`, `get_weather`, `get_proactive_suggestions`, `get_family_routines`, `get_past_weeks`, `get_rewards`, `get_hall_of_fame`, `get_skill_tree`, `get_time_capsules`
 
 Reads and summaries only — every write, admin, logistics, and house-control tool is excluded for kids.
+
+`get_skill_tree` always shows the child's own tree, `get_time_capsules` only the capsules they are part of, and a `member` argument is ignored for a child session. If one of these reads fails it says so — say that plainly instead of inventing a level, a prize, or a capsule.

@@ -26,6 +26,8 @@ import {
   findSnapshotTask,
 } from "@/lib/snapshot-tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
+import { getSkillBranches, getAllQuests } from "@/lib/skill-tree";
+import { calculateXPProgress } from "@/db/features/skill-tree";
 import { getStoreLabel, groupByStore } from "@/lib/stores";
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
 import { fetchLiveWeather } from "@/lib/weather-live";
@@ -51,6 +53,8 @@ import {
   liveSchedulesAll,
   liveWeekArchive,
   liveRewards,
+  liveTimeCapsules,
+  readSkillTreeProfile,
   textEmoji,
   mealsForWeek,
   parseJSON,
@@ -72,6 +76,8 @@ export {
   liveSchedulesAll,
   liveWeekArchive,
   liveRewards,
+  liveTimeCapsules,
+  readSkillTreeProfile,
   textEmoji,
   formatEventTime,
   mealsForWeek,
@@ -2566,6 +2572,136 @@ const TOOLS: Tool[] = [
       });
     },
   },
+  {
+    definition: {
+      name: "get_hall_of_fame",
+      description: "Get the family's Hall of Fame: each enshrined member, the week they won it, their rank, points and prize. Newest weeks first.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      // textEmoji is mandatory here: hall_of_fame.emoji rides the same 100-250KB
+      // photo-avatar data URLs as members.emoji, and get_leaderboard's comment
+      // records that payload as a verified live cause of the provider's
+      // "snag connecting to my brain" request-limit failure.
+      let rows: any[] = [];
+      try {
+        rows = await withAdmin(async (pb) => pb.collection("hall_of_fame").getFullList({ requestKey: null }));
+      } catch {
+        rows = [];
+      }
+      const entries = (Array.isArray(rows) ? rows : [])
+        .slice()
+        .sort((a: any, b: any) => String(b.weekStart || "").localeCompare(String(a.weekStart || "")))
+        .map((r: any) => ({
+          member: r.member,
+          emoji: textEmoji(r.emoji),
+          weekStart: r.weekStart,
+          points: r.points ?? 0,
+          rank: r.rank ?? null,
+          prize: r.prize || null,
+        }));
+      return summarize({ count: entries.length, entries });
+    },
+  },
+  {
+    definition: {
+      name: "get_skill_tree",
+      description:
+        "Get a skill tree: the member's XP, level and progress, plus every skill branch and quest with their completion. " +
+        "A child's session always returns THEIR OWN tree and ignores the member argument; a parent may name a member.",
+      parameters: {
+        type: "object",
+        properties: {
+          member: { type: "string", description: "Family member to look up — parent sessions only, ignored for a child session" },
+        },
+      },
+    },
+    handler: async (args: any, context?: ToolHandlerContext) => {
+      // Identity comes from the verified caller, never from the model's string.
+      // A blank/absent caller name would sanitize to the legacy demo-user
+      // namespace, whose XP belongs to another member — so fail closed.
+      const callerName = context?.caller?.name?.trim();
+      if (!callerName) {
+        return summarize({ error: "could not tell whose skill tree this is — retry, or ask a grown-up" });
+      }
+      const requested = callerIsAdult(context?.caller) ? String(args.member ?? "").trim() : "";
+      const memberId = requested || callerName;
+
+      const profile = await readSkillTreeProfile(memberId);
+      if (profile === null) {
+        return summarize({ error: "skill tree data unavailable — do not guess anyone's XP, retry later" });
+      }
+      const [branches, quests] = await Promise.all([getSkillBranches(), getAllQuests()]);
+      const questsByBranch: Record<string, any[]> = {};
+      for (const quest of quests) {
+        (questsByBranch[quest.branchId] ??= []).push(quest);
+      }
+      return summarize({
+        member: memberId,
+        profile: {
+          userId: profile.userId,
+          totalXP: profile.totalXP,
+          level: profile.level,
+          xpToNextLevel: profile.xpToNextLevel,
+          achievementCount: profile.achievementCount,
+          currentStreak: profile.currentStreak,
+          longestStreak: profile.longestStreak,
+        },
+        branches: branches.map((branch: any) => {
+          const branchQuests = questsByBranch[branch.id] || [];
+          const completed = branchQuests.filter((q: any) => (profile.completedQuests || []).includes(q.id)).length;
+          return {
+            id: branch.id,
+            name: branch.name,
+            icon: branch.icon,
+            category: branch.category,
+            totalQuests: branchQuests.length,
+            completedQuests: completed,
+            isUnlocked: (profile.unlockedBranches || []).includes(branch.id),
+          };
+        }),
+        quests: quests.map((q: any) => ({
+          id: q.id,
+          branchId: q.branchId,
+          title: q.title,
+          difficulty: q.difficulty,
+          xpReward: q.xpReward,
+          completed: (profile.completedQuests || []).includes(q.id),
+        })),
+        xpProgress: calculateXPProgress(profile.totalXP),
+      });
+    },
+  },
+  {
+    definition: {
+      name: "get_time_capsules",
+      description:
+        "Get the time capsules visible to the caller: title, unlock date, status and how many memories are inside. " +
+        "Never guess what exists — if the read fails the result says so.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async (_args: any, context?: ToolHandlerContext) => {
+      const callerName = context?.caller?.name?.trim();
+      if (!callerName) {
+        return summarize({ error: "could not tell whose capsules these are — retry, or ask a grown-up", capsules: [] });
+      }
+      const capsules = await liveTimeCapsules(callerName);
+      if (capsules === null) {
+        return summarize({ error: "capsule data unavailable — do not guess what exists, retry later", capsules: [] });
+      }
+      return summarize({
+        count: capsules.length,
+        capsules: capsules.map((c: any) => ({
+          id: c.id,
+          title: c.title,
+          status: c.status,
+          unlockDate: c.unlockDate,
+          contentCount: c.contentCount ?? 0,
+          isFamilyWide: c.isFamilyWide === true,
+        })),
+      });
+    },
+  },
 ];
 
 const HA_ALLOWED_DOMAINS = new Set(["light", "switch", "scene", "climate", "media_player", "vacuum"]);
@@ -2630,4 +2766,7 @@ const KID_TOOL_NAMES: ReadonlySet<string> = new Set([
   "get_family_routines",
   "get_past_weeks",
   "get_rewards",
+  "get_hall_of_fame",
+  "get_skill_tree",
+  "get_time_capsules",
 ]);
