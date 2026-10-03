@@ -4,6 +4,37 @@
 import { useState, useEffect, useCallback, createContext, useContext, ReactNode } from 'react';
 
 import { ThemeConfig, ThemeMode, AccentColor, defaultThemeConfig, THEME_STORAGE_KEY, defaultAccentHex, type AccentHexByTarget, type AccentTarget } from '@/lib/theme-config';
+import { warmGlassAccentOptions } from '@/lib/design-tokens';
+
+// The Accent Studio (settings/Appearance) writes a preset's own hex for every
+// target. Those hexes are the DARK palette — globals.css carries a second,
+// darker set per theme — so writing them inline on <html> outranked
+// `:root[data-theme="light"]` and pinned the light theme to the dark accent.
+//
+// The provider therefore publishes the accent IDENTITY as `data-accent` and
+// lets the stylesheet resolve `--color-accent-<id>` per theme. An inline style
+// is only written when the family has genuinely hand-picked a colour for a
+// target, which has no per-theme counterpart to defer to.
+const presetHexFor = (id: AccentColor, target: AccentTarget): string | undefined => {
+  const accent = warmGlassAccentOptions.find((option) => option.id === id);
+  if (!accent) return undefined;
+  return target === 'glow' || target === 'border' ? accent.glow : accent.hex;
+};
+
+/** True when the stored target still holds its untouched preset value. */
+const isPresetValue = (id: AccentColor, target: AccentTarget, value: string): boolean => {
+  const preset = presetHexFor(id, target);
+  if (preset === undefined) return false;
+  return preset.trim().toLowerCase() === value.trim().toLowerCase();
+};
+
+/** "#7c3aed" -> "124, 58, 237" — the channel-triple form legacy call sites read. */
+function hexToRgbChannels(value: string): string | null {
+  const hex = value.trim().replace(/^#/, '').toLowerCase();
+  const full = hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex;
+  if (!/^[0-9a-f]{6}$/.test(full)) return null;
+  return [0, 2, 4].map((offset) => parseInt(full.slice(offset, offset + 2), 16)).join(', ');
+}
 
 
 
@@ -124,12 +155,44 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
       }
       window.dispatchEvent(new Event('consuela-motion-preference-change'));
 
-      // Update CSS variables (per-target overrides)
-      document.documentElement.style.setProperty('--color-accent-selected', theme.accentHex.selected);
-      document.documentElement.style.setProperty('--color-accent-glow', theme.accentHex.glow);
-      document.documentElement.style.setProperty('--color-accent-button', theme.accentHex.button);
-      document.documentElement.style.setProperty('--color-accent-border', theme.accentHex.border);
-      document.documentElement.style.setProperty('--color-text-on-accent', '#ffffff');
+      // Publish the accent IDENTITY (not a colour) so the stylesheet can pick
+      // the active theme's `--color-accent-<id>`.
+      document.documentElement.setAttribute('data-accent', theme.accentColor);
+
+      // Per-target overrides. A target still holding its preset value is
+      // removed from the inline layer so globals.css's per-theme derivation
+      // takes over; only a hand-picked colour stays inline.
+      const overrides: Record<AccentTarget, string> = {
+        selected: theme.accentHex.selected,
+        glow: theme.accentHex.glow,
+        button: theme.accentHex.button,
+        border: theme.accentHex.border,
+      };
+      for (const target of ['selected', 'glow', 'button', 'border'] as AccentTarget[]) {
+        const property = `--color-accent-${target}`;
+        const value = overrides[target];
+        if (isPresetValue(theme.accentColor, target, value)) {
+          document.documentElement.style.removeProperty(property);
+          continue;
+        }
+        document.documentElement.style.setProperty(property, value);
+      }
+
+      // The rgb triple behind the three
+      // The channel triple for the three legacy alpha call sites that read
+      // `--color-accent-selected-rgb` (PhotoMemoriesWidget, HomeAssistantWidget
+      // ×2), which silently fell back to a hardcoded nori blue while the token
+      // was assigned nowhere. For a preset accent the
+      // stylesheet owns it per accent × theme, so publishing the stored dark
+      // hex here is exactly the hardcoded-nori-blue bug this replaced; for a
+      // hand-picked accent there is no themed pair, so it follows the custom
+      // hex. Either way it must never be left undefined.
+      const channels = hexToRgbChannels(overrides.selected);
+      if (channels === null || isPresetValue(theme.accentColor, 'selected', overrides.selected)) {
+        document.documentElement.style.removeProperty('--color-accent-selected-rgb');
+      } else {
+        document.documentElement.style.setProperty('--color-accent-selected-rgb', channels);
+      }
 
     };
 
@@ -160,6 +223,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     theme.mode,
     theme.contrastBoost,
     theme.reduceMotion,
+    theme.accentColor,
     theme.accentHex.selected,
     theme.accentHex.glow,
     theme.accentHex.button,

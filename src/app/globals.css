@@ -38,7 +38,16 @@
   --color-accent-amber: #f59e0b;
   --color-accent-coral: #fb7185;
   --color-accent-lavender: #a78bfa;
+  --color-accent-apricot: #fb923c;
+  --color-accent-sage: #84cc16;
   --color-accent-selected: var(--color-accent-nori);
+  /* Channel triple of the accent above, for the three legacy alpha call sites
+     that read `--color-accent-selected-rgb` (PhotoMemoriesWidget,
+     HomeAssistantWidget ×2). CSS cannot split a hex into channels, so it is
+     stated per accent below; this is the no-data-accent default, and
+     tests/unit/theme-token-contrast.test.ts fails the file if the two ever
+     drift apart. */
+  --color-accent-selected-rgb: 59, 130, 246;
 
   /* Gradient palette */
   --color-gradient-start: #b583ff;
@@ -140,6 +149,89 @@
   --color-nav-active-fill: color-mix(in srgb, var(--color-nav-active) 72%, black);
 }
 
+/* ─── Accent identity → accent tokens (UI audit 2026-10, defect 1) ───
+   `useTheme` publishes `data-accent` on <html> instead of a raw hex inline.
+   An inline style outranks every `:root[data-theme="…"]` rule, so the old
+   inline write pinned the light theme to the DARK accent hex — seven of ten
+   accents fell below 3:1 on the light canvas and the visible accent shifted at
+   hydration. Pointing `--color-accent-selected` at `--color-accent-<id>` makes
+   the substitution happen at computed-value time, so it re-resolves per theme
+   for free. Each `-rgb` line restates that accent's channels for the theme in
+   effect; the contract test fails if any of them drifts from its hex. */
+:root[data-accent="nori"] {
+  --color-accent-selected: var(--color-accent-nori);
+  --color-accent-selected-rgb: 59, 130, 246;
+}
+:root[data-accent="violet"] {
+  --color-accent-selected: var(--color-accent-violet);
+  --color-accent-selected-rgb: 124, 111, 247;
+}
+:root[data-accent="rose"] {
+  --color-accent-selected: var(--color-accent-rose);
+  --color-accent-selected-rgb: 244, 63, 94;
+}
+:root[data-accent="coral"] {
+  --color-accent-selected: var(--color-accent-coral);
+  --color-accent-selected-rgb: 251, 113, 133;
+}
+:root[data-accent="lavender"] {
+  --color-accent-selected: var(--color-accent-lavender);
+  --color-accent-selected-rgb: 167, 139, 250;
+}
+:root[data-accent="cyan"] {
+  --color-accent-selected: var(--color-accent-cyan);
+  --color-accent-selected-rgb: 6, 182, 212;
+}
+:root[data-accent="mint"] {
+  --color-accent-selected: var(--color-accent-mint);
+  --color-accent-selected-rgb: 74, 222, 128;
+}
+:root[data-accent="amber"] {
+  --color-accent-selected: var(--color-accent-amber);
+  --color-accent-selected-rgb: 245, 158, 11;
+}
+:root[data-accent="apricot"] {
+  --color-accent-selected: var(--color-accent-apricot);
+  --color-accent-selected-rgb: 251, 146, 60;
+}
+:root[data-accent="sage"] {
+  --color-accent-selected: var(--color-accent-sage);
+  --color-accent-selected-rgb: 132, 204, 22;
+}
+
+/* ─── Accent-derived tokens ───
+   All of these are ONE formula over whichever accent is live, not a
+   per-accent hand-picked list, so a new accent preset cannot ship without
+   them. `--color-accent-button` is deepened to 60% because ~25 call sites
+   pair it with a hard-coded `text-white` (SoftButton primary, Chip selected,
+   DayStrip, EmergencyButton, …): the raw accent clears 4.5:1 under white for
+   NONE of the ten presets (mint 1.74:1), while this mix clears it in both
+   themes — 7.15:1 worst case in light, 4.58:1 in dark. It follows the same
+   72%-black shape as `--color-nav-active-fill` above, one step deeper because
+   white text needs 4.5:1 rather than 3:1. */
+:root {
+  --color-accent-glow: color-mix(in srgb, var(--color-accent-selected) 25%, transparent);
+  --color-accent-border: color-mix(in srgb, var(--color-accent-selected) 35%, transparent);
+  --color-accent-button: color-mix(in srgb, var(--color-accent-selected) 60%, black);
+  --color-text-on-accent: #ffffff;
+
+  /* Avatar member-initials ink (defect 2). The member colour is the backdrop at
+     20% over the canvas, and the raw accent on top of it cleared 4.5:1 for
+     none of the six (amber 2.40:1 in light). Mixing 55% of the accent with
+     `--color-text-primary` walks the ink toward the theme's body ink — darker
+     on light, lighter on dark, and only ever more contrast in boost mode where
+     primary is pure black/white — for 5.67:1 worst case in light and 6.81:1 in
+     dark, at every avatarSize (12–20px is all under the 24px large-text bar)
+     and with `glow` on or off (an outer box-shadow sits behind the element's
+     own background, so it never reaches the ink). */
+  --color-accent-ink-nori: color-mix(in srgb, var(--color-accent-nori) 55%, var(--color-text-primary));
+  --color-accent-ink-mint: color-mix(in srgb, var(--color-accent-mint) 55%, var(--color-text-primary));
+  --color-accent-ink-violet: color-mix(in srgb, var(--color-accent-violet) 55%, var(--color-text-primary));
+  --color-accent-ink-amber: color-mix(in srgb, var(--color-accent-amber) 55%, var(--color-text-primary));
+  --color-accent-ink-cyan: color-mix(in srgb, var(--color-accent-cyan) 55%, var(--color-text-primary));
+  --color-accent-ink-rose: color-mix(in srgb, var(--color-accent-rose) 55%, var(--color-text-primary));
+}
+
 /* ─── Light Mode Color Tokens ─── */
 :root[data-theme="light"] {
   /* LIGHT MODE PALETTE */
@@ -190,6 +282,25 @@
   /* Gradient palette */
   --color-gradient-start: #7c3aed;
   --color-gradient-end: #e11d48;
+}
+
+/* Light-theme channel triples, keyed per accent (see the rgb note above).
+   (0,3,0) beats the bare `:root[data-accent]` block at (0,2,0). */
+:root[data-theme="light"][data-accent="nori"] { --color-accent-selected-rgb: 37, 99, 235; }
+:root[data-theme="light"][data-accent="violet"] { --color-accent-selected-rgb: 124, 58, 237; }
+:root[data-theme="light"][data-accent="rose"] { --color-accent-selected-rgb: 225, 29, 72; }
+:root[data-theme="light"][data-accent="coral"] { --color-accent-selected-rgb: 225, 29, 72; }
+:root[data-theme="light"][data-accent="lavender"] { --color-accent-selected-rgb: 109, 40, 217; }
+:root[data-theme="light"][data-accent="cyan"] { --color-accent-selected-rgb: 8, 145, 178; }
+:root[data-theme="light"][data-accent="mint"] { --color-accent-selected-rgb: 5, 150, 105; }
+:root[data-theme="light"][data-accent="amber"] { --color-accent-selected-rgb: 217, 119, 6; }
+:root[data-theme="light"][data-accent="apricot"] { --color-accent-selected-rgb: 234, 88, 12; }
+:root[data-theme="light"][data-accent="sage"] { --color-accent-selected-rgb: 101, 163, 13; }
+
+@media (prefers-color-scheme: light) {
+  /* Pre-hydration light: <html> carries no data-accent yet, so the nori triple
+     is the only one that can be selected. */
+  :root:not([data-theme="dark"]) { --color-accent-selected-rgb: 37, 99, 235; }
 }
 
 @media (prefers-color-scheme: light) {
@@ -277,9 +388,18 @@
   --color-gradient-end: #ff6b8a;
 }
 
-/* ─── High Contrast Mode ─── */
-/* Activates when [data-contrast="boost"] is present on html element */
-[data-contrast="boost"] {
+/* ─── High Contrast Mode ───
+   Every text level, in BOTH themes. The boost blocks have to out-specify the
+   token blocks they override: the old `[data-contrast="boost"]` scored (0,1,0)
+   and lost to `:root[data-theme="…"]` at (0,2,0), so dark+boost rendered
+   byte-identical to dark and light+boost lifted only primary + secondary.
+   Keying the dark variant on `:not([data-theme="light"])` puts it at (0,3,0) —
+   the same rank as the light variant, with disjoint conditions, so neither can
+   shadow the other regardless of source order. Boost lifts all four levels and
+   takes muted/dim over AA on every surface (canvas → surface-3), which the base
+   pair does not: the base light muted/dim are 4.49:1 on surface-2 and 4.21:1
+   on surface-3, and the base dark dim is 4.21:1 on surface-3. */
+:root:not([data-theme="light"])[data-contrast="boost"] {
   --color-text-primary: #ffffff;  /* Pure white in dark mode */
   --color-text-secondary: #e2e8f0; /* Very bright secondary text */
   --color-text-muted: #c3cadd;    /* Boost: muted/dim lift with the rest */
@@ -290,12 +410,16 @@
 :root[data-theme="light"][data-contrast="boost"] {
   --color-text-primary: #000000;  /* Pure black in light mode */
   --color-text-secondary: #1a1a1a; /* Very dark secondary text */
+  --color-text-muted: #2b2b2b;  /* was left behind before — boost did nothing for it */
+  --color-text-dim: #3d3d3d;
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"])[data-contrast="boost"] {
+  :root:not([data-theme="light"])[data-contrast="boost"] {
     --color-text-primary: #000000;  /* Pure black in light mode */
     --color-text-secondary: #1a1a1a; /* Very dark secondary text */
+    --color-text-muted: #2b2b2b;
+    --color-text-dim: #3d3d3d;
   }
 }
 

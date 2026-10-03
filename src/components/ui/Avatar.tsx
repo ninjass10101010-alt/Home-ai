@@ -18,13 +18,19 @@ interface AvatarProps {
   animated?: boolean;
 }
 
+// Member colour = a 20% tint of the accent for the backdrop, with the initials
+// in `--color-accent-ink-*`. The raw accent was never legible on top of its own
+// tint (amber 2.40:1 in light); the ink token is the accent walked toward the
+// theme's body ink, which clears 4.5:1 in both themes. Every entry also uses the
+// /20 tint — `green` used to be a SOLID mint circle under white text, the worst
+// case at 1.74:1.
 const colorMap: Record<string, string> = {
-  green: "bg-[var(--color-accent-mint)] text-[var(--color-text-on-accent)]",
-  violet: "bg-[var(--color-accent-violet)]/20 text-[var(--color-accent-violet)]",
-  amber: "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-amber)]",
-  cyan: "bg-[var(--color-accent-cyan)]/20 text-[var(--color-accent-cyan)]",
-  rose: "bg-[var(--color-accent-rose)]/20 text-[var(--color-accent-rose)]",
-  blue: "bg-[var(--color-accent-nori)]/20 text-[var(--color-accent-nori)]",
+  green: "bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-ink-mint)]",
+  violet: "bg-[var(--color-accent-violet)]/20 text-[var(--color-accent-ink-violet)]",
+  amber: "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-ink-amber)]",
+  cyan: "bg-[var(--color-accent-cyan)]/20 text-[var(--color-accent-ink-cyan)]",
+  rose: "bg-[var(--color-accent-rose)]/20 text-[var(--color-accent-ink-rose)]",
+  blue: "bg-[var(--color-accent-nori)]/20 text-[var(--color-accent-ink-nori)]",
 };
 
 // Ring color mapping for emoji variant
