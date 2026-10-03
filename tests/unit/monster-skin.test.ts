@@ -5,8 +5,8 @@ import { act, createElement, Fragment } from "react";
 import type { ReactElement } from "react";
 import { WEATHER_MATERIAL } from "@/lib/weather-skins/types";
 import { getWeatherSkin } from "@/components/ui/WeatherSkins";
-import { SKY, INK } from "@/components/ui/wx-tokens";
-import { contrastRatio, posterTextSurface } from "@/lib/weather-contrast";
+import { MONSTER, SKY, INK } from "@/components/ui/wx-tokens";
+import { contrastRatio, mixHexColor, posterTextSurface } from "@/lib/weather-contrast";
 import { Condition, MonsterDigit, SceneLayers, CONDITION_SILHOUETTE_TONES } from "@/components/ui/WxToys";
 import type { ConditionCode, WxScene } from "@/components/ui/WxToys";
 import type { SkyPhase } from "@/lib/weather-scene-params";
@@ -137,6 +137,20 @@ const EXPECTED_DIGIT_SEGMENTS: Record<string, string[]> = {
   "-": ["middle"],
 };
 
+const EXPECTED_DIGIT_COLORS: Record<string, string[]> = {
+  "0": [MONSTER.orange, MONSTER.red, MONSTER.teal, MONSTER.blue, MONSTER.purple, MONSTER.teal],
+  "1": [MONSTER.teal, MONSTER.orange],
+  "2": [MONSTER.orange, MONSTER.teal, MONSTER.purple, MONSTER.blue, MONSTER.red],
+  "3": [MONSTER.orange, MONSTER.teal, MONSTER.purple, MONSTER.red, MONSTER.blue],
+  "4": [MONSTER.teal, MONSTER.orange, MONSTER.purple, MONSTER.red],
+  "5": [MONSTER.orange, MONSTER.teal, MONSTER.purple, MONSTER.red, MONSTER.blue],
+  "6": [MONSTER.orange, MONSTER.teal, MONSTER.purple, MONSTER.blue, MONSTER.red, MONSTER.orange],
+  "7": [MONSTER.orange, MONSTER.teal, MONSTER.red],
+  "8": [MONSTER.orange, MONSTER.teal, MONSTER.red, MONSTER.blue, MONSTER.purple, MONSTER.red, MONSTER.orange],
+  "9": [MONSTER.orange, MONSTER.teal, MONSTER.red, MONSTER.purple, MONSTER.blue, MONSTER.orange],
+  "-": [MONSTER.purple],
+};
+
 it.each(Object.entries(EXPECTED_DIGIT_SEGMENTS))(
   "MonsterDigit %s uses the expected flat, colored number sections",
   (digit, expectedSegments) => {
@@ -146,6 +160,7 @@ it.each(Object.entries(EXPECTED_DIGIT_SEGMENTS))(
 
     const segments = Array.from(svg!.querySelectorAll<SVGRectElement>("[data-digit-segment]"));
     expect(segments.map((segment) => segment.getAttribute("data-digit-segment"))).toEqual(expectedSegments);
+    expect(segments.map((segment) => segment.getAttribute("fill"))).toEqual(EXPECTED_DIGIT_COLORS[digit]);
     expect(segments.every((segment) => segment.tagName.toLowerCase() === "rect")).toBe(true);
     expect(segments.every((segment) => Number(segment.getAttribute("rx")) > 0)).toBe(true);
     expect(segments.every((segment) => segment.hasAttribute("fill") && !segment.hasAttribute("stroke"))).toBe(true);
@@ -153,14 +168,26 @@ it.each(Object.entries(EXPECTED_DIGIT_SEGMENTS))(
     expect(depthFaces.map((face) => face.getAttribute("data-digit-depth"))).toEqual(expectedSegments);
     for (const segment of segments) {
       const depthFace = depthFaces.find((face) => face.getAttribute("data-digit-depth") === segment.getAttribute("data-digit-segment"));
-      expect(Number(depthFace?.getAttribute("x"))).toBeGreaterThan(Number(segment.getAttribute("x")));
-      expect(Number(depthFace?.getAttribute("y"))).toBeGreaterThan(Number(segment.getAttribute("y")));
-      expect(depthFace?.getAttribute("fill")).not.toBe(segment.getAttribute("fill"));
+      expect(Number(depthFace?.getAttribute("x"))).toBe(Number(segment.getAttribute("x")) + 7);
+      expect(Number(depthFace?.getAttribute("y"))).toBe(Number(segment.getAttribute("y")) + 9);
+      expect(depthFace?.getAttribute("width")).toBe(segment.getAttribute("width"));
+      expect(depthFace?.getAttribute("height")).toBe(segment.getAttribute("height"));
+      expect(depthFace?.getAttribute("rx")).toBe(segment.getAttribute("rx"));
+      expect(depthFace?.getAttribute("fill")).toBe(mixHexColor(segment.getAttribute("fill")!, MONSTER.inkBlue, 0.32));
     }
     if (digit !== "-") {
       expect(new Set(segments.map((segment) => segment.getAttribute("fill"))).size).toBeGreaterThan(1);
       expect(svg!.querySelectorAll("[data-digit-eye]")).toHaveLength(1);
-      expect(svg!.querySelector('[data-digit-eye] circle[fill="#101418"]')).toBeTruthy();
+      const eye = svg!.querySelector("[data-digit-eye]");
+      const eyeCircles = Array.from(eye?.querySelectorAll("circle") ?? []);
+      expect(eyeCircles).toHaveLength(3);
+      expect(eyeCircles[0].getAttribute("fill")).toBe(mixHexColor(MONSTER.glint, MONSTER.inkBlue, 0.22));
+      expect(eyeCircles[0].getAttribute("cx")).toBe(String(Number(eyeCircles[1].getAttribute("cx")) + 3));
+      expect(eyeCircles[0].getAttribute("cy")).toBe(String(Number(eyeCircles[1].getAttribute("cy")) + 5));
+      expect(eyeCircles[1].getAttribute("fill")).toBe(MONSTER.glint);
+      expect(eyeCircles[1].getAttribute("r")).toBe("17");
+      expect(eyeCircles[2].getAttribute("fill")).toBe(MONSTER.pupil);
+      expect(eyeCircles[2].getAttribute("r")).toBe("8");
     } else {
       expect(svg!.querySelectorAll("[data-digit-eye]")).toHaveLength(0);
     }
