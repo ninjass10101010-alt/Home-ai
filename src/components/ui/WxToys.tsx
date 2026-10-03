@@ -5,6 +5,7 @@ import { moonLitPath } from "@/lib/weather-astro";
 import type { SkyPhase } from "@/lib/weather-scene-params";
 import { mixHexColor } from "@/lib/weather-contrast";
 import { cloudVariant, backCloudVariant, starOpacity } from "@/lib/weather-scene-params";
+import { readReducedMotionPreference, subscribeToReducedMotion } from "@/hooks/useReducedMotionPreference";
 import { MONSTER, WX_POSTER } from "./wx-tokens";
 
 // WxToys — the toy weather kit: SunOrb, CloudPuff, seagull Birds,
@@ -129,15 +130,26 @@ function BirdGlyph({ size, flap, color, flapping }: { size: number; flap: number
   );
 }
 
+/**
+ * May the toy weather scene animate right now?
+ *
+ * Reads the app's composed preference — the OS query OR the family's Settings →
+ * Appearance toggle — rather than the OS query alone, which is what left the
+ * toys animating on a shared wall after the family had asked for less motion.
+ *
+ * Still `false` on the very first render: Weather shares a paused first-render
+ * snapshot (DESIGN.md) and only resumes ambient motion after readiness, which is
+ * also what keeps the server render and the first client render in agreement.
+ */
 export function useWxMotionOk(): boolean {
   const [motionOk, setMotionOk] = useState(false);
+
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setMotionOk(!mq.matches);
+    const update = () => setMotionOk(!readReducedMotionPreference());
     update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+    return subscribeToReducedMotion(update);
   }, []);
+
   return motionOk;
 }
 

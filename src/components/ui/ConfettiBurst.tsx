@@ -1,14 +1,23 @@
 "use client";
 
+import { usePrefersReducedMotion } from "@/hooks/useReducedMotionPreference";
+
 /**
  * Shared confetti burst — extracted verbatim from src/app/tasks/page.tsx
  * (2026-09-16) so the Tasks completion celebration and the WeeklyWinModal
- * ceremony share ONE implementation. Callers own the reduced-motion guard:
- * skip rendering `active` when `prefers-reduced-motion` matches (mirror the
- * tasks page's `triggerConfetti` check).
+ * ceremony share ONE implementation.
+ *
+ * The component owns its own reduced-motion gate. It used to document "callers
+ * own the reduced-motion guard", which is exactly why the guard was routinely
+ * wrong: a caller reading `window.matchMedia` directly only sees the OS
+ * preference, so the Settings → Appearance "Reduce motion" toggle did not
+ * suppress the confetti on a shared wall. Gating here means a burst can never
+ * fire for a motion-sensitive family member no matter what a caller does, and a
+ * caller cannot forget.
  */
 export default function ConfettiBurst({ active }: { active: boolean }) {
-  if (!active) return null;
+  const reduceMotion = usePrefersReducedMotion();
+  if (!active || reduceMotion) return null;
   const particles = Array.from({ length: 20 }, (_, i) => ({
     id: i,
     left: `${Math.random() * 100}%`,

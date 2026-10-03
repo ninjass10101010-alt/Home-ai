@@ -42,38 +42,9 @@ export function useAnimationBudget(maxConcurrent: number = DEFAULT_BUDGET) {
 }
 
 /**
- * usePrefersReducedMotion — OS preference OR the family's user-facing toggle
- * (UI audit 5.5: `<html data-reduce-motion="true">`, set in Settings →
- * Appearance and mirrored by ThemeProvider). The toggle dispatches
- * `consuela-motion-preference-change`, so flipping it mid-session updates
- * every mounted consumer immediately.
+ * `usePrefersReducedMotion` now lives in `./useReducedMotionPreference`, its
+ * single owner, where the OS query and the family's in-app toggle are composed
+ * once for every animation site. Re-exported here so the existing AnimatedEmoji
+ * import path — and the module mock in its suite — keep resolving.
  */
-export function usePrefersReducedMotion(): boolean {
-  const [prefersReduced, setPrefersReduced] = useState(false);
-
-  useEffect(() => {
-    // matchMedia is absent during SSR and in some test environments — treat its
-    // absence as "no preference" rather than throwing.
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => {
-      const userPreference =
-        typeof document !== "undefined" &&
-        document.documentElement.getAttribute("data-reduce-motion") === "true";
-      setPrefersReduced(mq.matches || userPreference);
-    };
-    sync();
-    const handler = (e: MediaQueryListEvent | Event) => {
-      sync();
-      void e;
-    };
-    mq.addEventListener("change", handler as (e: MediaQueryListEvent) => void);
-    window.addEventListener("consuela-motion-preference-change", handler);
-    return () => {
-      mq.removeEventListener("change", handler as (e: MediaQueryListEvent) => void);
-      window.removeEventListener("consuela-motion-preference-change", handler);
-    };
-  }, []);
-
-  return prefersReduced;
-}
+export { usePrefersReducedMotion } from "./useReducedMotionPreference";

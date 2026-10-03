@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { readReducedMotionPreference } from "@/hooks/useReducedMotionPreference";
 
 const EXIT_MS = 180;
 
@@ -22,7 +23,10 @@ export default function Toast({ open, children, tone = "neutral" }: ToastProps) 
       return;
     }
     if (!visible) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    // Read at close time, not at mount: the family may have flipped the toggle
+    // since the toast appeared, and reading through the app's own preference is
+    // what makes that count. An instant close carries no motion.
+    if (readReducedMotionPreference()) {
       setVisible(false);
       setClosing(false);
       return;

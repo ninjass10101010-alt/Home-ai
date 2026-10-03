@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import EmptyState from "@/components/ui/EmptyState";
+import { usePrefersReducedMotion } from "@/hooks/useReducedMotionPreference";
 import { isOnThisDay, type WallPhoto } from "@/db/features/photos";
 
 /**
@@ -75,13 +76,28 @@ export default function PhotosWidget({
   const [incoming, setIncoming] = useState<WallPhoto | null>(null);
   /** Flips the incoming layer to full opacity one frame after it mounts. */
   const [armed, setArmed] = useState(false);
-  const [reduceMotion, setReduceMotion] = useState(
-    // Read once at init rather than setting state inside the effect below,
-    // which would render the tile twice on mount.
-    () =>
-      typeof window !== "undefined" && typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
+  /**
+   * Reduced motion comes from the OS *or* from the family's own Settings →
+   * Appearance toggle, so it is read through the app's one preference hook —
+   * a direct `matchMedia` here is what left the in-app toggle inert.
+   */
+  const reduceMotion = usePrefersReducedMotion();
+  /**
+   * WCAG 2.2.2 (Pause, Stop, Hide — Level A). The rotation is moving content
+   * that starts by itself and never stops, so the family gets a real control to
+   * stop it.
+   *
+   * `null` means "the family has not said", and the carousel then follows the
+   * reduced-motion preference — which is what makes it START paused under
+   * reduced motion, not merely swap faster. Once they press the control their
+   * choice is authoritative, so play really does resume: a toggle whose play
+   * state could not be reached would be worse than no control at all. (Honest
+   * nuance: a reduce-motion preference switched on *after* an explicit play is
+   * not re-applied until the family presses again — the deliberate press is
+   * treated as the newer signal.)
+   */
+  const [pausedByChoice, setPausedByChoice] = useState<boolean | null>(null);
+  const paused = pausedByChoice ?? reduceMotion;
 
   const cursorRef = useRef(0);
   /** The id currently composited. Rotation must never re-pick it. */
@@ -101,14 +117,6 @@ export default function PhotosWidget({
     return () => {
       mountedRef.current = false;
     };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const onChange = (event: MediaQueryListEvent) => setReduceMotion(event.matches);
-    mq.addEventListener?.("change", onChange);
-    return () => mq.removeEventListener?.("change", onChange);
   }, []);
 
   const load = useCallback(async (recent: string[], keepCurrent: boolean) => {
@@ -197,13 +205,16 @@ export default function PhotosWidget({
   }, [load]);
 
   useEffect(() => {
-    if (state !== "ready" || photos.length < 2) return;
+    // Paused means no timer at all, not a timer that no-ops: under reduced
+    // motion the carousel must not autoplay, and a paused family member must get
+    // their photo back. Burn-in still happens when they press play.
+    if (paused || state !== "ready" || photos.length < 2) return;
     const id = window.setInterval(() => {
       if (document.hidden) return; // nobody is watching a sleeping panel
       void advance();
     }, rotateMs);
     return () => window.clearInterval(id);
-  }, [advance, photos.length, rotateMs, state]);
+  }, [advance, paused, photos.length, rotateMs, state]);
 
   useEffect(() => {
     if (!incoming) return;
@@ -287,6 +298,36 @@ export default function PhotosWidget({
         <p className="wall-photo-caption" translate="no">
           {caption}
         </p>
+      )}
+      {photos.length > 1 && (
+        // The placement wrapper is `absolute` and the button itself is `relative`
+        // via `.hit-44`, which also guarantees its 44px hit box without changing
+        // the 36px visual. Deliberately NOT a `glass-*` surface: those classes
+        // define their own `::before`, which would replace the `.hit-44::before`
+        // box and silently drop the guarantee.
+        <div className="absolute right-5 top-5">
+          <button
+            type="button"
+            onClick={() => setPausedByChoice((was) => !(was ?? reduceMotion))}
+            // Static name + pressed state is the standard toggle-button pairing:
+            // "Pause photo rotation, pressed" reads as paused without the
+            // double-announcement of a label that also changes.
+            aria-label="Pause photo rotation"
+            aria-pressed={paused}
+            title={paused ? "Resume photo rotation" : "Pause photo rotation"}
+            className="hit-44 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[var(--color-surface-0)]/60 text-white backdrop-blur-md hover:bg-[var(--color-surface-0)]/85 tap-sm"
+          >
+            {paused ? (
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                <path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.5-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14Z" />
+              </svg>
+            ) : (
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                <path d="M7 4h3.5v16H7zM13.5 4H17v16h-3.5z" />
+              </svg>
+            )}
+          </button>
+        </div>
       )}
     </div>
   );

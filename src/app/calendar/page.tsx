@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import Chip, { type ChipTone } from "@/components/ui/Chip";
 import Avatar from "@/components/ui/Avatar";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
+import { readReducedMotionPreference } from "@/hooks/useReducedMotionPreference";
 import { expandGoogleEvent, eventInMonth, dbEventToCalEvent, dbScheduleToScheduleItem } from "@/lib/calendar/google-mapping";
 import { db } from "@/db";
 import { gatewayList } from "@/db/gateway-client";
@@ -315,6 +316,43 @@ function getShortWeekday(year: number, month: number, day: number) {
   return new Date(year, month, day).toLocaleDateString("en-US", { weekday: "short" });
 }
 
+/**
+ * Why the school (Google) calendar is missing from this view — the three
+ * answers, and ONLY these three.
+ *
+ * `idle` is the honest good case: the read succeeded. It says nothing even when
+ * it returned zero rows, because a day genuinely without school events is a real
+ * answer, not an outage.
+ *
+ * `not_connected` / `unavailable` used to be invisible. `/calendar` is
+ * ALL_ROLES but the page's only Google load used `?sync=now`, which
+ * `/api/google-calendar` answers behind the parent gate — so a child, guest or
+ * pet got a 401 on every mount and a permanently empty calendar with no error
+ * and no explanation. The read is now ungated for every role (see
+ * `loadGoogleEvents`) and these two states say plainly what is missing and who
+ * can fix it.
+ *
+ * Copy rule: neutral, actionable, and never the server's raw error string. A
+ * token-store failure message is a developer string, not a family one.
+ */
+type GoogleCalendarStatus = "idle" | "not_connected" | "unavailable";
+
+const GOOGLE_STATUS_COPY: Record<Exclude<GoogleCalendarStatus, "idle">, string> = {
+  not_connected:
+    "School events aren't on the calendar yet \u2014 a parent can connect Google Calendar in Settings \u2192 Integrations.",
+  unavailable:
+    "Couldn't reach the school calendar just now \u2014 family events are still here.",
+};
+
+function CalendarGoogleStatusLine({ status }: { status: GoogleCalendarStatus }) {
+  if (status === "idle") return null;
+  return (
+    <p className="calendar-hero-copy" role="status" data-testid="calendar-google-status">
+      {GOOGLE_STATUS_COPY[status]}
+    </p>
+  );
+}
+
 export default function CalendarPage() {
   const today = new Date();
   // Fix-B: arg 2 is the CLIENT snapshot (read post-hydration + after every
@@ -337,7 +375,14 @@ export default function CalendarPage() {
   const [scheduleFilter, setScheduleFilter] = useState<"all" | "morning" | "afternoon" | "evening" | "night">("all");
   const [toast, setToast] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  // "idle" once a read has succeeded. See GOOGLE_STATUS_COPY above.
+  const [googleStatus, setGoogleStatus] = useState<GoogleCalendarStatus>("idle");
   const calendarDataGenerationRef = useRef(0);
+  // Only a parent is offered a fresh pull (the `sync=now` half of the route is
+  // parent-gated). `currentUser` is not in the dep list on purpose — this only
+  // decides WHETHER to render a control, and a null user (pre-hydration) simply
+  // shows none.
+  const canPullFreshFromGoogle = currentUser?.role === "parent";
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = (msg: string) => {
@@ -394,7 +439,7 @@ export default function CalendarPage() {
     if (activeTab !== "calendar") return;
     const btn = document.querySelector(".calendar-strip-day.is-selected");
     if (!btn || typeof btn.scrollIntoView !== "function") return;
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const reduce = readReducedMotionPreference();
     btn.scrollIntoView({ block: "nearest", inline: "center", behavior: reduce ? "auto" : "smooth" });
   }, [selectedDay, month, year, activeTab]);
 
@@ -602,20 +647,41 @@ export default function CalendarPage() {
     cancelSchedEdit();
   };
 
-  const syncGoogleEvents = async (silent = false) => {
+  /**
+   * THE Google read for `/calendar`, which is `ALL_ROLES`.
+   *
+   * `refresh: false` (the default, and the ONLY thing a child/guest/pet can
+   * ever do) hits the route's plain GET, which is session-scoped precisely so
+   * product calendar events are readable by every signed-in profile. Before this
+   * the page always sent `?sync=now`, which `/api/google-calendar` answers behind
+   * `authorizeAdminRequest` — so every non-parent role took a 401 on every mount
+   * and saw a permanently school-event-free calendar with no error and no
+   * explanation.
+   *
+   * `refresh: true` keeps the parent gate where it earns its keep: a fresh pull
+   * from Google is a parent action, and only a parent is offered the control.
+   *
+   * A failed read is reported as a state, never swallowed and never echoed: the
+   * server's `error` string (a token-store or PocketBase message) is not family
+   * copy, so it is dropped here.
+   */
+  const loadGoogleEvents = async (opts: { refresh?: boolean; announce?: boolean } = {}) => {
+    const { refresh = false, announce = false } = opts;
     const requestGeneration = calendarDataGenerationRef.current;
     setIsSyncing(true);
     try {
-      const res = await fetch("/api/google-calendar?sync=now");
-      const data = await res.json();
+      const res = await fetch(refresh ? "/api/google-calendar?sync=now" : "/api/google-calendar");
+      const data = await res.json().catch(() => null);
       if (requestGeneration !== calendarDataGenerationRef.current) return;
       if (!res.ok || !data || data.ok === false) {
-        showToast("Google Calendar unavailable — showing saved events.");
+        setGoogleStatus("unavailable");
+        if (announce) showToast("Couldn't reach the school calendar — showing what's already here.");
         return;
       }
       if (!data.connected) {
         setCalEvents((prev) => prev.filter((event: CalEvent) => event.member !== "Google"));
-        if (!silent) showToast("Connect Google in Settings → Integrations");
+        setGoogleStatus("not_connected");
+        if (announce) showToast("Connect Google in Settings → Integrations");
         return;
       }
       const colorMap = (data.calendar_colors && typeof data.calendar_colors === "object")
@@ -642,7 +708,8 @@ export default function CalendarPage() {
         }
         return filtered;
       });
-      if (!silent) {
+      setGoogleStatus("idle");
+      if (announce) {
         showToast(
           mappedList.length
             ? `\u2705 Synced ${mappedList.length} Google events`
@@ -651,25 +718,28 @@ export default function CalendarPage() {
       }
     } catch {
       if (requestGeneration !== calendarDataGenerationRef.current) return;
-      if (!silent) showToast("\u274C Sync failed");
+      setGoogleStatus("unavailable");
+      if (announce) showToast("\u274C Sync failed");
     } finally {
       setIsSyncing(false);
     }
   };
 
   // Auto-load Google Calendar events on mount so the calendar shows real
-  // school/holiday events without requiring a manual Sync tap.
+  // school/holiday events without requiring a manual Sync tap. The ungated read
+  // path is what makes that true for a child, guest or pet too.
   useEffect(() => {
     const onGoogleDisconnected = () => {
       calendarDataGenerationRef.current += 1;
       setCalEvents((prev) => prev.filter((event: CalEvent) => event.member !== "Google"));
+      setGoogleStatus("not_connected");
     };
     window.addEventListener("consuela-google-disconnected", onGoogleDisconnected);
     return () => window.removeEventListener("consuela-google-disconnected", onGoogleDisconnected);
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void syncGoogleEvents(true); }, 0);
+    const timer = window.setTimeout(() => { void loadGoogleEvents(); }, 0);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -834,19 +904,23 @@ export default function CalendarPage() {
               <p className="calendar-hero-copy">
                 {isSelectedToday ? "Here\u2019s your day at a glance" : `What\u2019s on for ${weekdayName} ${MONTHS[month].slice(0, 3)} ${selectedDay}`}
               </p>
+            <CalendarGoogleStatusLine status={googleStatus} />
             </div>
-            <button
-              onClick={() => syncGoogleEvents(false)}
-              disabled={isSyncing}
-              className="calendar-sync-btn"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={isSyncing ? "animate-spin" : ""}>
-                <path d="M21 12a9 9 0 11-6.219-8.56" strokeLinecap="round" />
-                <path d="M21 3v4h-4" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M21 3l-7 7" strokeLinecap="round" />
-              </svg>
-              Sync
-            </button>
+            {canPullFreshFromGoogle && (
+              <button
+                onClick={() => loadGoogleEvents({ refresh: true, announce: true })}
+                disabled={isSyncing}
+                aria-label="Sync Google Calendar now"
+                className="calendar-sync-btn"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={isSyncing ? "animate-spin" : ""}>
+                  <path d="M21 12a9 9 0 11-6.219-8.56" strokeLinecap="round" />
+                  <path d="M21 3v4h-4" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M21 3l-7 7" strokeLinecap="round" />
+                </svg>
+                Sync
+              </button>
+            )}
           </div>
         </section>
 

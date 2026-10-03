@@ -41,6 +41,7 @@ import { db } from "@/db";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { usePendingChatQuery } from "@/hooks/usePendingChatQuery";
+import { usePrefersReducedMotion } from "@/hooks/useReducedMotionPreference";
 
 const SPEAKER_STORAGE_KEY = "consuela-chat-speaker";
 
@@ -308,6 +309,7 @@ function ChatContent() {
   const speakerPickerRef = useRef<HTMLDivElement>(null);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
   const reducedMotionRef = useRef(false);
+  const reduceMotion = usePrefersReducedMotion();
   const searchParams = useSearchParams();
   const queryParam = searchParams.get("q");
 
@@ -407,9 +409,12 @@ function ChatContent() {
     setPinnedToBottom(distanceFromBottom < 80);
   };
 
+  // The auto-pin glides only when motion is wanted. This mirrors the reactive
+  // preference into the ref the scroll effect reads, so it keeps its dependency
+  // list (and its scroll behaviour) exactly as it was.
   useEffect(() => {
-    reducedMotionRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  }, []);
+    reducedMotionRef.current = reduceMotion;
+  }, [reduceMotion]);
 
   // Close the speaker picker on outside tap or Escape.
   useEffect(() => {

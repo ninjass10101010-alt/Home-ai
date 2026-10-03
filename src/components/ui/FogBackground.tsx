@@ -7,6 +7,7 @@ import { getFogParams } from "@/lib/fog-weather-mapping";
 import type { FogEffect } from "@/lib/vanta-fog";
 import type { ShaderOptions } from "@/lib/vanta-shader-base";
 import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
+import { usePrefersReducedMotion } from "@/hooks/useReducedMotionPreference";
 
 type Condition =
   | "sunny"
@@ -43,18 +44,14 @@ export default function FogBackground() {
   const { runtime } = useRuntimeConfig();
   const [weatherCondition, setWeatherCondition] = useState<Condition>("partly-cloudy");
   const prefersReducedMotion = useRef(false);
+  const reduceMotion = usePrefersReducedMotion();
 
+  // The canvas draw loop reads a ref, so mirror the reactive preference into it.
+  // The old listener read `window.matchMedia` directly and therefore only ever
+  // saw the OS — the family's Settings → Appearance toggle left the fog drifting.
   useEffect(() => {
-    prefersReducedMotion.current = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-    const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const handler = (e: MediaQueryListEvent) => {
-      prefersReducedMotion.current = e.matches;
-    };
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
-  }, []);
+    prefersReducedMotion.current = reduceMotion;
+  }, [reduceMotion]);
 
   useEffect(() => {
     const lat = Number(runtime?.weather_location?.LAT ?? 42.7875);

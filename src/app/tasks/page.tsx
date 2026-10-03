@@ -86,6 +86,7 @@ import TaskLedgerQuarantineNotice from "@/components/tasks/TaskLedgerQuarantineN
 import AllTimeValue from "@/components/leaderboard/AllTimeValue";
 import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard/level";
 import { useAllTimeTotals } from "@/hooks/useAllTimeTotals";
+import { readReducedMotionPreference } from "@/hooks/useReducedMotionPreference";
 import { familyAllTimePoints } from "@/lib/all-time-totals";
 
 function formatDueLabel(dateStr: string): string {
@@ -579,7 +580,9 @@ export default function TasksPage() {
   }, [restoreFromSnapshot]);
 
   const triggerConfetti = useCallback(() => {
-    if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // ConfettiBurst also gates itself, so this is belt and braces: the burst
+    // never mounts under reduced motion, from either input.
+    if (typeof window !== "undefined" && readReducedMotionPreference()) return;
     setConfettiActive(true);
     setTimeout(() => setConfettiActive(false), 2500);
   }, []);
