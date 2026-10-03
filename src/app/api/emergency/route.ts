@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { liveEmergencyContacts } from "@/lib/consuela/live-reads";
 import { resolveGmailCredentials, sendSMSViaEmail, sendEmailAlert } from "@/lib/free-communication";
 import { broadcastHouseAlert } from "@/lib/ha/notify";
@@ -7,9 +8,66 @@ import { verifyPinAgainstAnyMember } from "@/lib/server-auth";
 export const dynamic = "force-dynamic";
 
 const EMERGENCY_PIN_HEADER = "x-emergency-pin";
+
+// The PIN escape hatch is OFF unless the env var holds an explicit, non-blank
+// PIN. Unset, empty, or whitespace-only NEVER means "no PIN required" — it
+// means the gate still demands a real family PIN. (This used to default to "",
+// and `String([]) === ""` let a `{"pin":[]}` body skip the gate entirely.)
 // Read lazily (per request) so tests can stub the env var via vi.stubEnv;
 // runtime behavior is identical to capturing it at module load.
-const emergencyPinBypass = () => process.env.EMERGENCY_PIN_BYPASS || "";
+const emergencyPinBypass = (): string | null => {
+  const raw = process.env.EMERGENCY_PIN_BYPASS;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+// A PIN is short; anything longer than this is not one.
+const MAX_PIN_LENGTH = 12;
+// One request may offer a few candidates, but never enough to turn a single
+// alert call into an unbounded number of PocketBase full-list reads.
+const MAX_PIN_CANDIDATES = 4;
+
+// Deliberate normalization — never `String(value)`. A request may carry the PIN
+// as a string, as an integer, or as an array of candidates; every other shape
+// (undefined, null, "", [], objects, booleans, nested junk) yields NO candidate
+// so the gate asks for a PIN instead of coercing one out of thin air.
+// Integers are deliberately NOT zero-padded: a PIN with leading zeros has to be
+// sent as a string, otherwise "0123" would be coerced to "123" and could never
+// match the value stored for it.
+export function emergencyPinCandidates(raw: unknown): string[] {
+  const candidates: string[] = [];
+  const consider = (value: unknown) => {
+    const text = typeof value === "string"
+      ? value.trim()
+      : typeof value === "number" && Number.isInteger(value)
+        ? String(value)
+        : "";
+    if (!text || text.length > MAX_PIN_LENGTH || !/^\d+$/.test(text)) return;
+    if (candidates.includes(text)) return;
+    candidates.push(text);
+  };
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 2 || candidates.length >= MAX_PIN_CANDIDATES) return;
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry, depth + 1);
+      return;
+    }
+    consider(value);
+  };
+  visit(raw, 0);
+  return candidates;
+}
+
+// Timing-safe credential comparison: hash both sides first so the comparison
+// always runs over equal-length buffers (timingSafeEqual throws on a length
+// mismatch, which would itself leak the length), then compare the digests.
+// An empty side is never a match — fail closed.
+export function timingSafePinEquals(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
+  return timingSafeEqual(digest(a), digest(b));
+}
 
 export const EMERGENCY_ALERT_COOLDOWN_MS = 30_000;
 
@@ -30,6 +88,9 @@ function emergencyMemberKey(member: unknown): string {
       return `name:${record.name.trim().toLowerCase()}`;
     }
   }
+  // Only reachable through an explicitly configured EMERGENCY_PIN_BYPASS (the
+  // gate otherwise fails closed without a member), so the shared bucket is a
+  // deliberate one: one bypassed alert still gets the same cooldown window.
   return "bypass";
 }
 
@@ -222,19 +283,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Emergency type is required or invalid" }, { status: 400 });
   }
 
-  const providedPin = pin || request.headers.get(EMERGENCY_PIN_HEADER);
-  if (!providedPin) {
+  const bodyCandidates = emergencyPinCandidates(pin);
+  // A body PIN that carries any usable candidate wins; otherwise fall back to
+  // the documented `x-emergency-pin` header. Anything that normalizes to zero
+  // candidates (missing, null, "", [], object, boolean) is a request WITHOUT a
+  // PIN — it is never coerced into one.
+  const claimedPins = bodyCandidates.length > 0
+    ? bodyCandidates
+    : emergencyPinCandidates(request.headers.get(EMERGENCY_PIN_HEADER));
+  if (claimedPins.length === 0) {
     return NextResponse.json({ ok: false, error: "PIN required to trigger emergency alert" }, { status: 401 });
   }
 
-  let verifiedMember: unknown;
-  try {
-    verifiedMember = await verifyPinAgainstAnyMember(String(providedPin));
-  } catch {
-    return NextResponse.json({ ok: false, error: "pin_check_failed" }, { status: 503 });
-  }
-  if (!verifiedMember && String(providedPin) !== emergencyPinBypass()) {
-    return NextResponse.json({ ok: false, error: "Invalid PIN" }, { status: 401 });
+  const bypass = emergencyPinBypass();
+  const bypassMatched = bypass !== null
+    && claimedPins.some((candidate) => timingSafePinEquals(candidate, bypass));
+
+  let verifiedMember: unknown = null;
+  if (!bypassMatched) {
+    for (const candidate of claimedPins) {
+      try {
+        verifiedMember = await verifyPinAgainstAnyMember(candidate);
+      } catch {
+        return NextResponse.json({ ok: false, error: "pin_check_failed" }, { status: 503 });
+      }
+      if (verifiedMember) break;
+    }
+    if (!verifiedMember) {
+      return NextResponse.json({ ok: false, error: "Invalid PIN" }, { status: 401 });
+    }
   }
 
   let contacts: EmergencyContact[];

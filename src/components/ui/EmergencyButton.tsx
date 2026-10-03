@@ -32,10 +32,50 @@ interface EmergencyResult {
   message: string;
   contactsSource?: ContactsSource;
   details?: EmergencyResultDetails;
+  /** Server-declared cooldown (ms) — the retry button stays inert until it elapses. */
+  retryAfterMs?: number;
 }
+
+const GENERIC_FAILURE_COPY =
+  "Emergency alert failed. Please try again or call emergency services directly.";
+
+// Route error codes the emergency routes can return, in human words. A parent
+// in a real emergency must never read a snake_case code off the result screen,
+// so any code-shaped error that has no human `message` beside it is translated
+// here instead of rendered verbatim.
+const EMERGENCY_ERROR_COPY: Record<string, string> = {
+  emergency_cooldown: "An emergency alert was sent recently. Wait a moment before trying again.",
+  emergency_in_flight: "An emergency alert is already sending. Wait for it to finish before trying again.",
+  pin_check_failed: "Could not check the family PIN. Please try again or call emergency services directly.",
+  contacts_unavailable: "Emergency contacts could not be read. No alert was sent — please call emergency services directly.",
+  delivery_failed: "No emergency channel confirmed delivery. Please call emergency services directly.",
+  service_not_configured: "SMS and email are not configured for alerts. Please call emergency services directly.",
+  config_resolution_failed: "SMS and email could not be configured. Please call emergency services directly.",
+};
+
+// machine_code / machineCode / machine_code_with_digits — anything shaped like
+// an internal identifier rather than a sentence.
+const ERROR_CODE_SHAPE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseRetryAfterMs(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  return Math.min(Math.ceil(value), 10 * 60_000);
+}
+
+function humanizeError(error: unknown, retryAfterMs?: number): string | undefined {
+  if (typeof error !== "string") return undefined;
+  const text = error.trim();
+  if (!text) return undefined;
+  // A human sentence from the route ("Invalid PIN") is already copy.
+  if (!ERROR_CODE_SHAPE.test(text)) return text;
+  if (text === "emergency_cooldown" && retryAfterMs) {
+    return `An emergency alert was sent recently. Wait ${Math.ceil(retryAfterMs / 1000)} seconds before trying again.`;
+  }
+  return EMERGENCY_ERROR_COPY[text] ?? GENERIC_FAILURE_COPY;
 }
 
 function parseContactsSource(value: unknown): ContactsSource | undefined {
@@ -87,6 +127,12 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
   const pinInputRef = useRef<HTMLInputElement | null>(null);
   const retryFocusRef = useRef(false);
   const sendingRef = useRef(false);
+  const [retrySeconds, setRetrySeconds] = useState(0);
+
+  // The route's cooldown is honored in real time: the remaining seconds drive
+  // both the on-screen notice and whether Try Again may re-submit, so a parent
+  // cannot hammer the 30s guard while an alert is already going out.
+  const retryBlocked = retrySeconds > 0;
 
   // When the result screen replaces the type picker, move focus to its primary
   // action so the dialog's focus trap keeps a live target inside the panel.
@@ -101,11 +147,19 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
     }
   }, [result]);
 
+  // Count the cooldown down once a second while it is on screen.
+  useEffect(() => {
+    if (retrySeconds <= 0) return;
+    const timer = setInterval(() => setRetrySeconds((prev) => Math.max(0, prev - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [retrySeconds]);
+
   const closeFlow = () => {
     if (isSending || sendingRef.current) return;
     setShowModal(false);
     setSelectedType(null);
     setResult(null);
+    setRetrySeconds(0);
     // The PIN lives in memory only — drop it as soon as the dialog closes.
     setPinInput("");
   };
@@ -118,6 +172,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
     setSelectedType(type);
     setIsSending(true);
     setResult(null);
+    setRetrySeconds(0);
 
     try {
       const response = await fetch("/api/emergency", {
@@ -136,6 +191,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
         : response.ok ? 200 : 500;
       const details = parseEmergencyDetails(payload?.details);
       const contactsSource = parseContactsSource(payload?.contactsSource) ?? details?.contactsSource;
+      const retryAfterMs = parseRetryAfterMs(payload?.retryAfterMs);
       const success = response.ok !== false
         && responseStatus >= 200
         && responseStatus < 300
@@ -150,19 +206,23 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
           details,
         });
       } else {
+        // The route's human `message` always wins; `error` is only consulted
+        // when there is no message, and a code-shaped error is translated into
+        // a sentence rather than shown to a parent mid-emergency.
+        const message = typeof payload?.message === "string" && payload.message.trim()
+          ? payload.message
+          : responseStatus >= 200 && responseStatus < 300
+            ? "Emergency service returned an invalid result. Please try again or call emergency services directly."
+            : humanizeError(payload?.error, retryAfterMs) ?? GENERIC_FAILURE_COPY;
         setResult({
           success: false,
           partial: false,
           contactsSource,
-          message: responseStatus >= 200 && responseStatus < 300
-            ? "Emergency service returned an invalid result. Please try again or call emergency services directly."
-            : typeof payload?.error === "string"
-              ? payload.error
-              : typeof payload?.message === "string"
-                ? payload.message
-                : "Emergency alert failed.",
+          message,
           details,
+          ...(retryAfterMs ? { retryAfterMs } : {}),
         });
+        if (retryAfterMs) setRetrySeconds(Math.ceil(retryAfterMs / 1000));
       }
     } catch (error) {
       console.error("Emergency alert failed:", error);
@@ -226,6 +286,14 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
               {result.success ? result.partial ? "Alert Partially Sent" : "Alert Sent" : "Alert Failed"}
             </p>
             <p className="mb-4 text-sm text-text-secondary">{result.message}</p>
+            {retryBlocked ? (
+              <p
+                role="alert"
+                className="mb-3 rounded-2xl border border-[var(--color-accent-amber)]/30 bg-[var(--color-accent-amber)]/10 p-3 text-sm font-semibold text-[var(--color-accent-amber)]"
+              >
+                You can try again in {retrySeconds} second{retrySeconds === 1 ? "" : "s"}.
+              </p>
+            ) : null}
             {result.contactsSource === "cache" ? (
               <p
                 role="alert"
@@ -264,12 +332,16 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
               <button
                 ref={primaryActionRef}
                 onClick={() => {
+                  // Server-declared cooldown still running — refuse to re-send
+                  // rather than spend the parent's tap on a guaranteed 429.
+                  if (retryBlocked) return;
                   // Drop the stale PIN too — a failed send must not leave the
                   // credential sitting in the field for the next attempt.
                   retryFocusRef.current = true;
                   setResult(null);
                   setPinInput("");
                 }}
+                aria-disabled={retryBlocked ? "true" : undefined}
                 className="min-h-[44px] w-full rounded-2xl px-3 py-2 text-sm font-medium tap"
                 style={{
                   background: "color-mix(in srgb, var(--color-accent-rose) 15%, transparent)",
