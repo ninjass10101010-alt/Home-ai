@@ -151,7 +151,11 @@ describe("Calendar page cross-device refresh", () => {
     await settle();
 
     expect(el.textContent).toContain("Stale Google Event");
-    expect(el.textContent).toContain("Google Calendar unavailable — showing saved events");
+    // A failed read keeps the last-known rows AND says so — as a persistent
+    // status line, not a toast that vanishes after 3s (2026-10-03: the copy also
+    // stopped being "Google Calendar unavailable", which read as a connection
+    // fault on a calendar that was merely unreadable).
+    expect(el.textContent).toContain("Couldn't reach the school calendar");
   });
 
   it("removes cached Google events when the direct grant is disconnected", async () => {

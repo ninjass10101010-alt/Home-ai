@@ -6,6 +6,7 @@ import {
   deleteCapsule,
   addCapsuleContent,
   markCapsuleViewed,
+  checkAndUnlockCapsules,
 } from '@/lib/time-capsule';
 import type { AddContentRequest, UpdateCapsuleRequest } from '@/db/features/time-capsule';
 
@@ -19,6 +20,25 @@ export async function GET(
 ) {
   try {
     const { id: capsuleId } = await params;
+
+    // Defense in depth, matching the PATCH/DELETE/POST siblings. Also gates the
+    // write-side sweep below.
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
+
+    // Sweep FIRST, so a capsule whose date has passed stops reporting
+    // `locked: true` / `contents: []`. `checkAndUnlockCapsules` had no caller
+    // anywhere, which is why a time-locked capsule stayed shut forever. Only
+    // capsules whose `unlockDate` is already past are moved, so this can never
+    // open one early. Best-effort: a failed sweep must not blank the read.
+    try {
+      await checkAndUnlockCapsules();
+    } catch {
+      // Deliberately swallowed — the read below is still worth returning.
+    }
+
     const userId = await getUserId(request);
     const result = await getCapsule(capsuleId);
     

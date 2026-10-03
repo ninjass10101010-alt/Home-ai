@@ -4,14 +4,47 @@ import type { CreateCapsuleRequest } from '@/db/features/time-capsule';
 import { getUserId, requireSession } from '@/lib/auth';
 
 /**
+ * Sweep time capsules whose unlock date has passed BEFORE a read.
+ *
+ * `checkAndUnlockCapsules` shipped with NO caller at all, so a capsule's
+ * `status` stayed "locked" forever and every recipient saw `contents: []` on the
+ * unlock date and every day after it. The host cron
+ * (`POST /api/cron/time-capsules/unlock`) is the belt; this is the braces — the
+ * feature opens on its day whether or not ops installed the crontab line.
+ *
+ * Safety: the sweep only ever flips a capsule whose `unlockDate` is already in
+ * the past, so it can never open one early. It is skipped entirely when there
+ * is no session, because a sweep is a WRITE and this is a read path.
+ *
+ * Best-effort: a failed sweep must not blank the family's list — the reads below
+ * still run and the capsules simply stay closed until the next attempt.
+ */
+async function sweepUnlockedCapsules(): Promise<void> {
+  try {
+    await checkAndUnlockCapsules();
+  } catch {
+    // Deliberately swallowed: the list itself is still worth returning.
+  }
+}
+
+/**
  * GET /api/time-capsules
  * Get all time capsules for the current user.
  */
 export async function GET(request: NextRequest) {
   try {
+    // Defense in depth, matching the POST sibling: an unauthenticated GET must
+    // not trigger the write-side sweep below.
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
+
+    await sweepUnlockedCapsules();
+
     const userId = await getUserId(request);
     const capsules = await getUserCapsules(userId);
-    
+
     return NextResponse.json({ capsules });
   } catch (error) {
     console.error('Failed to get time capsules:', error);
@@ -35,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     const userId = await getUserId(request);
     const data: CreateCapsuleRequest = await request.json();
-    
+
     // Validation
     if (!data.title || !data.unlockDate) {
       return NextResponse.json(
@@ -43,7 +76,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    
+
     // Check if unlock date is in the future
     const unlockDate = new Date(data.unlockDate);
     if (unlockDate <= new Date()) {
@@ -52,16 +85,16 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    
+
     const capsule = await createCapsule(userId, data);
-    
+
     if (!capsule) {
       return NextResponse.json(
         { error: 'Failed to create time capsule' },
         { status: 500 }
       );
     }
-    
+
     return NextResponse.json({ capsule }, { status: 201 });
   } catch (error) {
     console.error('Failed to create time capsule:', error);

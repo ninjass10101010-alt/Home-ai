@@ -1,143 +1,67 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Mic, MicOff, Loader2 } from 'lucide-react';
+import { Mic, Loader2 } from 'lucide-react';
+
+/**
+ * UNAVAILABLE (2026-10-03). This control used to open the microphone, POST the
+ * recording to `/api/voice/process`, and render whatever came back. The route's
+ * transcription step THREW — "Voice transcription must be implemented client-side
+ * using Web Speech API or server-side using Whisper API" — the route caught it
+ * and copied the message into its JSON `error`, and this component rendered it
+ * verbatim. So every tap on the mic recorded a parent's voice, sent it, and then
+ * displayed a developer's TODO.
+ *
+ * There is no speech-to-text service in this app and no credential for one, so
+ * the honest state is a control that says so. Adding a transcription provider is
+ * a product decision with a billing consequence, not a UI bug fix — when one
+ * exists, delete UNAVAILABLE below and restore the recorder; the module contract
+ * is unchanged and already honest (`processVoiceInput` resolves an `unavailable`
+ * result instead of throwing).
+ *
+ * A `disabled` control is dropped from the tab order, so the explanation is
+ * rendered as real text and mirrored into the live region — a `title` nobody can
+ * reach is not an explanation.
+ */
+export const VOICE_UNAVAILABLE_REASON =
+  "Voice input isn't set up on this dashboard yet — type your message instead.";
 
 interface VoiceInputButtonProps {
-  onTranscript: (transcript: string) => void;
+  /** Unused while unavailable; kept so enabling the recorder is a one-line diff. */
+  onTranscript?: (transcript: string) => void;
   disabled?: boolean;
 }
 
-export function VoiceInputButton({ onTranscript, disabled }: VoiceInputButtonProps) {
-  const [isRecording, setIsRecording] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+const UNAVAILABLE = true;
 
-  const startRecording = async () => {
-    try {
-      setError(null);
-
-      // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      // Create MediaRecorder
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      // Collect audio chunks
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      // Handle recording complete
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        await processAudio(audioBlob);
-
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      // Start recording
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (err: any) {
-      setError('Could not access microphone. Please check permissions.');
-      console.error('Microphone error:', err);
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-
-  const processAudio = async (audioBlob: Blob) => {
-    setIsProcessing(true);
-    setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
-
-      const response = await fetch('/api/voice/process', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        onTranscript(result.transcript);
-      } else {
-        setError(result.error || 'Failed to process audio');
-      }
-    } catch (err: any) {
-      setError('Failed to process voice input');
-      console.error('Voice processing error:', err);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleClick = () => {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      startRecording();
-    }
-  };
-
-  const status = isRecording ? 'Recording…' : isProcessing ? 'Transcribing…' : error ?? '';
-  const stateLabel = isRecording ? 'Stop recording' : 'Start voice input';
+export function VoiceInputButton({ disabled }: VoiceInputButtonProps) {
+  const stateLabel = 'Voice input is not available';
 
   return (
     <div className="flex flex-col items-center gap-2">
       <button
-        onClick={handleClick}
-        disabled={disabled || isProcessing}
+        type="button"
+        onClick={() => {}}
+        disabled={UNAVAILABLE || disabled}
         aria-label={stateLabel}
-        aria-pressed={isRecording}
         title={stateLabel}
-        className={`tap-sm flex h-12 w-12 items-center justify-center rounded-full ${
-          isRecording
-            ? 'bg-[var(--color-accent-rose)] shadow-[0_0_16px_rgba(244,63,94,0.35)]'
-            : isProcessing
-            ? 'bg-[var(--color-surface-3,#3a4256)] cursor-not-allowed'
-            : 'bg-[var(--color-accent-button,var(--color-accent-selected))]'
-        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        aria-describedby="voice-input-unavailable"
+        className="tap-sm flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-surface-3,#3a4256)] cursor-not-allowed opacity-60"
       >
-        {isProcessing ? (
-          <Loader2 className="h-6 w-6 animate-spin text-white" />
-        ) : isRecording ? (
-          <MicOff className="h-6 w-6 text-white" />
-        ) : (
-          <Mic className="h-6 w-6 text-white" />
-        )}
+        <Loader2 className="h-6 w-6 text-white/70" aria-hidden="true" />
+        <Mic className="h-6 w-6 text-white/70" aria-hidden="true" />
       </button>
 
-      {/* Live region: recording / transcribing / error announce to screen readers */}
-      <span role="status" aria-live="polite" className="sr-only">{status}</span>
+      {/* Live region: the state is announced once rather than only hovered. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {stateLabel}
+      </span>
 
-      {/* Visual status stays for sighted users (state also carried by the button color) */}
-      {isRecording && (
-        <span className="text-xs text-[var(--color-accent-rose)] font-medium">Recording…</span>
-      )}
-
-      {isProcessing && (
-        <span className="text-xs text-text-secondary">Transcribing…</span>
-      )}
-
-      {error && (
-        <span className="text-xs text-[var(--color-accent-rose)] text-center max-w-xs">{error}</span>
-      )}
+      <span
+        id="voice-input-unavailable"
+        className="max-w-[9rem] text-center text-xs text-text-secondary"
+      >
+        {VOICE_UNAVAILABLE_REASON}
+      </span>
     </div>
   );
 }

@@ -15,7 +15,24 @@ export interface VoiceInputResult {
   };
   clarification?: any;
   error?: string;
+  /**
+   * Machine-readable outcome for the caller (route / UI). `'unavailable'` means
+   * this dashboard has no speech-to-text service configured — NOT that the audio
+   * was bad. Absent on success.
+   */
+  code?: 'unavailable' | 'no_transcript';
 }
+
+/**
+ * User-facing copy for "this dashboard cannot transcribe audio".
+ *
+ * Deliberately free of every internal noun: no provider name, no route path, no
+ * "not yet implemented". This string reaches a parent's screen verbatim (the
+ * route copies `error` into its JSON body), so it must read like an explanation
+ * with an alternative, not like a developer's TODO.
+ */
+export const VOICE_UNAVAILABLE_MESSAGE =
+  "Voice input isn't available on this dashboard yet \u2014 type your message instead.";
 
 export interface VoiceProcessingOptions {
   familyMembers?: { name: string; id: string; role: string }[];
@@ -34,10 +51,14 @@ export async function processVoiceInput(
     const transcript = await transcribeAudio(audioBlob);
 
     if (!transcript) {
+      // `transcribeAudio` reports "no service configured" with a null
+      // transcript and a spoken reason; everything downstream reads the reason.
+      const unavailable = voiceUnavailableReason;
       return {
         success: false,
         transcript: '',
-        error: 'Could not transcribe audio',
+        error: unavailable ?? 'No speech was found in that recording — try again.',
+        code: unavailable ? 'unavailable' : 'no_transcript',
       };
     }
 
@@ -65,29 +86,44 @@ export async function processVoiceInput(
       parsed,
     };
   } catch (error: any) {
+    // Never echo an exception message: it is a developer string by
+    // construction, and this value reaches the user's screen. The one known
+    // cause — no transcription service — already returned above.
     return {
       success: false,
       transcript: '',
-      error: error.message,
+      error: 'Something went wrong reading that recording — type your message instead.',
+      code: 'unavailable',
     };
   }
 }
 
 /**
- * Transcribe audio using Web Speech API (browser-based, free)
- * For production, consider OpenAI Whisper API for better accuracy
+ * Why the last `transcribeAudio` call produced no text, or `null` when it
+ * produced some. Module-scoped rather than a return value because a transcription
+ * BACKEND is not wired into this app: there is no speech-to-text provider, no key
+ * for one, and no browser capture fallback in this path. Until one exists,
+ * `transcribeAudio` can only say "unavailable" — so the honest contract is an
+ * unavailable RESULT, not an exception.
+ *
+ * It used to `throw new Error('Voice transcription must be implemented client-side
+ * using Web Speech API or server-side using Whisper API')`. `processVoiceInput`
+ * caught that and put the message on the result, `POST /api/voice/process`
+ * copied it into its JSON `error`, and the composer rendered it — a parent who
+ * tapped the mic was shown a developer's TODO.
  */
-async function transcribeAudio(audioBlob: Blob): Promise<string> {
-  // TODO: Integrate with backend transcription service
-  // For now, this is a placeholder that would be called from the client
-  // using the Web Speech API
+let voiceUnavailableReason: string | null = VOICE_UNAVAILABLE_MESSAGE;
 
-  // In production, this would:
-  // 1. Send audio to OpenAI Whisper API
-  // 2. Or use server-side transcription
-  // 3. Return the transcribed text
-
-  throw new Error('Voice transcription must be implemented client-side using Web Speech API or server-side using Whisper API');
+/**
+ * Transcribe audio to text.
+ *
+ * Returns `null` — never throws — because "this dashboard has no transcription
+ * service" is an expected state, not an exception. See
+ * {@link voiceUnavailableReason}.
+ */
+async function transcribeAudio(_audioBlob: Blob): Promise<string | null> {
+  voiceUnavailableReason = VOICE_UNAVAILABLE_MESSAGE;
+  return null;
 }
 
 /**

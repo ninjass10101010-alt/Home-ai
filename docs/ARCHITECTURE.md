@@ -34,6 +34,8 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/tasks/sync` | POST | Session; **no browser writes** — a `tasks`/`weekData` body is 410 `legacy_sync_write_disabled`, any other body 400 `invalid_body` (GET is the read: rollover + reconcile + snapshot) |
 | `/api/tasks/quarantine` | POST | Parent session **and** a live PocketBase `role === "parent"` row (`verifyLiveParentSession`; 401 `unauthorized`/`member_missing`, 403 `adult_only`, 503 `member_lookup_failed`); takes no PIN because it writes nothing to the server — `dry-run` returns the match report only, `export` writes one JSON file to `local-quarantine/`. PB is read-only here (snapshot → `week_data` fallback, `getFullList` only; 503 `canonical_week_unavailable`) |
 | `/api/consuela/briefing` | GET/PATCH | Session (no longer middleware-exempt); PATCH stamps `acknowledgedBy` |
+| `/api/time-capsules/[id]/view` | POST | Session **and** a live PocketBase member row (`getLiveMemberById`; 401 `unauthorized`/`member_missing`, 503 `member_lookup_failed`) **and** capsule visibility (creator / named recipient / family-wide; 403 `forbidden`, 404 `capsule_not_found`). It resolves the caller's name from the LIVE row, never the session cookie's own claim, and writes nothing on any failure. This verb had **no ownership check at all** while every sibling has one, so any signed-in member could stamp `viewedBy` onto a parent's private capsule |
+| `/api/time-capsules/unlock` | POST | Session. A signed-in-member trigger for the capsule unlock sweep; it previously carried no auth. Automation belongs on `POST /api/cron/time-capsules/unlock` (`CRON_SECRET`) — see the sweep contract below |
 | `/api/ha/call-service`, `notify-config`, `notify-prefs`, `notify-test` | POST | Parent session (`authorizeAdminRequest`); HA reads stay session-level |
 
 ---
@@ -138,8 +140,17 @@ User → Ask Consuela → POST /api/hermes/chat
 | `POST /api/cron/consuela/calendar-alert` | every 15 min | Pushes a ~60-min lead-time heads-up for important (`importanceScore ≥ 50`) events today via `broadcastHouseAlert` when the `calendar` pref is on; one push per event/date deduped in `ha_alert_state`; quiet hours |
 | `POST /api/cron/consuela/google-sync` | every 5 min | Pulls Google Calendar + updates last-auto-sync state (quota-guarded) |
 | `POST /api/cron/consuela/telegram-poll` | every 5 min | Polls Telegram and mirrors group messages into the daily chat thread |
+| `POST /api/cron/time-capsules/unlock` | hourly | Flips `time_capsules.status` → `unlocked` for every capsule whose `unlockDate` has passed (`checkAndUnlockCapsules`) |
 
 Unauthorized requests (missing/wrong bearer) get a 401 `{error:"unauthorized"}`.
+
+**The capsule unlock sweep is belt AND braces (2026-10-03).** `checkAndUnlockCapsules` shipped with **no caller at all** — no cron route, no crontab line, no read path — so a capsule stayed `locked` forever and every recipient saw `contents: []` on the unlock date and every day after. It is now invoked from three places, and the contract is that **all three** stay:
+
+1. `POST /api/cron/time-capsules/unlock` — the belt. Bearer-gated like every other `/api/cron/**` route (hourly; unlocking is a status flip on already-past dates, so a finer cadence buys nothing).
+2. `GET /api/time-capsules` and `GET /api/time-capsules/[id]` — the braces. The sweep runs **before** the read, so a capsule opens on its date whether or not ops installed the NAS crontab line. Best-effort: a failed sweep never blanks the list.
+3. `POST /api/time-capsules/unlock` — a signed-in-member trigger. It used to carry **no auth at all** ("Optional: Add authentication/authorization here"), so anyone who could reach the app could fire the sweep; it now takes the same session as every sibling verb. Prefer the cron route for automation.
+
+A sweep only ever moves a capsule whose `unlockDate` is already past, so **no caller can open a capsule early**. Do not delete the read-path sweep because the cron route exists, and do not re-open the legacy route to anonymous callers.
 
 **Security (suggestion write routes):** all `/api/consuela/suggestions/*` write routes (PATCH, POST /act) require the `x-consuela-pin` header verified against a family member PIN. GET requests remain public (read-only). The client sends the active session PIN when one exists; when the session has none (after a page reload — the PIN is in-memory only and never persisted — or for guests) the Home "Consuela suggests" widget and the /suggestions page prompt for a family-member PIN, queue the pending dismiss/snooze/act, and retry it once a PIN is submitted. A rejected PIN (401) clears the cached pin and re-prompts with an error; non-401 write failures surface a toast instead of failing silently.
 
@@ -483,6 +494,25 @@ this by consulting `role` — that is what reintroduces the race. Pinned by
 idempotency) and by the Option B case in
 `tests/unit/hermes-tools-task-crud.test.ts`.
 
+**An `ALL_ROLES` page must not reach data through a parent-gated write-or-read
+verb (2026-10-03).** `/calendar` is `ALL_ROLES` (guest + parent + child + pet),
+but its only Google load sent `?sync=now`, which `/api/google-calendar` answers
+behind `authorizeAdminRequest`. A child, guest or pet therefore took a 401 on
+every mount and saw a permanently school-event-free calendar — no error, no
+explanation, no way to tell "nothing today" from "never read".
+
+**The rule: gate the WRITE, not the READ.** `GET /api/google-calendar` is
+session-scoped by design ("Plain GET remains session-scoped for product calendar
+events"); `sync=now` — a fresh pull from Google, quota-bearing and token-touching
+— is the parent-only half. An `ALL_ROLES` surface reads through the plain GET and
+offers the gated verb only to the roles that hold it (here: the Sync button renders
+for a parent only, so a child is not offered a control that cannot work). Two
+further obligations come with it: a failed read is a **reported state**, never a
+silent empty day (`not_connected` / `unavailable`, neutral copy naming who can fix
+it), and a connected-but-empty read says **nothing** — a day genuinely without
+school events is a real answer. The server's raw `error` string is never rendered;
+a token-store message is a developer string, not a family one.
+
 **Parent-only admin auth (pets denied).** `authorizeAdminRequest`
 (`src/lib/admin-auth.ts`) is an **allowlist on `role === "parent"`**: a valid
 session that is child or pet is 403 `adult_only`, and a valid PIN belonging to a
@@ -545,6 +575,23 @@ rotate/revoke are **not** written to the MUSE audit log (known v1 gap — the
    Presets, calendar cells, `addDaysISO` and `getMonthGrid` are local-day,
    noon-anchored; never parse `YYYY-MM-DD` with `new Date(value)` or slice a UTC
    instant for a day comparison.
+
+4b. **A Google event's CLOCK is family-local too — one formatter, no exceptions
+   (2026-10-03).** `googleEventClockTime()` in `src/lib/calendar/google-mapping.ts`
+   is the single formatter, and `googleEventLocalMinutes()` sorts in the same
+   frame. Ask Consuela's `googleEventTime()` is a **delegate** to it, not a second
+   implementation — that duplication is exactly what shipped two contradictory
+   times for one event ("9:00 AM" in chat, "6:00 PM" on the calendar).
+
+   **The rule:** a timed Google event is displayed in `familyTimeZone()`, the same
+   zone `googleEventCoveredDays` already decides the DAY in. The authored UTC
+   offset is an *instant*, not a display frame: using it produced a row with a
+   family-local day and a foreign hour, and made "today at 9:00 AM" answer a
+   question nobody asked. A start with **no** offset is read as family-local wall
+   time, matching `parseGoogleStart` — the two cannot disagree. An `all_day` flag
+   or a date-only `start_iso` is an all-day row; unparseable input returns
+   `undefined` (an honest dash), never a fabricated midnight. If you add a third
+   Google time surface, call the shared formatter — do not slice the string.
 5. **`archivedTasks` is rollover-written, bounded to 4 week keys, read-only
    elsewhere.** The week rollover is its only writer; it keeps the newest four
    week keys (one-off completed defs for repeat-last-week), and every other

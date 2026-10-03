@@ -6,7 +6,7 @@
 // sources into one day-accurate, time-sorted list. No PB access here — the
 // tool handlers fetch rows and call mergeTodaysEvents.
 
-import { googleEventCoversDay } from "@/lib/calendar/google-mapping";
+import { googleEventCoversDay, googleEventClockTime, googleEventLocalMinutes } from "@/lib/calendar/google-mapping";
 
 export interface ToolEvent {
   title: string;
@@ -37,18 +37,17 @@ function parseMinutes(time?: string): number | null {
 
 /** Format a Google start_iso as a 12-hour clock time ("6:30 PM"), or
  *  "All day" for date-only (all-day) starts. Returns undefined when the
- *  string is unparseable — the honest-dash rule from the weather card. */
+ *  string is unparseable — the honest-dash rule from the weather card.
+ *
+ *  DELEGATE, NOT A SECOND FORMATTER (2026-10-03). This used to slice the
+ *  authored UTC offset out of the string, so Ask Consuela said "9:00 AM" about
+ *  the school event the Calendar page rendered as "12:00 PM" — one event, two
+ *  clocks, and no way for a family to tell which one to believe. The rule is
+ *  family-local time (see the TIME RULE block in google-mapping.ts), which is
+ *  the same frame this module already picks the DAY in via
+ *  `googleEventCoversDay`. */
 export function googleEventTime(startIso: string | undefined | null): string | undefined {
-  if (!startIso) return undefined;
-  // Date-only → all-day row.
-  if (!startIso.includes("T")) return "All day";
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(startIso);
-  if (!m) return undefined;
-  const h24 = Number(m[4]);
-  const min = m[5];
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
-  const suffix = h24 < 12 ? "AM" : "PM";
-  return `${h12}:${min} ${suffix}`;
+  return googleEventClockTime(startIso);
 }
 
 /**
@@ -80,9 +79,6 @@ export function mergeTodaysEvents(
     .filter((r) => typeof r?.start_iso === "string" && googleEventCoversDay(r, dayISO))
     .map((r) => {
       const time = googleEventTime(r.start_iso);
-      const isAllDay = time === "All day";
-      const m = /^T(\d{2}):(\d{2})/.exec(r.start_iso.slice(10));
-      const minutes = isAllDay ? -1 : m ? Number(m[1]) * 60 + Number(m[2]) : 24 * 60;
       return {
         title: String(r.summary || r.title || "Untitled"),
         time,
@@ -90,7 +86,10 @@ export function mergeTodaysEvents(
         color: "cyan",
         icon: "📅",
         source: "google" as const,
-        sortMinutes: minutes,
+        // Family-local minutes — the frame the printed clock is in. The old
+        // regex sliced the AUTHORED offset, so a 08:00+02:00 event sorted as
+        // 08:00 while printing "2:00 AM".
+        sortMinutes: googleEventLocalMinutes(r.start_iso, r.all_day),
       };
     });
 

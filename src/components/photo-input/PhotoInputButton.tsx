@@ -1,76 +1,43 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Camera, Loader2, X } from 'lucide-react';
+import { Camera, X } from 'lucide-react';
+
+/**
+ * UNAVAILABLE (2026-10-03). This control used to open the file picker, POST the
+ * image to `/api/photo/process`, and render whatever came back. The route's OCR
+ * step THREW — "OCR must be implemented via /api/ocr/extract endpoint" — the
+ * route copied the message into its JSON `error`, and this component rendered it
+ * verbatim, so a parent who took a photo of a flyer was shown a developer's TODO.
+ *
+ * There is no OCR service in this app: `/api/ocr/extract` is a documented 501
+ * placeholder and no OCR credential exists in the environment. The honest state
+ * is therefore a control that says so, and a file input that cannot be driven —
+ * the PREVIEW branch is retained (below) purely so the 24px remove button's
+ * documented 44px hit-area allowlist entry in
+ * `tests/unit/tap-target-contract.test.ts` stays valid; it is unreachable while
+ * UNAVAILABLE is true.
+ */
+export const PHOTO_UNAVAILABLE_REASON =
+  "Reading photos isn't set up on this dashboard yet — type or paste it instead.";
 
 interface PhotoInputButtonProps {
-  onExtracted: (text: string) => void;
+  /** Unused while unavailable; kept so enabling OCR is a one-line diff. */
+  onExtracted?: (text: string) => void;
   disabled?: boolean;
 }
 
-export function PhotoInputButton({ onExtracted, disabled }: PhotoInputButtonProps) {
-  const [isProcessing, setIsProcessing] = useState(false);
+const UNAVAILABLE = true;
+
+export function PhotoInputButton({ disabled }: PhotoInputButtonProps) {
   const [preview, setPreview] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    // Create preview
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setPreview(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
-
-    // Process image
-    await processImage(file);
-  };
-
-  const processImage = async (file: File) => {
-    setIsProcessing(true);
-    setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('image', file);
-
-      const response = await fetch('/api/photo/process', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        onExtracted(result.text);
-      } else {
-        setError(result.error || 'Failed to extract text from image');
-      }
-    } catch (err: any) {
-      setError('Failed to process image');
-      console.error('Photo processing error:', err);
-    } finally {
-      setIsProcessing(false);
-      // Clear file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    }
-  };
 
   const clearPreview = () => {
     setPreview(null);
-    setError(null);
   };
 
-  const status = isProcessing ? 'Extracting text…' : error ?? '';
+  const stateLabel = 'Photo text reading is not available';
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -79,40 +46,36 @@ export function PhotoInputButton({ onExtracted, disabled }: PhotoInputButtonProp
         type="file"
         accept="image/*"
         capture="environment"
-        onChange={handleFileChange}
+        disabled={UNAVAILABLE || disabled}
         aria-label="Photo to extract text from"
         className="hidden"
       />
 
       <button
-        onClick={handleClick}
-        disabled={disabled || isProcessing}
+        type="button"
+        onClick={() => {}}
+        disabled={UNAVAILABLE || disabled}
         aria-label="Take photo or upload image"
-        title="Take photo or upload image"
-        className={`tap-sm flex h-12 w-12 items-center justify-center rounded-full ${
-          isProcessing
-            ? 'bg-[var(--color-surface-3,#3a4256)] cursor-not-allowed'
-            : 'bg-[var(--color-accent-button,var(--color-accent-selected))]'
-        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        title={stateLabel}
+        aria-describedby="photo-input-unavailable"
+        className="tap-sm flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-surface-3,#3a4256)] cursor-not-allowed opacity-60"
       >
-        {isProcessing ? (
-          <Loader2 className="h-6 w-6 animate-spin text-white" />
-        ) : (
-          <Camera className="h-6 w-6 text-white" />
-        )}
+        <Camera className="h-6 w-6 text-white/70" aria-hidden="true" />
       </button>
 
-      {/* Live region: extracting / error announce to screen readers */}
-      <span role="status" aria-live="polite" className="sr-only">{status}</span>
+      {/* Live region: the state is announced once rather than only hovered. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {stateLabel}
+      </span>
 
-      {isProcessing && (
-        <span className="text-xs text-text-secondary">Extracting text…</span>
-      )}
+      <span
+        id="photo-input-unavailable"
+        className="max-w-[9rem] text-center text-xs text-text-secondary"
+      >
+        {PHOTO_UNAVAILABLE_REASON}
+      </span>
 
-      {error && (
-        <span className="text-xs text-[var(--color-accent-rose)] text-center max-w-xs">{error}</span>
-      )}
-
+      {/* Unreachable while UNAVAILABLE — see the file note. */}
       {preview && (
         <div className="relative mt-2">
           {/* eslint-disable-next-line @next/next/no-img-element -- local data-URL preview */}

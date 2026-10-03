@@ -30,29 +30,37 @@ afterEach(() => {
 });
 
 describe("VoiceInputButton — a11y", () => {
-  it("exposes a real accessible name (not title-only)", () => {
+  // 2026-10-03: the mic is UNAVAILABLE — there is no speech-to-text service in
+  // this app, and the old control recorded the family and then rendered the
+  // route's developer string. These two cases were rewritten off the
+  // "Start voice input" / record-then-transcribe flow because that flow no
+  // longer exists; the contract they protect (an honest accessible name, state
+  // announced through a live region) is unchanged.
+  it("exposes a real, honest accessible name (not title-only)", () => {
     const el = render(<VoiceInputButton onTranscript={vi.fn()} />);
     const btn = el.querySelector("button")!;
-    expect(btn.getAttribute("aria-label")).toBe("Start voice input");
+    const name = btn.getAttribute("aria-label");
+    expect(name).toBeTruthy();
+    expect(name).toBe("Voice input is not available");
+    // It must not advertise a capability it does not have.
+    expect(name).not.toMatch(/start|record|transcribe/i);
   });
 
-  it("announces state changes through a live region", () => {
+  it("announces its state through a live region", () => {
     const el = render(<VoiceInputButton onTranscript={vi.fn()} />);
     const live = el.querySelector("[role='status']");
     expect(live).not.toBeNull();
+    expect(live!.textContent).toMatch(/not available/i);
   });
 
-  it("updates its accessible name while recording and processing", () => {
+  it("is disabled and points at a visible explanation", () => {
     const el = render(<VoiceInputButton onTranscript={vi.fn()} />);
     const btn = el.querySelector("button")!;
-    expect(btn.getAttribute("aria-label")).toBe("Start voice input");
-    // While the mic is denied (jsdom has no mediaDevices), the error must be
-    // announced and the label must stay actionable.
-    act(() => { btn.click(); });
-    return Promise.resolve().then(() => {
-      expect(el.querySelector("[role='status']")!.textContent).toContain("microphone");
-      expect(btn.getAttribute("aria-label")).toBe("Start voice input");
-    });
+    expect(btn.hasAttribute("disabled")).toBe(true);
+    const describedBy = btn.getAttribute("aria-describedby")!;
+    expect(describedBy).toBeTruthy();
+    const explanation = document.getElementById(describedBy);
+    expect(explanation?.textContent).toMatch(/type your message instead/i);
   });
 });
 

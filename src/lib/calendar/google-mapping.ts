@@ -1,3 +1,5 @@
+import { familyTimeZone } from "@/lib/local-date";
+
 export interface GoogleEventRow {
   google_id: string;
   calendar_id?: string;
@@ -118,6 +120,89 @@ export function googleEventCoversDay(row: GoogleDayRow, dayISO: string): boolean
   return googleEventCoveredDays(row).includes(dayISO);
 }
 
+// ─── THE TIME RULE (2026-10-03) ──────────────────────────────────────────────
+//
+// A timed Google event is displayed in the FAMILY-LOCAL timezone — the same
+// `familyTimeZone()` the rest of the "what's on today" surfaces use, and the
+// same frame `googleEventCoveredDays` above already decides the DAY in.
+//
+// The alternative (printing the authored UTC offset's wall clock) was live on
+// the Ask Consuela surface while the Calendar printed local time, so ONE school
+// event read "9:00 AM" in chat and "12:00 PM" on the calendar. Beyond the
+// contradiction it was internally incoherent: a family-local DAY with a foreign
+// HOUR. `googleEventCoversDay` had already moved the day to Detroit; the clock
+// must live in the same frame, or "today at 9:00 AM" answers a question nobody
+// asked. Google Calendar itself has always displayed these in the viewer's zone.
+//
+// `all_day` and a date-only `start_iso` are both all-day rows. A start with NO
+// offset is read as family-local wall time — that is what `parseGoogleStart`
+// (and therefore the day logic) already does, so the two cannot disagree.
+// Unparseable input returns `undefined` so callers can render an honest dash
+// rather than a fabricated midnight.
+const ALL_DAY_TIME = "All day";
+
+/** Minutes-since-local-midnight sentinel for an all-day row (sorts first). */
+export const ALL_DAY_SORT_MINUTES = -1;
+/** Unparseable rows sort last rather than pretending to be midnight. */
+export const UNKNOWN_SORT_MINUTES = 24 * 60;
+
+function isDateOnly(startIso: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(startIso);
+}
+
+/**
+ * THE clock formatter. `"6:30 PM"` | `"All day"` | `undefined`.
+ *
+ * Both the Calendar page (`expandGoogleEvent`) and Ask Consuela's calendar
+ * tools (`src/lib/consuela/todays-events.ts`) MUST go through this — a second
+ * formatter is how the two screens drifted apart in the first place.
+ */
+export function googleEventClockTime(
+  startIso: string | undefined | null,
+  allDay?: boolean,
+): string | undefined {
+  const iso = (startIso ?? "").trim();
+  if (!iso) return undefined;
+  if (allDay || isDateOnly(iso)) return ALL_DAY_TIME;
+  const start = parseGoogleStart(iso, false);
+  if (!start) return undefined;
+  return start.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: familyTimeZone(),
+  });
+}
+
+/**
+ * Minutes since local midnight for ORDERING — the same frame as
+ * {@link googleEventClockTime}, so a day's list is sorted by the clock it
+ * prints. All-day rows sort first (−1); unparseable rows sort last.
+ */
+export function googleEventLocalMinutes(
+  startIso: string | undefined | null,
+  allDay?: boolean,
+): number {
+  const iso = (startIso ?? "").trim();
+  if (!iso) return UNKNOWN_SORT_MINUTES;
+  if (allDay || isDateOnly(iso)) return ALL_DAY_SORT_MINUTES;
+  const start = parseGoogleStart(iso, false);
+  if (!start) return UNKNOWN_SORT_MINUTES;
+  // `hourCycle: "h23"` rather than `hour12: false` — under en-US the latter
+  // renders midnight as "24:xx" in some ICU versions, which would silently
+  // push midnight to the end of the day.
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: familyTimeZone(),
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(start);
+  const hour = Number(parts.find((p) => p.type === "hour")?.value);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return UNKNOWN_SORT_MINUTES;
+  return hour * 60 + minute;
+}
+
 // Id shape: primary/legacy rows keep the original
 // `g_{google_id}_{day}_{month}_{year}_{time}` (no churn for the 67 cached
 // events already in device localStorage); events from any other calendar get
@@ -131,12 +216,9 @@ export function expandGoogleEvent(
   const days = googleEventCoveredDays(ge);
   if (days.length === 0) return [];
   const startIso = ge.start_iso || "";
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(startIso);
-  const startDate = parseGoogleStart(startIso, dateOnly);
-  if (!startDate) return [];
-  const time = ge.all_day || dateOnly
-    ? "All day"
-    : startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  const dateOnly = isDateOnly(startIso);
+  if (!parseGoogleStart(startIso, dateOnly)) return [];
+  const time = googleEventClockTime(startIso, ge.all_day) ?? "All day";
   const calendarId = ge.calendar_id || "primary";
   const prefix = calendarId === "primary" ? "" : `${calendarToken(calendarId)}_`;
   const colorHex = colorMap?.[calendarId];

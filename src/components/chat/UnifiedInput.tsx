@@ -45,14 +45,6 @@ export function UnifiedInput({
     setMessage('');
   };
 
-  const handleVoiceTranscript = (transcript: string) => {
-    setMessage(transcript);
-  };
-
-  const handlePhotoExtracted = (text: string) => {
-    setMessage(text);
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -67,17 +59,11 @@ export function UnifiedInput({
     <div className="border-t border-white/10 bg-[var(--color-surface-1)]/80 backdrop-blur-xl p-4">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-end gap-3">
-          {/* Voice Input */}
-          <VoiceInputButton
-            onTranscript={handleVoiceTranscript}
-            disabled={disabled}
-          />
-
-          {/* Photo Input */}
-          <PhotoInputButton
-            onExtracted={handlePhotoExtracted}
-            disabled={disabled}
-          />
+          {/* Both input buttons render as disabled + explained: there is no
+              transcription and no OCR service behind them (see
+              VoiceInputButton / PhotoInputButton). Typing is the real path. */}
+          <VoiceInputButton disabled={disabled} />
+          <PhotoInputButton disabled={disabled} />
 
           {/* Text Input */}
           <div className="flex-1 relative">
@@ -86,7 +72,7 @@ export function UnifiedInput({
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message, or use voice/photo..."
+              placeholder="Type a message to Consuela…"
               aria-label="Message Consuela"
               disabled={disabled}
               // Focus lands in the composer when a quick-action draft arrives
@@ -114,10 +100,14 @@ export function UnifiedInput({
           </div>
         </div>
 
-        {/* Help Text — a first-run hint, not a permanent resident */}
+        {/* Help Text — a first-run hint, not a permanent resident.
+            2026-10-03: it used to promise "Say 'Add dentist appointment tomorrow
+            at 3pm' or snap a photo of a flyer", i.e. two capabilities that do
+            not exist. Typing is the only real input path, and the tip now names
+            only things that work. */}
         {showTip && (
           <div className="mt-2 text-xs text-text-secondary text-center">
-            💡 Tip: Say “Add dentist appointment tomorrow at 3pm” or snap a photo of a flyer · type <strong>/new</strong> to start a fresh conversation
+            💡 Tip: type <strong>/new</strong> to start a fresh conversation
           </div>
         )}
       </div>

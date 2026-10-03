@@ -14,7 +14,24 @@ export interface PhotoInputResult {
   };
   clarification?: any;
   error?: string;
+  /**
+   * Machine-readable outcome for the caller (route / UI). `'unavailable'` means
+   * this dashboard has no OCR service configured — not that the photo was
+   * unreadable. Absent on success.
+   */
+  code?: 'unavailable' | 'unreadable';
 }
+
+/**
+ * User-facing copy for "this dashboard cannot read text out of photos".
+ *
+ * `POST /api/ocr/extract` is an explicit 501 placeholder and there is no OCR key
+ * in the environment, so this is the state the family is in. It reaches a
+ * parent's screen verbatim, so it names the alternative (type or paste) instead
+ * of the missing service.
+ */
+export const OCR_UNAVAILABLE_MESSAGE =
+  "Reading text from photos isn't available on this dashboard yet — type or paste it instead.";
 
 export interface PhotoProcessingOptions {
   familyMembers?: { name: string; id: string; role: string }[];
@@ -33,10 +50,14 @@ export async function processPhotoInput(
     const text = await extractTextFromImage(imageBlob);
 
     if (!text || text.trim().length < 10) {
+      // `extractTextFromImage` reports "no service configured" with a null
+      // result; everything downstream reads the reason.
+      const unavailable = ocrUnavailableReason;
       return {
         success: false,
         text: '',
-        error: 'Could not extract readable text from image',
+        error: unavailable ?? 'No readable text was found in that photo — try a closer shot.',
+        code: unavailable ? 'unavailable' : 'unreadable',
       };
     }
 
@@ -64,45 +85,39 @@ export async function processPhotoInput(
       parsed,
     };
   } catch (error: any) {
+    // Never echo an exception message: it is a developer string by
+    // construction, and this value reaches the user's screen.
     return {
       success: false,
       text: '',
-      error: error.message,
+      error: 'Something went wrong reading that photo — type or paste the details instead.',
+      code: 'unavailable',
     };
   }
 }
 
 /**
- * Extract text from image using OCR
+ * Why the last `extractTextFromImage` call produced no text, or `null` when it
+ * produced some. There is no OCR backend in this app — `/api/ocr/extract` is a
+ * documented 501 placeholder and no OCR credential exists in the environment —
+ * so the only honest answer is "unavailable", returned as a RESULT rather than
+ * thrown.
  *
- * For production, use one of these services:
- * - Google Cloud Vision API (recommended, $1.50/1000 images)
- * - AWS Textract ($1.50/1000 pages)
- * - Azure Computer Vision ($1.50/1000 images)
- * - Tesseract.js (free, client-side, lower accuracy)
- *
- * For now, this is a placeholder that expects the client to use
- * browser-based OCR or send to a backend service
+ * It used to `throw new Error('OCR must be implemented via /api/ocr/extract
+ * endpoint')`, which surfaced to the user as raw developer text through
+ * `POST /api/photo/process` → the composer's error line.
  */
-async function extractTextFromImage(imageBlob: Blob): Promise<string> {
-  // TODO: Implement OCR service integration
-  // This would be called from the client or routed through an API endpoint
+let ocrUnavailableReason: string | null = OCR_UNAVAILABLE_MESSAGE;
 
-  // Example implementation with Google Cloud Vision:
-  /*
-  const formData = new FormData();
-  formData.append('image', imageBlob);
-
-  const response = await fetch('/api/ocr/extract', {
-    method: 'POST',
-    body: formData,
-  });
-
-  const result = await response.json();
-  return result.text;
-  */
-
-  throw new Error('OCR must be implemented via /api/ocr/extract endpoint');
+/**
+ * Extract text from an image using OCR.
+ *
+ * Returns `null` — never throws — because "this dashboard has no OCR service"
+ * is an expected state, not an exception. See {@link ocrUnavailableReason}.
+ */
+async function extractTextFromImage(_imageBlob: Blob): Promise<string | null> {
+  ocrUnavailableReason = OCR_UNAVAILABLE_MESSAGE;
+  return null;
 }
 
 /**
