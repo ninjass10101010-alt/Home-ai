@@ -21,10 +21,13 @@ vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 const mockUseAuth = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/useAuth", () => ({ useAuth: mockUseAuth }));
 
-const PARENT = { currentUser: { role: "parent" } };
-const CHILD = { currentUser: { role: "child" } };
-const PET = { currentUser: { role: "pet" } };
-const GUEST = { currentUser: null };
+const PARENT = { hydrated: true, currentUser: { role: "parent" } };
+// `hydrated: true` on every session: the dock renders nothing until auth has
+// hydrated (capsule-nav-hydration.test.tsx), so a fixture without the flag
+// describes a signed-out screen that has not resolved yet, not a parent/kid/pet.
+const CHILD = { hydrated: true, currentUser: { role: "child" } };
+const PET = { hydrated: true, currentUser: { role: "pet" } };
+const GUEST = { hydrated: true, currentUser: null };
 const SESSIONS = [PARENT, CHILD, PET, GUEST];
 
 function render(ui: ReactElement): HTMLElement {

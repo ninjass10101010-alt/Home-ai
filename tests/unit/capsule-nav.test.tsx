@@ -20,13 +20,19 @@ vi.mock("@/hooks/useAuth", () => ({ useAuth: mockUseAuth }));
 
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
+// `hydrated: true` on every fixture: CapsuleNav renders nothing until auth has
+// hydrated (see capsule-nav-hydration.test.tsx), so a stub without the flag is a
+// signed-out session, not a parent/kid/pet one.
 const PARENT_USER = {
+  hydrated: true,
   currentUser: { id: 1, name: "Jeffery", role: "parent", emoji: "👨", color: "#fff", pin: "1234", avatarSize: "md", glow: false },
 };
 const CHILD_USER = {
+  hydrated: true,
   currentUser: { id: 2, name: "Caspian", role: "child", emoji: "🧒", color: "#fff", pin: "1234", avatarSize: "md", glow: false },
 };
 const PET_USER = {
+  hydrated: true,
   currentUser: { id: 3, name: "Biscuit", role: "pet", emoji: "🐶", color: "#fff", pin: "0000", avatarSize: "md", glow: false },
 };
 

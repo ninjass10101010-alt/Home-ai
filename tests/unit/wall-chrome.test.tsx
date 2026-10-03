@@ -19,7 +19,9 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), prefetch: vi.fn() }),
 }));
 
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ currentUser: null }) }));
+// `hydrated: true`: the wall IS the signed-out guest session, but CapsuleNav
+// renders nothing until auth has hydrated (capsule-nav-hydration.test.ts).
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ currentUser: null, hydrated: true }) }));
 
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
