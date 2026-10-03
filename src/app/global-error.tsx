@@ -4,8 +4,16 @@
  * Last-resort boundary for when the *root layout itself* fails (audit P0-4,
  * phase 2). Next replaces the whole tree — including `<html>`/`<body>` and every
  * provider — so this file may not import anything that needs them: no `PageShell`,
- * no `ErrorState`, no CSS variables (globals.css is imported by the layout that
- * just failed). Hence the inline styles and the raw `<!DOCTYPE html>` shape.
+ * no `ErrorState`, no `CapsuleNav`, no CSS variables (globals.css is imported
+ * by the layout that just failed). Hence the inline styles and the raw
+ * `<!DOCTYPE html>` shape.
+ *
+ * The dock cannot exist here — `CapsuleNav` reads `useAuth`, which throws outside
+ * an `AuthProvider`, and this file has none — so the shell contract exempts it
+ * (`SEGMENT_SHELL_EXEMPT` in `tests/unit/route-shell-contract.test.ts`) and pins
+ * the substitute instead: a plain `<a href="/">` full-document escape that needs
+ * no React, no providers and no hydration, unlike `reset()`. Two ways out for a
+ * screen that has nothing else.
  *
  * Text stays at 14px+ by hand for the same reason (Contract B2's 12px floor,
  * `docs/UI_AUDIT_2026-09.md`): nothing is loading the design system here.
@@ -74,6 +82,31 @@ export default function GlobalError({
           >
             Reload
           </button>
+          {/* The one escape that cannot itself be broken by React: a plain anchor
+              does a full-document load, which re-runs the root layout instead of
+              asking a crashed tree to re-render. `<Link>` is exactly what must NOT
+              be used here — it needs the router context from the layout that just
+              failed — so the lint rule is disabled for this one element.
+              `tests/unit/route-shell-contract.test.ts` pins it, because the dock is
+              unavailable in this file. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
+            href="/"
+            style={{
+              display: "inline-block",
+              marginTop: "12px",
+              minHeight: "44px",
+              lineHeight: "44px",
+              padding: "0 20px",
+              color: "#e8eaed",
+              fontSize: "14px",
+              fontWeight: 600,
+              textDecoration: "underline",
+              textUnderlineOffset: "3px",
+            }}
+          >
+            Back to Home
+          </a>
           {error.digest && (
             <p style={{ fontSize: "13px", lineHeight: "20px", margin: "14px 0 0", color: "#94a3b8" }}>
               If this keeps happening, tell Consuela this code:{" "}

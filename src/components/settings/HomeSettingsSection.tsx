@@ -13,6 +13,7 @@ import Toast from "@/components/ui/Toast";
 import Toggle from "@/components/ui/Toggle";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useSettingsFeedback } from "@/hooks/useSettingsFeedback";
+import { readReducedMotionPreference } from "@/hooks/useReducedMotionPreference";
 import { ALL_WIDGETS, type LayoutMode, type WidgetId } from "@/lib/layout-config";
 
 export default function HomeSettingsSection() {
@@ -136,7 +137,7 @@ export default function HomeSettingsSection() {
     reorderPending.current = false;
     const previous = previousPositions.current;
     previousPositions.current = null;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return cancelFlipAnimations;
+    if (readReducedMotionPreference()) return cancelFlipAnimations;
     for (const [id, element] of rowRefs.current) {
       if (!element || typeof element.animate !== "function") continue;
       const oldTop = previous.get(id);

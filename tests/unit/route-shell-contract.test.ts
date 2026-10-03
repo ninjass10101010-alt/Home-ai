@@ -39,6 +39,31 @@ const SHELL_EXEMPT: Record<string, string> = {
     "A full-screen drill-down that already carries its own `aria-label=\"Back to meal planner\"` control, so it is not a dead end. Giving it the shared dock as well is a UX decision, not a correctness fix — tracked, not silently dropped.",
 };
 
+/**
+ * The same dead-end problem, one level up: an error/loading segment REPLACES the
+ * route it interrupts, so if it renders no shell the dock disappears exactly when
+ * the family most needs to navigate away. `page.tsx` walking cannot see this — an
+ * `error.tsx` is not a `page.tsx`.
+ *
+ * `src/app/global-error.tsx` is the one structural exception, and it is a
+ * platform constraint rather than a choice: Next replaces the whole root layout
+ * there (the file must emit its own `<html>`/`<body>`), so there is no
+ * `AuthProvider` — `useAuth` throws outside one, and `CapsuleNav` reads it — and
+ * no `globals.css`, so every token is unavailable. It therefore owes a *hard*
+ * escape instead, pinned below.
+ */
+const SEGMENT_SHELL_EXEMPT: Record<string, string> = {
+  "src/app/global-error.tsx":
+    "Next replaces the entire root layout here, so this file must emit its own <html>/<body> and has no AuthProvider (useAuth throws) or globals.css. The dock is structurally impossible; the suite below pins its full-document <a href=\"/\"> instead.",
+};
+
+/** Route-error shells that owe a hydration-free, client-renderable way out. */
+const SEGMENT_FILES = [
+  "src/app/error.tsx",
+  "src/app/loading.tsx",
+  "src/app/settings/layout.tsx",
+];
+
 const MAX_DEPTH = 3;
 
 function abs(rel: string): string {
@@ -124,5 +149,47 @@ describe("every route renders through PageShell", () => {
       "src/app/memory/page.tsx" in SHELL_EXEMPT,
       "/memory must not be exempt from the walk"
     ).toBe(false);
+  });
+});
+
+describe("every error/loading segment keeps the dock reachable", () => {
+  it("the interrupting segments it walks all exist", () => {
+    for (const rel of SEGMENT_FILES) {
+      expect(existsSync(abs(rel)), `${rel} must ship`).toBe(true);
+    }
+    expect(existsSync(abs("src/app/global-error.tsx"))).toBe(true);
+  });
+
+  it("no error or loading segment is a dock-less dead end", () => {
+    const bare = SEGMENT_FILES.filter((rel) => !reachesPageShell(rel));
+    const unexplained = bare.filter((rel) => !(rel in SEGMENT_SHELL_EXEMPT));
+    expect(
+      unexplained,
+      "an error/loading segment replaces the route it interrupts — without PageShell there is no dock left to navigate with"
+    ).toEqual([]);
+    for (const rel of bare) {
+      expect(SEGMENT_SHELL_EXEMPT[rel].length, `${rel} needs a written reason`).toBeGreaterThan(20);
+    }
+  });
+
+  it("global-error is the only segment exempt from the shell, and says why", () => {
+    expect(reachesPageShell("src/app/global-error.tsx")).toBe(false);
+    expect(SEGMENT_SHELL_EXEMPT["src/app/global-error.tsx"]).toBeTruthy();
+  });
+
+  it("global-error still offers a full-document way back to Home", () => {
+    // The one thing a root-layout failure can always offer: a plain anchor, which
+    // works with no React, no providers and no hydration.
+    const src = stripComments(readFileSync(abs("src/app/global-error.tsx"), "utf8"));
+    expect(src).toMatch(/<a[\s\S]{0,400}href=["']\/["']/);
+  });
+
+  it("the root error boundary is the one that names the digest and retries", () => {
+    // Not a structural check — a copy check, because the shell is only worth
+    // rendering if the family can still act: retry, leave, and quote the code.
+    const src = stripComments(readFileSync(abs("src/app/error.tsx"), "utf8"));
+    expect(src).toContain("reset");
+    expect(src).toContain("error.digest");
+    expect(src).toMatch(/href=["']\/["']/);
   });
 });

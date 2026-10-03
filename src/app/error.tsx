@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { Component, type ReactNode, useEffect } from "react";
 import Link from "next/link";
 import ErrorState from "@/components/ui/ErrorState";
+import PageShell from "@/components/ui/PageShell";
 
 /**
  * Route-level error boundary (audit P0-4, phase 2).
@@ -14,8 +15,14 @@ import ErrorState from "@/components/ui/ErrorState";
  * file existed, a render throw unmounted the screen into Next's built-in
  * full-screen error, which on a wall display looks exactly like the app dying.
  *
- * Deliberately provider-free (no `useAuth`, no `PageShell`): if a provider is
- * what broke, this boundary still has to render.
+ * It renders through `PageShell`, so the dock survives: a boundary that replaces
+ * a route but drops the shell strands the family with no way out except the
+ * browser's own back button — the exact dead end
+ * `tests/unit/route-shell-contract.test.ts` forbids. The shell is wrapped in
+ * `ShellOrFallback` because the realistic throw *is* the chrome: a dock or auth
+ * bug must not turn a recoverable page error into a blank screen with no dock
+ * and no copy. `global-error.tsx` covers provider failures and cannot render a
+ * shell at all (Next replaces the root layout there).
  */
 export default function AppError({
   error,
@@ -30,9 +37,9 @@ export default function AppError({
     console.error("[app-error]", error.digest ?? "", error);
   }, [error]);
 
-  return (
+  const copy = (
     <div
-      className="min-h-screen bg-[var(--color-canvas)] max-w-lg md:max-w-3xl lg:max-w-none mx-auto px-4 pt-16 pb-10"
+      className="max-w-lg md:max-w-3xl lg:max-w-none mx-auto px-4 pt-16 pb-10"
       data-testid="route-error"
     >
       <ErrorState
@@ -59,4 +66,33 @@ export default function AppError({
       </div>
     </div>
   );
+
+  return (
+    <ShellOrFallback fallback={copy}>
+      <PageShell>{copy}</PageShell>
+    </ShellOrFallback>
+  );
+}
+
+interface ShellOrFallbackProps {
+  children: ReactNode;
+  /** Rendered instead when the shell itself throws. */
+  fallback: ReactNode;
+}
+
+/**
+ * Renders `children` unless *it* throws. `getDerivedStateFromError` is the only
+ * legal place for this: a throw while rendering the shell is exactly the case
+ * that must not take the family's only way out down with it.
+ */
+class ShellOrFallback extends Component<ShellOrFallbackProps, { shellFailed: boolean }> {
+  state = { shellFailed: false };
+
+  static getDerivedStateFromError() {
+    return { shellFailed: true };
+  }
+
+  render() {
+    return this.state.shellFailed ? this.props.fallback : this.props.children;
+  }
 }

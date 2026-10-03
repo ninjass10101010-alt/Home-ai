@@ -119,14 +119,25 @@ Authoritative copy lives in `docs/DESIGN_SYSTEM.md` §6–8; these are the parts
   `tests/unit/nav-items.test.ts` fails otherwise (that is what makes "no unreachable route" hold).
   Never add a nav list, an icon set or an active-item check inside a component. `SidebarNav.tsx`
   was deleted 2026-09-29; it and its suite stay deleted. **The dock must be reachable on every
-  route:** a parent-reachable destination that renders no `PageShell` is a dead end and fails
-  `tests/unit/route-shell-contract.test.ts`, which walks every `src/app/**/page.tsx`, follows
-  `@/…` imports (depth-capped) to find the shell, and requires a reasoned `SHELL_EXEMPT` entry
-  otherwise. Current exemptions, all justified in that file: `design-system`, `grocery`,
-  `screensaver`, `meals/archive`, `settings/[section]`. **Seven dock caps for every role** —
+  route AND on every route interruption:** a parent-reachable destination that renders no
+  `PageShell` is a dead end and fails `tests/unit/route-shell-contract.test.ts`, which walks every
+  `src/app/**/page.tsx`, follows `@/…` imports (depth-capped) to find the shell, and requires a
+  reasoned `SHELL_EXEMPT` entry otherwise. The same walk covers `error.tsx`, `loading.tsx` and
+  `settings/layout.tsx` under `SEGMENT_SHELL_EXEMPT` — a boundary *replaces* the route it
+  interrupts, so a shell-less fallback strands the family precisely when they need the dock.
+  `global-error.tsx` is the only segment exemption (Next replaces the root layout there: no
+  `AuthProvider` for `CapsuleNav`, no `globals.css`) and must keep its plain
+  `<a href="/">` full-document escape, which the test pins. Page exemptions, all justified in
+  that file: `design-system`, `grocery`, `screensaver`, `meals/archive`, `settings/[section]`.
+  A nested route is only its parent's section if it is one: `OWN_DESTINATION_ROUTES` in
+  `nav-items.ts` lists standalone screens that share a URL prefix — currently `/meals/archive`,
+  which must not light up the Meals cap or pass for a manifest-covered route.
+  **Seven dock caps for every role** —
   `Rewards` is `KID_ROLES` and `House` is `guest`+`parent`, so exactly one of the pair is always
-  present; the `More…` sheet is 6 (parent) / 5 (kid) / 4 (wall). `docs/DESIGN.md` §1.1 holds
-  both tables.
+  present; the `More…` sheet is 7 (parent) / 6 (kid) / 4 (wall) — `/photos` joined it in
+  `03af7b2` and the old 6/5/4 counts were stale. The dock also waits for `hydrated` from
+  `useAuth` before painting caps, so a kid never sees the parent's `House` cap flash.
+  `docs/DESIGN.md` §1.1 holds both tables.
 
 - **Type floor is 12px (0.75rem / `text-xs`).** This *replaces* the 11px floor that earlier
   change records and plan docs cited — those are history, do not follow them for new work.

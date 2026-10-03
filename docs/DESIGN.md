@@ -123,10 +123,10 @@ signed-out wall) gets Home, Ask, Meals, Tasks, Calendar, House, Settings; a kid 
 eight — `Rewards` is `KID_ROLES` and `House` is `guest`+`parent`, so exactly one of the pair is
 always present. That is the invariant `CapsuleNav` sizes its capsule for.
 
-**Home "More…" sheet (`MoreSheet.tsx`)** — the six secondary destinations that no dock cap
+**Home "More…" sheet (`MoreSheet.tsx`)** — the seven secondary destinations that no dock cap
 points at, role-filtered the same way. This is what makes "no unreachable route" hold. How many
-appear depends on the role: **6** to a parent, **5** to a kid (no Family Memory), **4** on the
-signed-out wall (no Money Mountain, no Family Memory).
+appear depends on the role: **7** to a parent, **6** to a kid (no Family Memory), **4** on the
+signed-out wall (no Money Mountain, no Family Memory, no Photos).
 
 | Label            | Route               | Roles    | Wall | Blurb |
 |------------------|---------------------|----------|------|-------|
@@ -136,13 +136,22 @@ signed-out wall (no Money Mountain, no Family Memory).
 | Insights         | `/analytics`        | everyone | yes  | Schedule and routine patterns |
 | Money Mountain   | `/money-mountain`   | signed in | no  | Savings goals and allowance |
 | Family Memory    | `/memory`           | **parent only** | no | Addresses, allergies and preferences |
+| Photos           | `/photos`           | signed in | no  | Add pictures and choose what the wall shows |
+
+`/photos` joined the sheet in `03af7b2` (2026-09-30); this table and the 6/5/4 counts in
+`AGENTS.md` were not updated with it and said six rows until now.
 
 `/memory` is parent-only in the manifest and in `middleware.ts`; `/money-mountain` and
 `/memory` stay off the shared wall. Routes with no manifest entry live in `EXEMPT_ROUTES`
 with a written reason, and `tests/unit/nav-items.test.ts` walks every `src/app/**/page.tsx`
 so a new route cannot ship unreachable. `tests/unit/route-shell-contract.test.ts` is the
 matching guarantee that no route is a **dead end** — every one reaches `PageShell`, so the
-dock is present, or it is exempt with a reason.
+dock is present, or it is exempt with a reason. It also walks the **interrupting** segments
+(`error.tsx`, `loading.tsx`, `settings/layout.tsx`): a boundary replaces the route it
+interrupts, so a fallback without the shell strands the family at the exact moment they need
+to navigate away. `global-error.tsx` is the one exemption — Next replaces the root layout
+there, so there is no `AuthProvider` for `CapsuleNav` and no `globals.css`; it owes a plain
+`<a href="/">` full-document escape instead, which the same test pins.
 
 **Floating Emergency Button (always on Home, `EmergencyButton.tsx`):**
 - Fixed position: `top-4 right-4`, `z-50`

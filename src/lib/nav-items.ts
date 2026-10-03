@@ -202,13 +202,46 @@ export function moreNavItemsForRole(role: NavRole): NavItemDefinition[] {
 }
 
 /**
+ * Routes that sit under a destination's URL prefix but are NOT a section of it.
+ *
+ * `isPathActive` is segment-aware, so it correctly lights up `/settings` on
+ * `/settings/me` and `/meals` on `/meals/recipes/12`. A full-screen sibling
+ * that merely shares the prefix is different: `/meals/archive` is the week
+ * restore screen, not the planner, and prefix-matching reported it as an active
+ * Meals tab — so the dock claimed you were on Meals while the archive was on
+ * screen, and `navItemForPath` reported the route as *covered by the manifest*,
+ * which is how a route with zero inbound links could read as "tracked".
+ *
+ * The list is explicit rather than inferred because nothing in the path itself
+ * distinguishes the two cases; a drill-down that should stay attached to its cap
+ * (`/meals/recipes/12`) must not be swept in by a heuristic. Every entry needs a
+ * matching `EXEMPT_ROUTES` reason so the no-orphan contract keeps covering it
+ * (`tests/unit/nav-active-path.test.ts` asserts that pairing).
+ */
+export const OWN_DESTINATION_ROUTES: readonly string[] = ["/meals/archive"];
+
+/** Is this pathname (or a path under it) a standalone destination? */
+function isOwnDestinationPath(pathname: string): boolean {
+  return OWN_DESTINATION_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  );
+}
+
+/**
  * Is `pathname` inside `path`? Exact for the root ("/" must not match every
  * route), segment-aware for everything else so `/mealsomething` never activates
- * `/meals`, while `/meals/recipes/12` and `/settings/me` both do.
+ * `/meals` — and false for an `OWN_DESTINATION_ROUTES` route sitting under the
+ * prefix, so `/meals/archive` never lights up the Meals cap. `/meals/recipes/12`
+ * and `/settings/me` both still do.
  */
 export function isPathActive(pathname: string, path: string): boolean {
   if (path === "/") return pathname === "/";
-  return pathname === path || pathname.startsWith(`${path}/`);
+  if (pathname === path) return true;
+  // A standalone destination is nobody's section: activating the parent cap would
+  // misreport where the family is. Only an exact (or deeper) match on the
+  // standalone route itself may activate it.
+  if (isOwnDestinationPath(pathname) && !isOwnDestinationPath(path)) return false;
+  return pathname.startsWith(`${path}/`);
 }
 
 export function isNavItemActive(pathname: string, item: NavItemDefinition): boolean {
@@ -230,6 +263,8 @@ export const EXEMPT_ROUTES: Readonly<Record<string, string>> = {
   "/emergency":
     "Reference page reached from Settings → Safety and the wall Emergency action; not a dock cap.",
   "/ledger": "Parent-only finance iframe, reached from the Settings ledger widget.",
+  "/meals/archive":
+    "Week-restore drill-down, linked from the Meals Plan tab ('Archived weeks') and given its own back control. Not a dock cap and not a More… sheet row: it is a sub-screen of /meals, and the sheet is already seven rows for a parent. Listed in OWN_DESTINATION_ROUTES so it cannot masquerade as an active Meals tab.",
   "/player": "Reached from Home's Music widget (\"Open the full player\"); the dock is capped at seven caps and a widget drill-down is not one.",
   "/screensaver": "Typed wall URL only — CacheRefresher special-cases it so the wall can sleep.",
   "/suggestions": "Reached from Home's Suggestions widget (\"See all →\").",

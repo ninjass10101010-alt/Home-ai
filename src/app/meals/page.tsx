@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect, Suspense } from "react";
+import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import PageShell from "@/components/ui/PageShell";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { db } from "@/db";
 import { emptyRecipe, groceryCategories } from "@/data/meals";
 import { Meal, Recipe, Tab } from "@/types/meals";
@@ -27,18 +28,87 @@ import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import Toast from "@/components/ui/Toast";
 
+/**
+ * Weekday short labels, exactly what `useMeals.activeDay` stores (`"Mon"`,
+ * `"Tue"`, …) and exactly what Home's "This Week" `DayStrip` puts in a link as
+ * `?day=`. Kept local rather than imported so this page holds the whole
+ * `?day=` contract in one readable place.
+ */
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+function normalizeDayParam(param: string | null): "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun" | null {
+  if (!param) return null;
+  const match = WEEKDAYS.find((day) => day.toLowerCase() === param.trim().toLowerCase());
+  return match ?? null;
+}
+
 function MealHubContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const initialTab = mapKitchenTabParam(requestedTab);
   const focusRecipeBox = isRecipesDeepLink(requestedTab);
-  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+  // Home's "This Week" strip links `/meals?day=<weekday>`. Honouring it is what
+  // makes that strip a navigation rather than a decoration: the day it names is
+  // selected and, because the Plan tab is where days live, shown.
+  const requestedDay = normalizeDayParam(searchParams.get("day"));
+  const [activeTab, setActiveTab] = useState<Tab>(requestedDay ? "plan" : initialTab);
+  // The `?tab=` value this render has already folded into `activeTab`, so the
+  // adjustment below fires once per genuine URL change and not on every render.
+  const [syncedTabParam, setSyncedTabParam] = useState<string | null>(requestedTab);
   const [notification, setNotification] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
   }, []);
+
+  /**
+   * Rewrite one query param, leaving every other one alone. `?tab=` and `?day=`
+   * coexist (Home can link both, and a tab tap must not silently drop the day),
+   * so neither write rebuilds the query string from scratch.
+   */
+  const setQueryParam = useCallback(
+    (key: "tab" | "day", value: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set(key, value);
+      // `replace`, never `push`: a tab tap is a view change inside one screen, so
+      // Back should leave Meals rather than walk back through tab history.
+      router.replace(`/meals?${params.toString()}`);
+    },
+    [router, searchParams]
+  );
+
+  /** Tap handler: the screen and the URL change together, so a reload agrees. */
+  const selectTab = useCallback(
+    (next: Tab) => {
+      setActiveTab(next);
+      if (mapKitchenTabParam(searchParams.get("tab")) !== next) {
+        setQueryParam("tab", next);
+      }
+    },
+    [searchParams, setQueryParam]
+  );
+
+  /**
+   * URL → state, so a Back, a shared link or `/grocery`'s redirect lands on the
+   * tab the address bar names. Reading only on mount was the other half of the
+   * `?tab=` bug: the param was authoritative on arrival and stale forever after.
+   *
+   * Done as React's "adjust state while rendering" rather than in an effect: the
+   * URL is an input to this render, not an external system to subscribe to, and a
+   * `setState` inside an effect would spend a whole extra render pass
+   * re-deriving what the address bar already said.
+   *
+   * A `?day=` deep link outranks `?tab=`: days only exist on the Plan tab, so
+   * `/meals?tab=stock&day=Sat` has to mean "show me Saturday" rather than
+   * "show me the pantry". Leaving the tab alone afterwards is what lets the
+   * family browse Shop and come back to the same day.
+   */
+  if (requestedDay === null && requestedTab !== syncedTabParam) {
+    setSyncedTabParam(requestedTab);
+    setActiveTab(mapKitchenTabParam(requestedTab));
+  }
 
   const showToast = (msg: string) => {
     setNotification(msg);
@@ -89,12 +159,45 @@ function MealHubContent() {
   };
 
   const {
-    meals, setMeals, activeDay, setActiveDay, activeMeals, deleteMeal,
+    meals, setMeals, activeDay, setActiveDay: setActiveDayState, activeMeals, deleteMeal,
     aiMealIdeas, aiMealLoading, aiMealError, showAiSuggestions, generateAiMeals,
     activeWeek, goToWeek, archiveCurrentWeek, isCurrentWeek,
     generateWeeklyPlan, weeklyPlanLoading, weeklyPlanError,
     syncBlocked: mealsSyncBlocked,
   } = useMeals();
+
+  /**
+   * Day selection, kept in step with `?day=` in both directions.
+   *
+   * In: Home's "This Week" strip links `/meals?day=Sat`, and before this read
+   * that parameter nothing anywhere consumed — the tap navigated to Meals and
+   * changed nothing visible. A `useMeals` default is "today", so the deep link
+   * has to override it explicitly.
+   *
+   * Out: the strip inside `PlanTab` moves `activeDay`, so the param is rewritten
+   * too. A read-only param is the same staleness bug as a write-only one — reload
+   * or Back would snap the family back to the day they had left.
+   */
+  // `null` = "no `?day=` has been folded into `activeDay` yet". It cannot be
+  // seeded from the URL the way `syncedTabParam` is, because `activeDay` lives in
+  // `useMeals` and its default is "today", not the deep-linked day.
+  const [syncedDay, setSyncedDay] = useState<string | null>(null);
+
+  const setActiveDay = useCallback(
+    (day: string) => {
+      setActiveDayState(day);
+      if (normalizeDayParam(searchParams.get("day")) !== day) {
+        setQueryParam("day", day);
+      }
+    },
+    [setActiveDayState, searchParams, setQueryParam]
+  );
+
+  // Same "adjust while rendering" shape as `?tab=` above, for the same reason.
+  if (requestedDay !== null && requestedDay !== syncedDay) {
+    setSyncedDay(requestedDay);
+    setActiveDayState(requestedDay);
+  }
 
   const {
     groceryItems, activeCategory, setActiveCategory, setGroceryItems,
@@ -348,13 +451,30 @@ function MealHubContent() {
         <SegmentedControl
           aria-label="Kitchen"
           value={activeTab}
-          onChange={(value) => setActiveTab(value as Tab)}
+          onChange={(value) => selectTab(value as Tab)}
           options={[
             { id: "plan", label: "🍽️ Plan" },
             { id: "shop", label: "🛒 Shop" },
             { id: "stock", label: "🥫 Stock" },
           ]}
         />
+
+        {activeTab === "plan" && (
+          /* The week-restore screen used to have no inbound link anywhere in
+             `src/` — reachable only by typing the URL, while its own exemption
+             entry called it "tracked". It belongs beside the Plan tab's week nav,
+             which is where a week gets archived. A plain `Link`, not a second nav
+             surface and not a manifest entry: `/meals` is already the destination. */
+          <div className="flex justify-end">
+            <Link
+              href="/meals/archive"
+              className="tap hit-44 inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-text-muted hover:text-text-primary"
+            >
+              <span aria-hidden="true">🗄️</span>
+              Archived weeks
+            </Link>
+          </div>
+        )}
 
         {activeTab === "plan" && (
           <div key="plan" className="panel-swap space-y-5">
