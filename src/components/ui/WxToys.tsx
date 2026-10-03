@@ -1,9 +1,9 @@
 "use client";
 
 import { CSSProperties, useEffect, useId, useState } from "react";
-import type { ReactNode } from "react";
 import { moonLitPath } from "@/lib/weather-astro";
 import type { SkyPhase } from "@/lib/weather-scene-params";
+import { mixHexColor } from "@/lib/weather-contrast";
 import { cloudVariant, backCloudVariant, starOpacity } from "@/lib/weather-scene-params";
 import { MONSTER, WX_POSTER } from "./wx-tokens";
 
@@ -872,198 +872,133 @@ export function Wind({ width = 72 }: { width?: number }) {
   );
 }
 
-// ─── MonsterDigit — the capsule-grammar hero digit set ───────────
-// Geometry extrapolated from the locked monster-v3 reference glyphs
-// ("4", "5", "7", "2"): every digit is 2–5 capsule segments + knobs +
-// knots + glints on a fixed 200×320 box (tabular alignment), with one
-// sleeping face (or, for the hero's single peering digit, an eyeball).
+// ─── MonsterDigit — simple numeric sections + one eye ────────────
+// The Monster treatment is the number itself: familiar seven-segment geometry,
+// flat color per section, and one eye. No knots, glints, mouths, or shadows.
+type DigitSegment = "top" | "upperRight" | "lowerRight" | "bottom" | "lowerLeft" | "upperLeft" | "middle";
+type DigitSection = { segment: DigitSegment; color: string };
 
 const DIGIT_VIEW_W = 200;
-// Glyphs are drawn in a 200×320 frame, but their ink lives roughly y38–298;
-// cropping the viewBox to that band makes the numerals ~17% larger at the
-// same 1em box height, so the hero reads poster-scale without changing the
-// card's layout math.
 const DIGIT_BOX_Y = 28;
 const DIGIT_BOX_H = 272;
 const DIGIT_ASPECT = DIGIT_VIEW_W / DIGIT_BOX_H;
 
-function DigitSleepFace({ x, y, ink, rotate = 0 }: { x: number; y: number; ink: string; rotate?: number }) {
+const DIGIT_SEGMENT_RECTS: Record<DigitSegment, { x: number; y: number; width: number; height: number }> = {
+  top: { x: 44, y: 34, width: 112, height: 44 },
+  upperRight: { x: 136, y: 72, width: 40, height: 104 },
+  lowerRight: { x: 136, y: 170, width: 40, height: 84 },
+  bottom: { x: 44, y: 242, width: 112, height: 44 },
+  lowerLeft: { x: 24, y: 170, width: 40, height: 84 },
+  upperLeft: { x: 24, y: 72, width: 40, height: 104 },
+  middle: { x: 44, y: 138, width: 112, height: 44 },
+};
+
+const DIGIT_SEGMENTS: Record<string, readonly DigitSection[]> = {
+  "0": [
+    { segment: "top", color: MONSTER.orange },
+    { segment: "upperRight", color: MONSTER.red },
+    { segment: "lowerRight", color: MONSTER.teal },
+    { segment: "bottom", color: MONSTER.blue },
+    { segment: "lowerLeft", color: MONSTER.purple },
+    { segment: "upperLeft", color: MONSTER.teal },
+  ],
+  "1": [
+    { segment: "upperRight", color: MONSTER.teal },
+    { segment: "lowerRight", color: MONSTER.orange },
+  ],
+  "2": [
+    { segment: "top", color: MONSTER.orange },
+    { segment: "upperRight", color: MONSTER.teal },
+    { segment: "middle", color: MONSTER.purple },
+    { segment: "lowerLeft", color: MONSTER.blue },
+    { segment: "bottom", color: MONSTER.red },
+  ],
+  "3": [
+    { segment: "top", color: MONSTER.orange },
+    { segment: "upperRight", color: MONSTER.teal },
+    { segment: "middle", color: MONSTER.purple },
+    { segment: "lowerRight", color: MONSTER.red },
+    { segment: "bottom", color: MONSTER.blue },
+  ],
+  "4": [
+    { segment: "upperLeft", color: MONSTER.teal },
+    { segment: "upperRight", color: MONSTER.orange },
+    { segment: "middle", color: MONSTER.purple },
+    { segment: "lowerRight", color: MONSTER.red },
+  ],
+  "5": [
+    { segment: "top", color: MONSTER.orange },
+    { segment: "upperLeft", color: MONSTER.teal },
+    { segment: "middle", color: MONSTER.purple },
+    { segment: "lowerRight", color: MONSTER.red },
+    { segment: "bottom", color: MONSTER.blue },
+  ],
+  "6": [
+    { segment: "top", color: MONSTER.orange },
+    { segment: "upperLeft", color: MONSTER.teal },
+    { segment: "middle", color: MONSTER.purple },
+    { segment: "lowerLeft", color: MONSTER.blue },
+    { segment: "lowerRight", color: MONSTER.red },
+    { segment: "bottom", color: MONSTER.orange },
+  ],
+  "7": [
+    { segment: "top", color: MONSTER.orange },
+    { segment: "upperRight", color: MONSTER.teal },
+    { segment: "lowerRight", color: MONSTER.red },
+  ],
+  "8": [
+    { segment: "top", color: MONSTER.orange },
+    { segment: "upperRight", color: MONSTER.teal },
+    { segment: "lowerRight", color: MONSTER.red },
+    { segment: "bottom", color: MONSTER.blue },
+    { segment: "lowerLeft", color: MONSTER.purple },
+    { segment: "upperLeft", color: MONSTER.red },
+    { segment: "middle", color: MONSTER.orange },
+  ],
+  "9": [
+    { segment: "top", color: MONSTER.orange },
+    { segment: "upperLeft", color: MONSTER.teal },
+    { segment: "upperRight", color: MONSTER.red },
+    { segment: "middle", color: MONSTER.purple },
+    { segment: "lowerRight", color: MONSTER.blue },
+    { segment: "bottom", color: MONSTER.orange },
+  ],
+  "-": [{ segment: "middle", color: MONSTER.purple }],
+};
+
+const DIGIT_EYE_POSITIONS: Record<string, { x: number; y: number }> = {
+  "0": { x: 156, y: 110 },
+  "1": { x: 156, y: 110 },
+  "2": { x: 156, y: 110 },
+  "3": { x: 156, y: 110 },
+  "4": { x: 156, y: 110 },
+  "5": { x: 44, y: 110 },
+  "6": { x: 44, y: 110 },
+  "7": { x: 156, y: 110 },
+  "8": { x: 156, y: 110 },
+  "9": { x: 156, y: 110 },
+};
+
+function DigitEye({ x, y }: { x: number; y: number }) {
+  const eyeDepth = mixHexColor(MONSTER.glint, MONSTER.inkBlue, 0.22);
   return (
-    <g transform={rotate ? `rotate(${rotate} ${x} ${y})` : undefined} stroke={ink} strokeWidth="5" fill="none" strokeLinecap="round">
-      <path d={`M${x} ${y} q8 9 16 0`} />
-      <path d={`M${x + 6} ${y + 15} q6 6 12 0`} />
+    <g data-digit-eye>
+      <circle cx={x + 3} cy={y + 5} r="17" fill={eyeDepth} />
+      <circle cx={x} cy={y} r="17" fill={MONSTER.glint} />
+      <circle cx={x + 1} cy={y + 1} r="8" fill={MONSTER.pupil} />
     </g>
   );
 }
 
-function DigitEye({ x, y, r = 22 }: { x: number; y: number; r?: number }) {
-  return (
-    <>
-      <circle cx={x} cy={y} r={r} fill={MONSTER.glint} />
-      <circle cx={x + r / 6} cy={y + r / 6} r={r * 0.42} fill={MONSTER.pupil} />
-      <circle cx={x + r / 3} cy={y - r / 8} r={r * 0.15} fill={MONSTER.glint} />
-    </>
-  );
-}
-
-type DigitGlyph = (peering: boolean) => ReactNode;
-
-const MONSTER_DIGITS: Record<string, DigitGlyph> = {
-  // 0 — two capsule loops (red left arc, blue right arc) + orange/teal knobs
-  "0": (peering) => (
-    <>
-      <path d="M100 66 A56 94 0 0 0 100 254" stroke={MONSTER.red} strokeWidth="44" fill="none" strokeLinecap="round" />
-      <path d="M100 66 A56 94 0 0 1 100 254" stroke={MONSTER.blue} strokeWidth="44" fill="none" strokeLinecap="round" />
-      <circle cx="100" cy="66" r="26" fill={MONSTER.orange} />
-      <circle cx="100" cy="254" r="26" fill={MONSTER.teal} />
-      <circle cx="132" cy="94" r="6" fill={MONSTER.glint} opacity="0.5" />
-      <rect x="54" y="200" width="10" height="22" rx="5" fill={MONSTER.glint} opacity="0.5" />
-      {peering ? <DigitEye x={128} y={180} r={22} /> : <DigitSleepFace x={148} y={152} ink={MONSTER.inkBlue} />}
-    </>
-  ),
-  // 1 — teal flag + blue stem + orange foot, orange joint knob
-  "1": (peering) => (
-    <>
-      <line x1="58" y1="112" x2="100" y2="62" stroke={MONSTER.teal} strokeWidth="40" strokeLinecap="round" />
-      <line x1="100" y1="62" x2="100" y2="268" stroke={MONSTER.blue} strokeWidth="50" strokeLinecap="round" />
-      <line x1="100" y1="268" x2="136" y2="268" stroke={MONSTER.orange} strokeWidth="38" strokeLinecap="round" />
-      <circle cx="58" cy="112" r="22" fill={MONSTER.teal} />
-      <circle cx="100" cy="62" r="24" fill={MONSTER.orange} />
-      <circle cx="136" cy="268" r="9" fill={MONSTER.knotOrange} />
-      <rect x="86" y="128" width="10" height="24" rx="5" fill={MONSTER.glint} opacity="0.5" />
-      {peering ? <DigitEye x={100} y={182} r={20} /> : <DigitSleepFace x={80} y={172} ink={MONSTER.inkBlue} />}
-    </>
-  ),
-  // 2 — mockup "2": orange bar + teal nub, red curve, blue stem, purple base
-  "2": (peering) => (
-    <>
-      <line x1="58" y1="74" x2="158" y2="74" stroke={MONSTER.orange} strokeWidth="46" strokeLinecap="round" />
-      <circle cx="58" cy="74" r="25" fill={MONSTER.teal} />
-      <path d="M106 102 C 168 108, 162 150, 118 174 L 92 194" stroke={MONSTER.red} strokeWidth="44" fill="none" strokeLinecap="round" />
-      <line x1="92" y1="194" x2="92" y2="264" stroke={MONSTER.blue} strokeWidth="44" strokeLinecap="round" />
-      <line x1="74" y1="264" x2="152" y2="264" stroke={MONSTER.purple} strokeWidth="40" strokeLinecap="round" />
-      <circle cx="74" cy="264" r="10" fill={MONSTER.knotPurple} />
-      <rect x="72" y="62" width="16" height="8" rx="4" fill={MONSTER.glint} opacity="0.5" />
-      <circle cx="112" cy="148" r="5" fill={MONSTER.glint} opacity="0.55" />
-      {peering ? <DigitEye x={128} y={136} r={20} /> : <DigitSleepFace x={96} y={68} ink={MONSTER.inkOrange} />}
-    </>
-  ),
-  // 3 — two right-opening bowl capsules (red upper, blue lower) + teal joint
-  "3": (peering) => (
-    <>
-      {peering && <DigitEye x={138} y={208} r={21} />}
-      <path d="M84 76 C 166 76, 166 148, 90 152" stroke={MONSTER.red} strokeWidth="46" fill="none" strokeLinecap="round" />
-      <path d="M90 168 C 166 172, 166 244, 84 244" stroke={MONSTER.blue} strokeWidth="46" fill="none" strokeLinecap="round" />
-      <circle cx="88" cy="160" r="28" fill={MONSTER.teal} />
-      <circle cx="84" cy="76" r="9" fill={MONSTER.knotRed} />
-      <circle cx="84" cy="244" r="13" fill={MONSTER.teal} />
-      <circle cx="130" cy="98" r="5.5" fill={MONSTER.glint} opacity="0.5" />
-      <circle cx="132" cy="226" r="5" fill={MONSTER.glint} opacity="0.5" />
-      {!peering && <DigitSleepFace x={130} y={192} ink={MONSTER.inkBlue} rotate={90} />}
-    </>
-  ),
-  // 4 — mockup "4": teal roof, red/blue pillars, purple crossbar, orange foot
-  "4": (peering) => (
-    <>
-      <line x1="66" y1="92" x2="134" y2="92" stroke={MONSTER.teal} strokeWidth="50" strokeLinecap="round" />
-      <line x1="66" y1="100" x2="66" y2="224" stroke={MONSTER.red} strokeWidth="52" strokeLinecap="round" />
-      <line x1="134" y1="100" x2="134" y2="272" stroke={MONSTER.blue} strokeWidth="52" strokeLinecap="round" />
-      <line x1="34" y1="228" x2="166" y2="228" stroke={MONSTER.purple} strokeWidth="44" strokeLinecap="round" />
-      <line x1="134" y1="272" x2="168" y2="272" stroke={MONSTER.orange} strokeWidth="38" strokeLinecap="round" />
-      <circle cx="34" cy="228" r="11" fill={MONSTER.knotPurple} />
-      <circle cx="168" cy="272" r="9" fill={MONSTER.knotOrange} />
-      <circle cx="98" cy="80" r="5.5" fill={MONSTER.glint} opacity="0.55" />
-      <rect x="122" y="120" width="9" height="22" rx="4.5" fill={MONSTER.glint} opacity="0.5" />
-      <rect x="44" y="220" width="18" height="9" rx="4.5" fill={MONSTER.glint} opacity="0.45" />
-      <circle cx="152" cy="264" r="5" fill={MONSTER.glint} opacity="0.5" />
-      {peering ? <DigitEye x={134} y={190} r={20} /> : <DigitSleepFace x={58} y={156} ink={MONSTER.inkRed} />}
-    </>
-  ),
-  // 5 — v3 reference: orange bar + teal nub, red shoulder + belly, teal
-  //     spine, blue foot. The spine is what makes the bowl read as a 5.
-  //     The locked glyph keeps the sleeping bar face AND the peering eye.
-  "5": (peering) => (
-    <>
-      {peering && <DigitEye x={128} y={212} r={21} />}
-      <line x1="40" y1="64" x2="160" y2="64" stroke={MONSTER.orange} strokeWidth="52" strokeLinecap="round" />
-      <circle cx="40" cy="64" r="26" fill={MONSTER.teal} />
-      <line x1="70" y1="90" x2="70" y2="150" stroke={MONSTER.red} strokeWidth="50" strokeLinecap="round" />
-      <circle cx="86" cy="176" r="32" fill={MONSTER.red} />
-      <line x1="158" y1="100" x2="158" y2="232" stroke={MONSTER.teal} strokeWidth="44" strokeLinecap="round" />
-      <path d="M74 250 C 126 260, 156 252, 160 234" stroke={MONSTER.blue} strokeWidth="48" fill="none" strokeLinecap="round" />
-      <path d="M97 60 q9 9 18 0 M104 76 q6 6 12 0" stroke={MONSTER.inkOrange} strokeWidth="5" fill="none" strokeLinecap="round" />
-      <rect x="54" y="52" width="18" height="9" rx="4.5" fill={MONSTER.glint} opacity="0.5" />
-      <circle cx="110" cy="160" r="5" fill={MONSTER.glint} opacity="0.5" />
-      <circle cx="160" cy="64" r="12" fill={MONSTER.knotOrange} />
-      <circle cx="70" cy="150" r="9" fill={MONSTER.knotRed} />
-    </>
-  ),
-  // 6 — blue loop + red tail capsule, red balloon knot at the tail tip
-  "6": (peering) => (
-    <>
-      <circle cx="100" cy="206" r="54" fill="none" stroke={MONSTER.blue} strokeWidth="46" />
-      <path d="M94 154 C 62 128, 56 84, 88 52" stroke={MONSTER.red} strokeWidth="46" fill="none" strokeLinecap="round" />
-      <circle cx="88" cy="52" r="10" fill={MONSTER.knotRed} />
-      <circle cx="100" cy="120" r="5" fill={MONSTER.glint} opacity="0.55" />
-      <rect x="126" y="168" width="10" height="20" rx="5" fill={MONSTER.glint} opacity="0.5" />
-      {peering ? <DigitEye x={154} y={202} r={20} /> : <DigitSleepFace x={154} y={194} ink={MONSTER.inkBlue} rotate={90} />}
-    </>
-  ),
-  // 7 — mockup "7": teal bar, red diagonal, orange corner knob, red knot
-  "7": (peering) => (
-    <>
-      <line x1="50" y1="78" x2="150" y2="78" stroke={MONSTER.teal} strokeWidth="52" strokeLinecap="round" />
-      <line x1="150" y1="82" x2="88" y2="268" stroke={MONSTER.red} strokeWidth="52" strokeLinecap="round" />
-      <circle cx="150" cy="79" r="33" fill={MONSTER.orange} />
-      <circle cx="50" cy="78" r="24" fill={MONSTER.teal} />
-      <circle cx="88" cy="268" r="10" fill={MONSTER.knotRed} />
-      <circle cx="128" cy="66" r="5.5" fill={MONSTER.glint} opacity="0.55" />
-      <circle cx="104" cy="232" r="5" fill={MONSTER.glint} opacity="0.5" />
-      {peering ? <DigitEye x={120} y={170} r={20} /> : <DigitSleepFace x={112} y={162} ink={MONSTER.inkRed} />}
-    </>
-  ),
-  // 8 — two blob loops (orange upper ring, blue lower ring) + purple waist
-  "8": (peering) => (
-    <>
-      <circle cx="100" cy="112" r="42" fill="none" stroke={MONSTER.orange} strokeWidth="40" />
-      <circle cx="100" cy="208" r="54" fill="none" stroke={MONSTER.blue} strokeWidth="44" />
-      <circle cx="100" cy="159" r="30" fill={MONSTER.purple} />
-      <circle cx="100" cy="70" r="9" fill={MONSTER.knotOrange} />
-      <circle cx="74" cy="84" r="5" fill={MONSTER.glint} opacity="0.5" />
-      <circle cx="146" cy="188" r="5.5" fill={MONSTER.glint} opacity="0.5" />
-      {peering ? <DigitEye x={54} y={204} r={20} /> : <DigitSleepFace x={54} y={198} ink={MONSTER.inkBlue} rotate={90} />}
-    </>
-  ),
-  // 9 — blue loop + red tail, red knot at the tail tip (six, flipped)
-  "9": (peering) => (
-    <>
-      <circle cx="100" cy="116" r="54" fill="none" stroke={MONSTER.blue} strokeWidth="46" />
-      <path d="M106 168 C 138 194, 144 238, 112 268" stroke={MONSTER.red} strokeWidth="46" fill="none" strokeLinecap="round" />
-      <circle cx="112" cy="268" r="10" fill={MONSTER.knotRed} />
-      <rect x="116" y="62" width="10" height="20" rx="5" fill={MONSTER.glint} opacity="0.5" />
-      <circle cx="124" cy="224" r="5" fill={MONSTER.glint} opacity="0.55" />
-      {peering ? <DigitEye x={50} y={112} r={20} /> : <DigitSleepFace x={50} y={106} ink={MONSTER.inkBlue} rotate={90} />}
-    </>
-  ),
-  // minus — one red capsule + teal nub + dark knot (no face)
-  "-": () => (
-    <>
-      <line x1="56" y1="160" x2="144" y2="160" stroke={MONSTER.red} strokeWidth="40" strokeLinecap="round" />
-      <circle cx="56" cy="160" r="20" fill={MONSTER.teal} />
-      <circle cx="144" cy="160" r="9" fill={MONSTER.knotRed} />
-      <rect x="76" y="152" width="16" height="8" rx="4" fill={MONSTER.glint} opacity="0.5" />
-    </>
-  ),
-};
-
-export function MonsterDigit({ digit, size, eye = false }: { digit: string; size?: number; eye?: boolean }) {
-  const glyph = MONSTER_DIGITS[digit];
+export function MonsterDigit({ digit, size }: { digit: string; size?: number }) {
+  const sections = DIGIT_SEGMENTS[digit];
+  const eye = DIGIT_EYE_POSITIONS[digit];
   // Without `size` the box tracks the parent font-size (DIGIT_ASPECT em wide,
   // 1em tall), so the hero's responsive text classes drive 64/80/96px boxes.
   const box: CSSProperties = size
     ? { width: size * DIGIT_ASPECT, height: size }
     : { width: `${DIGIT_ASPECT}em`, height: "1em" };
-  if (!glyph) return <span>{digit}</span>;
+  if (!sections) return <span>{digit}</span>;
   return (
     <svg
       data-weather-digit={digit}
@@ -1072,7 +1007,25 @@ export function MonsterDigit({ digit, size, eye = false }: { digit: string; size
       className="block shrink-0"
       style={box}
     >
-      {glyph(eye)}
+      {sections.map(({ segment, color }) => {
+        const rect = DIGIT_SEGMENT_RECTS[segment];
+        const depthColor = mixHexColor(color, MONSTER.inkBlue, 0.32);
+        return (
+          <g key={segment}>
+            <rect
+              data-digit-depth={segment}
+              x={rect.x + 7}
+              y={rect.y + 9}
+              width={rect.width}
+              height={rect.height}
+              rx="12"
+              fill={depthColor}
+            />
+            <rect data-digit-segment={segment} {...rect} rx="12" fill={color} />
+          </g>
+        );
+      })}
+      {eye && <DigitEye {...eye} />}
     </svg>
   );
 }

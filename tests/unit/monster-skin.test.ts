@@ -121,35 +121,64 @@ it("clear with hideSun renders nothing (poster owns the sun)", () => {
   expect(el.textContent?.trim()).toBe("");
 });
 
-// ── MonsterDigit: the capsule-grammar hero digit set ─────────────────────────
+// ── MonsterDigit: flat color sections + one clear eye per digit ───────────────
 
-it.each(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-"] as const)(
-  "MonsterDigit %s renders with data-weather-digit",
-  (digit: string) => {
-    const el = renderNode(createElement(MonsterDigit, { digit }));
-    const nodes = el.querySelectorAll(`[data-weather-digit="${digit}"]`);
-    expect(nodes).toHaveLength(1);
-  }
-);
+const EXPECTED_DIGIT_SEGMENTS: Record<string, string[]> = {
+  "0": ["top", "upperRight", "lowerRight", "bottom", "lowerLeft", "upperLeft"],
+  "1": ["upperRight", "lowerRight"],
+  "2": ["top", "upperRight", "middle", "lowerLeft", "bottom"],
+  "3": ["top", "upperRight", "middle", "lowerRight", "bottom"],
+  "4": ["upperLeft", "upperRight", "middle", "lowerRight"],
+  "5": ["top", "upperLeft", "middle", "lowerRight", "bottom"],
+  "6": ["top", "upperLeft", "middle", "lowerLeft", "lowerRight", "bottom"],
+  "7": ["top", "upperRight", "lowerRight"],
+  "8": ["top", "upperRight", "lowerRight", "bottom", "lowerLeft", "upperLeft", "middle"],
+  "9": ["top", "upperLeft", "upperRight", "middle", "lowerRight", "bottom"],
+  "-": ["middle"],
+};
 
-it.each(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-"] as const)(
-  "MonsterDigit %s renders real anatomy (≥2 shape elements)",
-  (digit: string) => {
+it.each(Object.entries(EXPECTED_DIGIT_SEGMENTS))(
+  "MonsterDigit %s uses the expected flat, colored number sections",
+  (digit, expectedSegments) => {
     const el = renderNode(createElement(MonsterDigit, { digit }));
     const svg = el.querySelector(`[data-weather-digit="${digit}"]`);
     expect(svg, digit).toBeTruthy();
-    expect(svg!.querySelectorAll("path, line, rect, circle, ellipse").length, digit).toBeGreaterThanOrEqual(2);
+
+    const segments = Array.from(svg!.querySelectorAll<SVGRectElement>("[data-digit-segment]"));
+    expect(segments.map((segment) => segment.getAttribute("data-digit-segment"))).toEqual(expectedSegments);
+    expect(segments.every((segment) => segment.tagName.toLowerCase() === "rect")).toBe(true);
+    expect(segments.every((segment) => Number(segment.getAttribute("rx")) > 0)).toBe(true);
+    expect(segments.every((segment) => segment.hasAttribute("fill") && !segment.hasAttribute("stroke"))).toBe(true);
+    const depthFaces = Array.from(svg!.querySelectorAll<SVGRectElement>("[data-digit-depth]"));
+    expect(depthFaces.map((face) => face.getAttribute("data-digit-depth"))).toEqual(expectedSegments);
+    for (const segment of segments) {
+      const depthFace = depthFaces.find((face) => face.getAttribute("data-digit-depth") === segment.getAttribute("data-digit-segment"));
+      expect(Number(depthFace?.getAttribute("x"))).toBeGreaterThan(Number(segment.getAttribute("x")));
+      expect(Number(depthFace?.getAttribute("y"))).toBeGreaterThan(Number(segment.getAttribute("y")));
+      expect(depthFace?.getAttribute("fill")).not.toBe(segment.getAttribute("fill"));
+    }
+    if (digit !== "-") {
+      expect(new Set(segments.map((segment) => segment.getAttribute("fill"))).size).toBeGreaterThan(1);
+      expect(svg!.querySelectorAll("[data-digit-eye]")).toHaveLength(1);
+      expect(svg!.querySelector('[data-digit-eye] circle[fill="#101418"]')).toBeTruthy();
+    } else {
+      expect(svg!.querySelectorAll("[data-digit-eye]")).toHaveLength(0);
+    }
+    expect(svg!.querySelectorAll("path, line, ellipse")).toHaveLength(0);
   }
 );
 
-it("exactly one eyeball pupil rides the peering digit; without eye there is none", () => {
-  const peering = renderNode(createElement(MonsterDigit, { digit: "5", eye: true }));
-  expect(peering.querySelectorAll('circle[fill="#101418"]')).toHaveLength(1);
-  const sleeping = renderNode(createElement(MonsterDigit, { digit: "5" }));
-  expect(sleeping.querySelectorAll('circle[fill="#101418"]')).toHaveLength(0);
+it("keeps the 1's upper and lower color sections joined into one numeral", () => {
+  const el = renderNode(createElement(MonsterDigit, { digit: "1" }));
+  const upper = el.querySelector<SVGRectElement>('[data-digit-segment="upperRight"]');
+  const lower = el.querySelector<SVGRectElement>('[data-digit-segment="lowerRight"]');
+  expect(upper).toBeTruthy();
+  expect(lower).toBeTruthy();
+  expect(Number(upper!.getAttribute("y")) + Number(upper!.getAttribute("height")))
+    .toBeGreaterThanOrEqual(Number(lower!.getAttribute("y")));
 });
 
-it("a 2-digit number renders exactly 2 digit nodes; unknown char falls back to text", () => {
+it("a 2-digit number renders two numbers with eyes; unknown char falls back to text", () => {
   const el = renderNode(
     createElement(Fragment, null, createElement(MonsterDigit, { digit: "7" }), createElement(MonsterDigit, { digit: "2" }))
   );
@@ -159,6 +188,7 @@ it("a 2-digit number renders exactly 2 digit nodes; unknown char falls back to t
       .map((node) => node.getAttribute("data-weather-digit"))
       .join("")
   ).toBe("72");
+  expect(el.querySelectorAll("[data-digit-eye]")).toHaveLength(2);
 
   const unknown = renderNode(createElement(MonsterDigit, { digit: "x" }));
   expect(unknown.querySelectorAll("[data-weather-digit]")).toHaveLength(0);

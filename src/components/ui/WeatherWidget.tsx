@@ -1187,17 +1187,15 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                     <span data-testid="wx-hero-temp" className="text-[64px] font-black leading-none tracking-[-0.03em] sm:text-[80px] xl:text-[96px]" style={{ color: skin.ink }}>—</span>
                   ) : (
                     <>
-                      {/* Monster capsule digits — the span keeps the responsive
-                          text classes, so each glyph box (0.625em × 1em) tracks
-                          the 64/80/96px hero scale. The LAST digit peers; every
-                          other glyph sleeps (one eyeball across the number). */}
+                      {/* Monster digits use flat color sections, a shallow
+                          extruded side face, and one simple eye per numeral. */}
                       <span
                         data-testid="wx-hero-temp"
                         className="relative z-10 flex text-[64px] font-black leading-none tracking-[-0.03em] tabular-nums sm:text-[80px] xl:text-[96px]"
                         style={{ color: skin.ink }}
                       >
-                        {String(heroTemp).split("").map((ch, i, chars) => (
-                          <MonsterDigit key={i} digit={ch} eye={i === chars.length - 1} />
+                        {String(heroTemp).split("").map((ch, i) => (
+                          <MonsterDigit key={i} digit={ch} />
                         ))}
                       </span>
                       <span className="self-start mt-1.5 ml-0.5 text-[22px] font-light leading-none sm:mt-2 sm:text-[28px]" style={{ color: skin.inkSoft }} aria-hidden="true">°</span>
