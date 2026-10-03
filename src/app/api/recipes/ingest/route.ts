@@ -7,108 +7,90 @@ import {
   schemaRecipeToRecipe,
   type ExtractedRecipe,
 } from "@/lib/recipe-extract";
+import { requireLiveSession } from "@/lib/server-auth";
+import {
+  OutboundRequestError,
+  safeFetchOutboundText,
+  type SafeFetchResult,
+} from "@/lib/safe-fetch";
 
+// One deadline for the WHOLE import fetch — every redirect hop and the CDN
+// user-agent retry share it, so a chain of slow hops cannot multiply into a
+// multi-minute hold on a server worker.
+const FETCH_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
-function isPrivateIP(hostname: string): boolean {
-  if (!hostname) return true;
-  if (/localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0/.test(hostname)) return true;
-  const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (!ipMatch) return false;
-  const [, a, b] = ipMatch.map(Number);
-  if (a === 10) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  return false;
-}
+// Tried in order. Many CDNs 403 a non-browser UA outright, so the second entry
+// is a browser-shaped string; the guard re-validates the target on the retry.
+const IMPORT_USER_AGENTS: readonly string[] = [
+  "Consuela-Dashboard/1.0 RecipeImporter",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+];
 
 function cleanExtractedText(s: string) {
   return s.replace(/\s+/g, " ").trim();
 }
 
-class FetchError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
-async function readBodyCapped(res: Response): Promise<string> {
-  const lengthHeader = Number(res.headers.get("content-length"));
-  if (Number.isFinite(lengthHeader) && lengthHeader > MAX_BODY_BYTES) {
-    throw new FetchError(413, "Page is too large to import");
-  }
-  if (!res.body) return res.text();
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      received += value.byteLength;
-      if (received > MAX_BODY_BYTES) {
-        reader.cancel().catch(() => {});
-        throw new FetchError(413, "Page is too large to import");
-      }
-      chunks.push(value);
-    }
-  }
-  return new TextDecoder("utf-8").decode(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks));
-}
-
-async function fetchHtml(url: string): Promise<string> {
-  let parsed: URL;
+/**
+ * Fetch a page the caller pasted, under the shared SSRF guard.
+ *
+ * `safeFetchOutboundText` owns every network rule — scheme, hostname shape, the
+ * resolved address on EACH redirect hop, the byte cap and the deadline — and
+ * throws `OutboundRequestError` with the status to answer with. This function
+ * only adds the human copy the import sheet shows.
+ *
+ * It returns the VALIDATED FINAL url, not the string the caller typed: a recipe
+ * must never record `http://127.0.0.1/` as its provenance.
+ */
+async function fetchHtml(url: string): Promise<{ html: string; finalUrl: string }> {
+  let result: SafeFetchResult;
   try {
-    parsed = new URL(url);
-  } catch {
-    throw new FetchError(400, "That doesn't look like a valid link. It should start with http:// or https://");
-  }
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new FetchError(400, "Only HTTP and HTTPS URLs are allowed");
-  }
-  if (isPrivateIP(parsed.hostname)) {
-    throw new FetchError(400, "Private network URLs are not allowed");
-  }
-
-  const doFetch = (userAgent: string) =>
-    fetch(url, {
-      headers: {
-        "User-Agent": userAgent,
-        Accept: "text/html,application/xhtml+xml,*/*",
-      },
-      signal: AbortSignal.timeout(15000),
+    result = await safeFetchOutboundText(url, {
+      userAgents: IMPORT_USER_AGENTS,
+      timeoutMs: FETCH_TIMEOUT_MS,
+      maxBytes: MAX_BODY_BYTES,
     });
-
-  let res = await doFetch("Consuela-Dashboard/1.0 RecipeImporter");
-  if (res.status === 403) {
-    // Many CDNs block non-browser UAs outright — retry once with a common one.
-    res = await doFetch(
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  } catch (error) {
+    if (error instanceof OutboundRequestError) throw error;
+    // Never a recipe: a failed fetch yields no text to fall back on, so this
+    // path cannot echo an unfetched body back to the caller.
+    throw new OutboundRequestError(
+      "network_error",
+      502,
+      "Could not reach that site. Check the link and try again.",
     );
   }
 
-  if (!res.ok) {
-    if (res.status === 403 || res.status === 401) {
-      throw new FetchError(
+  if (!result.ok) {
+    if (result.status === 403 || result.status === 401) {
+      throw new OutboundRequestError(
+        "http_status",
         403,
         "This site blocks automatic import. Try copying the recipe text and using the Paste text tab instead.",
       );
     }
-    if (res.status === 429) {
-      throw new FetchError(
+    if (result.status === 429) {
+      throw new OutboundRequestError(
+        "http_status",
         429,
         "This site is rate-limiting imports right now. Wait a minute and try again, or paste the recipe text instead.",
       );
     }
-    if (res.status === 404) {
-      throw new FetchError(404, "That page could not be found (404). Check the link and try again.");
+    if (result.status === 404) {
+      throw new OutboundRequestError(
+        "http_status",
+        404,
+        "That page could not be found (404). Check the link and try again.",
+      );
     }
-    throw new FetchError(502, `The site responded with an error (${res.status}). Try again in a moment.`);
+    throw new OutboundRequestError(
+      "http_status",
+      502,
+      `The site responded with an error (${result.status}). Try again in a moment.`,
+    );
   }
 
-  return readBodyCapped(res);
+  return { html: result.text, finalUrl: result.url };
 }
 
 function extractStructuredRecipe(html: string, url: string): ExtractedRecipe | null {
@@ -254,7 +236,19 @@ async function callConsuelaParseRecipe({
   };
 }
 
+// This route is privileged on both axes, so it is parent-only:
+//   * it fetches an ARBITRARY caller-supplied URL from the server, and
+//   * it spends the paid LLM key on whatever text comes back.
+// The gate re-reads the live PocketBase member row and its CURRENT role —
+// the signed cookie's role is never trusted, and a PocketBase outage fails
+// closed (503) rather than falling through to an open door. Same seam as
+// /api/consuela/planner/apply and /api/services/test.
 export async function POST(req: Request) {
+  const live = await requireLiveSession(req, { requireRole: "parent" });
+  if (!live.ok) {
+    return NextResponse.json({ error: live.error }, { status: live.status });
+  }
+
   try {
     const body = await req.json();
     const { type, url, sourceLabel, fileText } = body || {};
@@ -265,17 +259,16 @@ export async function POST(req: Request) {
       }
 
       let html: string;
+      // The validated url the body actually came from. Provenance is recorded
+      // from this, never from the submitted string.
+      let sourceUrl: string;
       try {
-        html = await fetchHtml(url);
+        const fetched = await fetchHtml(url);
+        html = fetched.html;
+        sourceUrl = fetched.finalUrl;
       } catch (e: any) {
-        if (e instanceof FetchError) {
+        if (e instanceof OutboundRequestError) {
           return NextResponse.json({ error: e.message }, { status: e.status });
-        }
-        if (e?.name === "TimeoutError" || e?.name === "AbortError") {
-          return NextResponse.json(
-            { error: "The site took too long to respond. Try again, or paste the recipe text instead." },
-            { status: 504 },
-          );
         }
         return NextResponse.json(
           { error: "Could not reach that site. Check the link and try again." },
@@ -283,7 +276,7 @@ export async function POST(req: Request) {
         );
       }
 
-      const structured = extractStructuredRecipe(html, url);
+      const structured = extractStructuredRecipe(html, sourceUrl);
       if (structured) {
         return NextResponse.json({
           recipe: {
@@ -323,13 +316,17 @@ export async function POST(req: Request) {
       try {
         const parsed = await callConsuelaParseRecipe({
           sourceLabel: sourceLabel || "Web",
-          url,
+          url: sourceUrl,
           extractedText: scrapedText,
         });
-        return NextResponse.json({ recipe: { ...parsed, sourceUrl: url }, structured: false });
+        return NextResponse.json({ recipe: { ...parsed, sourceUrl }, structured: false });
       } catch {
+        // Honest fallback: the parse failed, so the page text is offered as-is
+        // and flagged `needsReview`. The text was genuinely fetched from the
+        // validated public url above — this is never a stand-in for a failed
+        // fetch.
         return NextResponse.json({
-          recipe: recipeFromTextFallback(scrapedText, url),
+          recipe: recipeFromTextFallback(scrapedText, sourceUrl),
           structured: false,
           needsReview: true,
         });
