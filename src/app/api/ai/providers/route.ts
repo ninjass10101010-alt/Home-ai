@@ -1,20 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
 import { authorizeCurrentParentRequest } from "@/lib/server-auth";
-import { listAiProviders, upsertAiProvider, deleteAiProvider } from "@/lib/ai/providers";
-import { resetAiTargetsCache, resolveChatTargets } from "@/lib/ai/targets";
+import { listAiProviders, upsertAiProvider, deleteAiProvider, normalizeBaseUrl } from "@/lib/ai/providers";
+import { resolveChatTargets, resetAiTargetsCache } from "@/lib/ai/targets";
+import { isSameProviderEndpoint, redactUpstreamText, resolveEgressTarget } from "@/lib/ai/provider-egress";
 
 export const dynamic = "force-dynamic";
 
 /** One cheap probe per enabled provider — powers the settings status dot.
- *  Keyed providers 401 an unauthenticated /v1/models, so send the key. */
-async function probe(baseUrl: string, key?: string | null): Promise<"ok" | "unreachable" | "unknown"> {
+ *  Keyed providers 401 an unauthenticated /v1/models, so send the key — but
+ *  ONLY to the provider's own stored endpoint: `resolveEgressTarget` pins the
+ *  target to the record, and a refusal degrades to "unreachable" rather than
+ *  probing somewhere else. The upstream body is read only to be redacted
+ *  (providers echo the rejected credential back). */
+async function probe(provider: {
+  id: string;
+  baseUrl: string;
+  apiKey?: string | null;
+}): Promise<"ok" | "unreachable" | "unknown"> {
+  const target = resolveEgressTarget({ providerId: provider.id, providers: [provider] });
+  if (!target.ok) return "unreachable";
   try {
-    const headers: Record<string, string> = {};
-    if (key) headers.Authorization = `Bearer ${key}`;
-    const res = await fetch(`${baseUrl}/v1/models`, { headers, signal: AbortSignal.timeout(4000) });
-    return res.ok ? "ok" : "unreachable";
-  } catch {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (target.key) headers.Authorization = `Bearer ${target.key}`;
+    const res = await fetch(`${target.baseUrl}/v1/models`, {
+      headers,
+      signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) return "ok";
+    const detail = redactUpstreamText((await res.text().catch(() => "")).slice(0, 2000));
+    console.warn(`[ai/providers] probe ${target.baseUrl} -> ${res.status}: ${detail || res.statusText}`);
+    return "unreachable";
+  } catch (err) {
+    console.warn(`[ai/providers] probe ${target.baseUrl} failed: ${redactUpstreamText(err)}`);
     return "unreachable";
   }
 }
@@ -53,7 +71,7 @@ export async function GET(request: NextRequest) {
         ...p,
         keyPreview: p.apiKey ? p.apiKey.slice(-2) : null,
         apiKey: undefined, // decrypted key NEVER leaves the server
-        status: p.enabled ? await probe(p.baseUrl, p.apiKey) : "unknown",
+        status: p.enabled ? await probe(p) : "unknown",
       }))
     );
     // The brain shown in Settings must be the chain CHAT actually resolves —
@@ -97,7 +115,7 @@ export async function GET(request: NextRequest) {
       ...(envProviders ? { envProviders } : {}),
     });
   } catch (err) {
-    console.error("[ai/providers] GET failed:", err);
+    console.error(`[ai/providers] GET failed: ${redactUpstreamText(err)}`);
     return NextResponse.json({ providers: [], active: null, error: "config_store_unreachable" }, { status: 503 });
   }
 }
@@ -107,21 +125,57 @@ export async function PUT(request: NextRequest) {
   if (!auth.ok) return NextResponse.json({ error: auth.error ?? "unauthorized" }, { status: auth.status ?? 401 });
   try {
     const body = await request.json();
+    const id = typeof body.id === "string" && body.id ? body.id : undefined;
+    const baseUrl = normalizeBaseUrl(String(body.baseUrl ?? ""));
+    const apiKey = body.apiKey == null ? "" : String(body.apiKey);
+
+    // KEY BINDING (2026-10-03): a blank key means "keep the stored key", and the
+    // stored key belongs to the endpoint already saved on that provider. Moving
+    // a saved key onto a caller-chosen host is the same exfiltration primitive
+    // as the models route had, one write away — so an endpoint change has to
+    // come with that endpoint's own key. A provider with no stored secret may
+    // still move freely, and a store read that cannot confirm the provider
+    // fails CLOSED (an unreadable list must not become a skipped check).
+    if (id && !apiKey.trim()) {
+      const existing = (await listAiProviders()).find((p) => p.id === id);
+      if (!existing) {
+        return NextResponse.json(
+          { error: "Couldn't confirm that saved provider — reload the list and try again.", code: "provider_not_found" },
+          { status: 409 }
+        );
+      }
+      // `existing.apiKey` is the DECRYPTED key — only its emptiness is inspected,
+      // never its value, and it is never logged or returned.
+      if (existing.apiKey && !isSameProviderEndpoint(existing.baseUrl, baseUrl)) {
+        return NextResponse.json(
+          {
+            error:
+              "The saved key for this provider only works with its own endpoint. Enter the key for the new endpoint to move it, or add a separate provider.",
+            code: "endpoint_change_requires_key",
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     const provider = await upsertAiProvider({
-      id: typeof body.id === "string" && body.id ? body.id : undefined,
+      id,
       displayName: String(body.displayName ?? ""),
       baseUrl: String(body.baseUrl ?? ""),
-      // Empty key on update = "leave unchanged" (the CRUD layer's contract).
-      apiKey: body.apiKey == null ? "" : String(body.apiKey),
+      apiKey,
       models: Array.isArray(body.models) ? body.models : [],
       enabled: body.enabled,
       order: typeof body.order === "number" ? body.order : undefined,
     });
     // Drop the 10-min resolver cache so chat serves the new chain immediately.
     resetAiTargetsCache();
-    return NextResponse.json({ provider: { ...provider, apiKey: undefined } });
+    // Same contract as GET's mask(): the decrypted key never leaves the server.
+    const { apiKey: _drop, ...safeProvider } = provider;
+    return NextResponse.json({ provider: safeProvider });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+    const detail = redactUpstreamText(err);
+    console.warn(`[ai/providers] PUT failed: ${detail}`);
+    return NextResponse.json({ error: detail || "could not save provider", code: "save_failed" }, { status: 400 });
   }
 }
 
