@@ -8,17 +8,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const dbMock = vi.hoisted(() => ({
   insertChatMessage: vi.fn(async () => ({})),
+  withAdmin: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({ db: dbMock }));
 
+// The reset marker is a WRITE into the family's shared thread, so the gate is a
+// LIVE PocketBase identity read (the cookie role/name is a 7-day claim), not
+// the signed cookie alone. Only `verifySession` stays stubbed; the live read is
+// exercised through the PB seam below.
 vi.mock("@/lib/session", () => ({
   verifySession: vi.fn(async (cookie?: string) =>
     cookie
-      ? { name: "Rebecca Garcia", role: "parent", id: "m1" }
+      ? { name: "Rebecca Garcia", role: "parent", memberId: "m1" }
       : null
   ),
   SESSION_COOKIE: "consuela_session",
+}));
+
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => dbMock.withAdmin(fn),
 }));
 
 import { POST } from "@/app/api/chat/messages/route";
@@ -26,13 +35,25 @@ import { POST } from "@/app/api/chat/messages/route";
 function req(body: unknown, cookie?: string) {
   return {
     json: async () => body,
-    cookies: { get: (name: string) => (cookie && name === "consuela_session" ? { value: cookie } : undefined) },
+    // The live-identity helper reads the cookie off the raw header (the way
+    // every other server-auth caller sees it), not off a cookie accessor.
+    headers: new Headers(cookie ? { cookie: `consuela_session=${cookie}` } : {}),
   } as any;
 }
 
 beforeEach(() => {
   dbMock.insertChatMessage.mockClear();
   dbMock.insertChatMessage.mockImplementation(async () => ({}));
+  dbMock.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          if (id !== "m1") throw Object.assign(new Error("not found"), { status: 404 });
+          return { id: "m1", name: "Rebecca Garcia", role: "parent" };
+        },
+      }),
+    }),
+  );
 });
 
 describe("POST /api/chat/messages — reset marker", () => {

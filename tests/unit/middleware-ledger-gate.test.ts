@@ -1,5 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
+
+// The adult gate reads the LIVE PocketBase role, never the cookie's claim (a
+// cookie role is a 7-day statement with no revocation), so the PB seam is mocked
+// here and keyed by the memberIds these tests sign cookies with.
+const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
+}));
+
 import { middleware, isAdultOnlyPath } from "../../src/middleware";
 import { signSession, SESSION_COOKIE } from "../../src/lib/session";
 
@@ -8,6 +17,13 @@ function req(path: string, cookie?: string): NextRequest {
     headers: cookie ? { cookie } : {},
   });
 }
+
+const LIVE_MEMBERS: Record<string, { id: string; name: string; role: string }> = {
+  m1: { id: "m1", name: "Rebecca", role: "parent" },
+  m2: { id: "m2", name: "Emily", role: "child" },
+  m8: { id: "m8", name: "Rocco", role: "pet" },
+  m9: { id: "m9", name: "X", role: "guest-admin" },
+};
 
 const parentCookie = async () =>
   `${SESSION_COOKIE}=${await signSession({ memberId: "m1", name: "Rebecca", role: "parent" })}`;
@@ -21,7 +37,20 @@ const petCookie = async () =>
 const unknownRoleCookie = async () =>
   `${SESSION_COOKIE}=${await signSession({ memberId: "m9", name: "X", role: "guest-admin" })}`;
 
-beforeEach(() => vi.stubEnv("SESSION_SECRET", "test-secret-0123456789"));
+beforeEach(() => {
+  vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+  mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          const row = LIVE_MEMBERS[id];
+          if (!row) throw Object.assign(new Error("not found"), { status: 404 });
+          return { ...row };
+        },
+      }),
+    }),
+  );
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe("isAdultOnlyPath", () => {

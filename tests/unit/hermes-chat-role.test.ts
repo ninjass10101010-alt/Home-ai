@@ -1,6 +1,13 @@
-// MF-3 — chat house-control gating must derive the role from the signed
-// session cookie, never from the request body (any kid could post
-// role:"parent" and unlock ha_control_device).
+// MF-3 — chat house-control gating must derive the role from the session, never
+// from the request body (any kid could post role:"parent" and unlock
+// ha_control_device).
+//
+// The role now comes from the LIVE PocketBase row behind the session, not the
+// cookie's claim — see tests/unit/chat-live-role-authority.test.ts for the
+// drift cases. These posts are the CONVERSATIONAL wire (`stream: true`), which
+// is what a signed-in family member actually sends and what the writer gate now
+// requires; the bare `{message}` shape is the internal, non-conversational
+// completion (the recipe parse), covered by chat-thread-write-gate.test.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
@@ -11,6 +18,20 @@ const mocks = vi.hoisted(() => ({
   resolveChatTargets: vi.fn(async () => [testTarget()]),
   resetAiTargetsForTests: vi.fn(),
   buildMemoryContext: vi.fn(async () => ""),
+  withAdmin: vi.fn(),
+}));
+
+// The members collection the live-identity read goes through, keyed by the
+// memberIds these tests sign cookies with.
+const LIVE_MEMBERS: Record<string, { id: string; name: string; role: string }> = {
+  m1: { id: "m1", name: "Rebecca", role: "parent" },
+  m2: { id: "m2", name: "Caspian", role: "child" },
+  m3: { id: "m3", name: "Emily", role: "child" },
+  p1: { id: "p1", name: "Rocco", role: "pet" },
+};
+
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -54,7 +75,7 @@ function hermesReply() {
 }
 
 async function post(body: Record<string, unknown>, cookie?: string) {
-  return POST(
+  const res = await POST(
     new NextRequest("http://localhost/api/hermes/chat", {
       method: "POST",
       headers: {
@@ -64,6 +85,10 @@ async function post(body: Record<string, unknown>, cookie?: string) {
       body: JSON.stringify(body),
     })
   );
+  // The streamed route writes its frames from an async loop; drain the body so
+  // the provider call (and the persist decision) has run before assertions.
+  if ((res.headers.get("content-type") || "").includes("text/event-stream")) await res.text();
+  return res;
 }
 
 beforeEach(() => {
@@ -75,6 +100,17 @@ beforeEach(() => {
   mocks.insertChatMessage.mockClear();
   mocks.buildMemoryContext.mockClear();
   mocks.resolveChatTargets.mockReset().mockImplementation(async () => [testTarget()]);
+  mocks.withAdmin.mockReset().mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          const row = LIVE_MEMBERS[id];
+          if (!row) throw Object.assign(new Error("not found"), { status: 404 });
+          return { ...row };
+        },
+      }),
+    }),
+  );
 });
 
 afterEach(() => {
@@ -83,20 +119,21 @@ afterEach(() => {
 });
 
 describe("hermes chat — house-control role from session only", () => {
-  it("body role:\"parent\" WITHOUT a valid session yields NO house tools", async () => {
-    const res = await post({ message: "turn on the lights", role: "parent" });
+  it("body role:\"parent\" WITHOUT a valid session arms NO house tools", async () => {
+    const res = await post({ message: "turn on the lights", role: "parent", stream: true });
+    // An unverified caller is not a "child session" — it gets no manifest at all,
+    // which is strictly less than the kid read-only surface it used to inherit.
     expect(res.status).toBe(200);
-
-    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
-    // And the house-control prompt addendum never reaches Hermes either.
+    expect(mocks.buildToolsForOpenAI).not.toHaveBeenCalled();
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(sent.tools).toBeUndefined();
     expect(sent.messages[0].content).not.toContain("House control");
   });
 
   it("valid parent session cookie yields house tools regardless of a child body role", async () => {
     const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
     const res = await post(
-      { message: "turn on the lights", role: "child" },
+      { message: "turn on the lights", role: "child", stream: true },
       `${SESSION_COOKIE}=${token}`
     );
     expect(res.status).toBe(200);
@@ -106,24 +143,25 @@ describe("hermes chat — house-control role from session only", () => {
   it("child session cookie never gets house tools even with parent body role", async () => {
     const token = await signSession({ memberId: "m2", name: "Caspian", role: "child" });
     const res = await post(
-      { message: "open the garage", role: "parent" },
+      { message: "open the garage", role: "parent", stream: true },
       `${SESSION_COOKIE}=${token}`
     );
     expect(res.status).toBe(200);
     expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
   });
 
-  it("no cookie at all defaults to child-role (no house tools)", async () => {
-    const res = await post({ message: "hi" });
+  it("no cookie at all reaches neither the tool surface nor the store", async () => {
+    const res = await post({ message: "hi", stream: true });
     expect(res.status).toBe(200);
-    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
+    expect(mocks.buildToolsForOpenAI).not.toHaveBeenCalled();
+    expect(mocks.insertChatMessage).not.toHaveBeenCalled();
   });
 });
 
 describe("hermes chat — kid soul for child sessions (2026-09-06)", () => {
   it("child session gets the KID prompt naming the child, never the adult soul", async () => {
     const token = await signSession({ memberId: "m3", name: "Emily", role: "child" });
-    const res = await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
+    const res = await post({ message: "hi", stream: true }, `${SESSION_COOKIE}=${token}`);
     expect(res.status).toBe(200);
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     // Kid boot file (ai/KID.md) + per-child greeting.
@@ -136,7 +174,7 @@ describe("hermes chat — kid soul for child sessions (2026-09-06)", () => {
 
   it("parent session keeps the adult soul with admin + house-control lines", async () => {
     const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
-    const res = await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
+    const res = await post({ message: "hi", stream: true }, `${SESSION_COOKIE}=${token}`);
     expect(res.status).toBe(200);
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     // Adult boot files: SOUL + IDENTITY + TOOLS + house-control addendum.
@@ -172,7 +210,7 @@ describe("hermes chat — resolved auth header is actually sent", () => {
 describe("hermes chat — attribution follows the signed-in member (F1)", () => {
   it("parent session: user row carries the session name, assistant row stays consuela", async () => {
     const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
-    const res = await post({ message: "hello" }, `${SESSION_COOKIE}=${token}`);
+    const res = await post({ message: "hello", stream: true }, `${SESSION_COOKIE}=${token}`);
     expect(res.status).toBe(200);
     const rows = mocks.insertChatMessage.mock.calls.map((c: any[]) => c[0]);
     const userRow = rows.find((r) => r.role === "user");
@@ -182,18 +220,20 @@ describe("hermes chat — attribution follows the signed-in member (F1)", () => 
     expect(assistantRow.userId).toBe("consuela");
   });
 
-  it("no session: user row is honestly 'guest'", async () => {
-    await post({ message: "hello" });
-    const rows = mocks.insertChatMessage.mock.calls.map((c: any[]) => c[0]);
-    const userRow = rows.find((r) => r.role === "user");
-    expect(userRow.userId).toBe("guest");
+  it("no session: NOTHING is written to the shared thread (there is no 'guest' writer)", async () => {
+    // The thread is the family's; an unauthenticated caller used to land a row
+    // attributed to "guest" on every device. The writer path now needs a
+    // verified live identity, so that row can no longer be written.
+    const res = await post({ message: "hello", stream: true });
+    expect(res.status).toBe(200);
+    expect(mocks.insertChatMessage).not.toHaveBeenCalled();
   });
 });
 
 describe("hermes chat — pet sessions get the kid surface (F3)", () => {
   it("signed PET session → kid soul + child-normalized tool role, no house control", async () => {
     const token = await signSession({ memberId: "p1", name: "Rocco", role: "pet" });
-    const res = await post({ message: "treat please" }, `${SESSION_COOKIE}=${token}`);
+    const res = await post({ message: "treat please", stream: true }, `${SESSION_COOKIE}=${token}`);
     expect(res.status).toBe(200);
     expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
@@ -207,7 +247,7 @@ describe("hermes chat — adult prompts auto-carry the memory bank (F4)", () => 
   it("parent session appends the Family Context block to the system prompt", async () => {
     mocks.buildMemoryContext.mockResolvedValue("\nFamily Context:\n- test memory");
     const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
-    await post({ message: "what's for dinner" }, `${SESSION_COOKIE}=${token}`);
+    await post({ message: "what's for dinner", stream: true }, `${SESSION_COOKIE}=${token}`);
     expect(mocks.buildMemoryContext).toHaveBeenCalledWith("consuela", "demo-family", "what's for dinner");
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(sent.messages[0].content).toContain("Family Context:");
@@ -216,7 +256,7 @@ describe("hermes chat — adult prompts auto-carry the memory bank (F4)", () => 
   it("child session NEVER gets the Family Context block", async () => {
     mocks.buildMemoryContext.mockResolvedValue("\nFamily Context:\n- test memory");
     const token = await signSession({ memberId: "m2", name: "Caspian", role: "child" });
-    await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
+    await post({ message: "hi", stream: true }, `${SESSION_COOKIE}=${token}`);
     expect(mocks.buildMemoryContext).not.toHaveBeenCalled();
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(sent.messages[0].content).not.toContain("Family Context:");

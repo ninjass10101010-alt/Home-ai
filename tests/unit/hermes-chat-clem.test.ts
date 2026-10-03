@@ -8,6 +8,7 @@ import { act } from "react";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocks = vi.hoisted(() => ({
+  withAdmin: vi.fn(),
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(() => undefined),
   insertChatMessage: vi.fn(async () => ({})),
@@ -17,6 +18,17 @@ const mocks = vi.hoisted(() => ({
   resetAiTargetsForTests: vi.fn(),
   buildMemoryContext: vi.fn(async () => ""),
 }));
+
+// The live-identity read the writer path now requires goes through the members
+// collection; these rows are keyed by the memberIds the tests sign cookies with.
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
+}));
+
+const LIVE_MEMBERS: Record<string, { id: string; name: string; role: string }> = {
+  m1: { id: "m1", name: "Rebecca", role: "parent" },
+  m2: { id: "m2", name: "Caspian", role: "child" },
+};
 
 vi.mock("@/lib/hermes-tools", () => ({
   buildToolsForOpenAI: mocks.buildToolsForOpenAI,
@@ -55,17 +67,25 @@ function hermesReply(content = "ok") {
   return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }), { status: 200 });
 }
 
+/** Default to a signed-in live PARENT; pass "" for the anonymous case. */
+async function parentCookie() {
+  const { signSession, SESSION_COOKIE } = await import("@/lib/session");
+  return `${SESSION_COOKIE}=${await signSession({ memberId: "m1", name: "Rebecca", role: "parent" })}`;
+}
+
 async function post(body: Record<string, unknown>, cookie?: string) {
-  return POST(
+  const res = await POST(
     new NextRequest("http://localhost/api/hermes/chat", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(cookie ? { cookie } : {}),
+        ...(cookie !== undefined ? { cookie } : { cookie: await parentCookie() }),
       },
       body: JSON.stringify(body),
     })
   );
+  if ((res.headers.get("content-type") || "").includes("text/event-stream")) await res.text();
+  return res;
 }
 
 beforeEach(() => {
@@ -76,6 +96,17 @@ beforeEach(() => {
   toastMock.fn.mockReset();
   mocks.buildToolsForOpenAI.mockClear();
   mocks.getTool.mockClear();
+  mocks.withAdmin.mockReset().mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          const row = LIVE_MEMBERS[id];
+          if (!row) throw Object.assign(new Error("not found"), { status: 404 });
+          return { ...row };
+        },
+      }),
+    }),
+  );
   mocks.insertChatMessage.mockClear();
   mocks.resolveChatTargets.mockReset().mockImplementation(async () => [
     { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
@@ -119,7 +150,10 @@ describe("hermes chat — Clem persona", () => {
   });
 
   it("clem tools are scoped to allowlist only", async () => {
-    await post({ message: "hi", agent: "clem" });
+    const { signSession, SESSION_COOKIE } = await import("@/lib/session");
+    process.env.SESSION_SECRET = "test-secret-0123456789";
+    const childToken = await signSession({ memberId: "m2", name: "Caspian", role: "child" });
+    await post({ message: "hi", agent: "clem" }, `${SESSION_COOKIE}=${childToken}`);
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     const toolNames: string[] = (sent.tools || []).map((t: any) => t.function.name);
     const allowed = ["get_grocery_list", "get_pantry", "add_grocery_item", "complete_grocery_item", "get_weekly_meals", "get_recipes", "compare_grocery_prices"];
@@ -129,8 +163,8 @@ describe("hermes chat — Clem persona", () => {
     expect(toolNames).not.toContain("check_for_update");
     expect(toolNames).not.toContain("ha_control_device");
     expect(toolNames).not.toContain("get_proactive_suggestions");
-    // buildToolsForOpenAI called with houseControl:false + the session-derived
-    // role for Clem (no cookie here → child default → kid read-only surface)
+    // buildToolsForOpenAI called with houseControl:false + the LIVE
+    // session-derived role for Clem (a child session → kid read-only surface)
     expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
   });
 
@@ -140,7 +174,7 @@ describe("hermes chat — Clem persona", () => {
     const { signSession, SESSION_COOKIE } = await import("@/lib/session");
     process.env.SESSION_SECRET = "test-secret-0123456789";
     const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
-    await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
+    await post({ message: "hi", stream: true }, `${SESSION_COOKIE}=${token}`);
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     const systemContent = sent.messages[0].content as string;
     expect(systemContent).toContain("Dashboard Agent");
@@ -167,7 +201,7 @@ describe("hermes chat — Clem persona", () => {
   });
 
   it("system addendum appended for non-clem as well", async () => {
-    await post({ message: "hi", system: "extra persona hint" });
+    await post({ message: "hi", stream: true, system: "extra persona hint" });
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     const systemMsgs = sent.messages.filter((m: any) => m.role === "system");
     expect(systemMsgs.length).toBe(2);
@@ -179,8 +213,8 @@ describe("hermes chat — Clem persona", () => {
     expect(mocks.insertChatMessage).not.toHaveBeenCalled();
   });
 
-  it("non-clem persists chat pair", async () => {
-    await post({ message: "hello consuela" });
+  it("a streamed non-clem family-thread turn persists chat pair", async () => {
+    await post({ message: "hello consuela", stream: true });
     // should insert user + assistant
     expect(mocks.insertChatMessage).toHaveBeenCalledTimes(2);
   });
@@ -211,13 +245,15 @@ describe("hermes chat — Clem persona", () => {
 });
 
 describe("Clem role gate — child/pet/guest sessions get read-only grocery tools", () => {
-  it("guest clem session (no cookie → child default) arms NO write tools", async () => {
-    await post({ message: "add milk to the list", agent: "clem" });
+  it("an anonymous clem session gets NO write tools and stores nothing", async () => {
+    // An unverified caller keeps the answer (the exempted read the
+    // signed-out sheet depends on) but never a tool and never the store.
+    const res = await post({ message: "add milk to the list", agent: "clem" }, "");
+    expect(res.status).toBe(200);
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
-    const toolNames: string[] = (sent.tools || []).map((t: any) => t.function.name);
-    expect(toolNames).not.toContain("add_grocery_item");
-    expect(toolNames).not.toContain("complete_grocery_item");
-    expect(toolNames).toContain("get_grocery_list");
+    expect(sent.tools).toBeUndefined();
+    expect(mocks.buildToolsForOpenAI).not.toHaveBeenCalled();
+    expect(mocks.insertChatMessage).not.toHaveBeenCalled();
   });
 
   it("child clem session arms NO write tools", async () => {

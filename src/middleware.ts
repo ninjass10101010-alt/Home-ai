@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { requireLiveSession } from "@/lib/server-auth";
 
 // Prefixes that carry their own auth gate (CRON_SECRET bearer, admin
 // pin/secret, alarm PIN, emergency PIN). /api/auth/* is exempt so an
@@ -85,19 +86,35 @@ export async function middleware(request: NextRequest) {
 
   // Adult-only ledger paths — must run BEFORE the generic /api gate so
   // non-adults get the honest 403 `adult_only` instead of a bare 401.
-  // ALLOWLIST on `parent`: the roster has a third role `pet` (default PIN
-  // 0000, login-unfiltered), so denying only `child` would let a pet session
-  // read the whole ledger. Only `parent` passes; child/pet/unknown all denied.
+  // PARENT ALLOWLIST on the LIVE role: the roster has a third role `pet`
+  // (default PIN 0000, login-unfiltered), so denying only `child` would let a
+  // pet session read the whole ledger. Only `parent` passes; child/pet/unknown
+  // all denied.
+  //
+  // C — the role is re-read from PocketBase, not read off the cookie. The
+  // cookie's role is an HMAC-signed claim with a 7-day TTL and NO revocation,
+  // so trusting it left a demoted parent (or a removed one) holding the entire
+  // finance surface — the proxied app, its `/assets/*` bundles, `/api/data/*`
+  // and `/api/ofx/*` — until the cookie expired. `requireLiveSession` is the
+  // same helper and the same `requireRole:"parent"` seam /api/admin/*,
+  // /api/consuela/planner/apply and the chat planner use, and it FAILS CLOSED:
+  // a member whose live row is gone is 401/403, and a PocketBase outage is a
+  // 503 `identity_unavailable` — never "unverified, so probably a parent".
   if (isAdultOnlyPath(pathname)) {
-    const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-    if (!session || session.role !== "parent") {
+    const live = await requireLiveSession(request, { requireRole: "parent" });
+    if (!live.ok) {
       if (isAdultOnlyPage(pathname)) {
         const url = request.nextUrl.clone();
         url.pathname = "/";
         url.search = "";
         return NextResponse.redirect(url);
       }
-      return NextResponse.json({ error: "adult_only" }, { status: 403 });
+      // `identity_unavailable` is its own honest status so a PocketBase blip
+      // never reads as "you lost access".
+      return NextResponse.json(
+        { error: live.error },
+        { status: live.status === 503 ? 503 : 403 },
+      );
     }
     return NextResponse.next();
   }
@@ -121,6 +138,12 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // The adult-only gate reads the LIVE PocketBase identity (requireLiveSession →
+  // node:crypto + the PocketBase SDK), which the edge runtime cannot run, so
+  // this file is pinned to Node.js. Next 16 only forbids a `runtime` export in
+  // a `proxy.ts`; a `middleware.ts` takes it (stable since 15.5), and 16's own
+  // proxy runs on Node.js by default anyway.
+  runtime: "nodejs",
   // note: "/ledger/:path*" with zero-or-more semantics matches "/ledger" itself
   matcher: ["/api/:path*", "/_design-system", "/ledger/:path*", "/ledger-app/:path*", "/assets/:path*", "/memory/:path*"],
 };

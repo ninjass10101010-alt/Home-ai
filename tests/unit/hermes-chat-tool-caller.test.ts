@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   resetAiTargetsForTests: vi.fn(),
   buildMemoryContext: vi.fn(async () => ""),
   requireLiveSession: vi.fn(),
+  authorizeCurrentMemberRequest: vi.fn(),
   recordChatOutcome: vi.fn(),
   handler: vi.fn(async (_args: Record<string, unknown>, _context?: unknown) => '{"ok":true}'),
 }));
@@ -32,6 +33,10 @@ vi.mock("@/lib/server-auth", () => ({
   readSessionCookie: (request: Request) =>
     request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1],
   requireLiveSession: mocks.requireLiveSession,
+  // The conversational writer path resolves its identity through this helper.
+  // Stubbed the same way as requireLiveSession above; the LIVE-vs-cookie drift
+  // and the fail-closed outage are covered by chat-live-role-authority.test.ts.
+  authorizeCurrentMemberRequest: mocks.authorizeCurrentMemberRequest,
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -117,11 +122,23 @@ async function beforeTest() {
   mocks.recordChatOutcome.mockClear();
   mocks.resolveChatTargets.mockReset().mockImplementation(async () => [testTarget()]);
   const { verifySession } = await import("@/lib/session");
-  mocks.requireLiveSession.mockReset().mockImplementation(async (request: Request) => {
+  const liveIdentity = async (request: Request) => {
     const token = request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1];
-    const signed = await verifySession(token);
+    return verifySession(token);
+  };
+  mocks.requireLiveSession.mockReset().mockImplementation(async (request: Request) => {
+    const signed = await liveIdentity(request);
     if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
     return { ok: true as const, identity: { memberId: signed.memberId, name: signed.name, role: signed.role } };
+  });
+  mocks.authorizeCurrentMemberRequest.mockReset().mockImplementation(async (request: Request) => {
+    const signed = await liveIdentity(request);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    return {
+      ok: true as const,
+      member: { id: signed.memberId, name: signed.name, role: signed.role },
+      session: signed,
+    };
   });
 }
 

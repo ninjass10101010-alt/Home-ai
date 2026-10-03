@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
+  withAdmin: vi.fn(),
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(() => undefined),
   insertChatMessage: vi.fn(async () => ({})),
@@ -9,6 +10,12 @@ const mocks = vi.hoisted(() => ({
     { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
   ]),
   resetAiTargetsForTests: vi.fn(),
+}));
+
+// A conversation needs a verified LIVE identity to write the thread; a bare
+// `{message}` with no cookie is the internal, non-conversational completion.
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -24,21 +31,48 @@ vi.mock("@/db", () => ({ db: { insertChatMessage: mocks.insertChatMessage } }));
 import { POST, resetAiChatForTests } from "@/app/api/hermes/chat/route";
 
 function hermesReply(content = "ok") {
-  return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }), { status: 200 });
+  const enc = new TextEncoder();
+  const frame = `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(enc.encode(frame));
+      c.enqueue(enc.encode("data: [DONE]\n\n"));
+      c.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
+/** A streamed family-thread turn, signed in as a live parent. */
 async function post(message: string) {
+  const { signSession, SESSION_COOKIE } = await import("@/lib/session");
+  const cookie = `${SESSION_COOKIE}=${await signSession({ memberId: "m1", name: "Rebecca", role: "parent" })}`;
   return POST(
     new NextRequest("http://localhost/api/hermes/chat", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message }),
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ message, stream: true }),
     })
-  );
+  ).then(async (res) => {
+    // Drain the SSE body so the route's async loop (the provider call and the
+    // persist decision) has finished before the assertions read the mocks.
+    await res.text();
+    return res;
+  });
 }
 
 beforeEach(() => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+  mocks.withAdmin.mockReset().mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          if (id !== "m1") throw Object.assign(new Error("not found"), { status: 404 });
+          return { id: "m1", name: "Rebecca", role: "parent" };
+        },
+      }),
+    }),
+  );
   resetAiChatForTests();
   mocks.resolveChatTargets.mockClear();
   mocks.insertChatMessage.mockClear();

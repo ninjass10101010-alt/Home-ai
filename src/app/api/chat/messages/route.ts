@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { authorizeCurrentMemberRequest } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -35,11 +35,19 @@ export async function GET(request: NextRequest) {
 // conversation" divider AND the LLM context cutoff (the chat page only sends
 // post-marker history to the model). Session-gated — guests keep a local-only
 // reset (their device shows the divider, the family thread doesn't change).
+//
+// C — the gate is a LIVE identity read, not the cookie's claim: the divider is
+// attributed to the name on the PocketBase row behind the session (a 7-day
+// cookie claim would keep stamping a stale or removed member onto the shared
+// thread), and a PocketBase outage fails closed with 503 rather than writing an
+// unattributed row. `authorizeCurrentMemberRequest` is the same helper the
+// db-gateway routes use.
 export async function POST(request: NextRequest) {
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const live = await authorizeCurrentMemberRequest(request);
+  if (!live.ok) {
+    return NextResponse.json({ error: live.error }, { status: live.status });
   }
+  const memberName = live.member?.name || live.session?.name || "family";
   const body = await request.json().catch(() => ({}));
   if (body?.action !== "reset") {
     return NextResponse.json({ error: "unsupported action" }, { status: 400 });
@@ -47,7 +55,7 @@ export async function POST(request: NextRequest) {
   const threadId = new Date().toISOString().split("T")[0];
   try {
     await db.insertChatMessage({
-      userId: session.name || "family",
+      userId: memberName,
       role: "system",
       content: "New conversation",
       source: "dashboard",

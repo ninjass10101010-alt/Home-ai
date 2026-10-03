@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
+  withAdmin: vi.fn(),
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(
     (_name: string): { handler: (args: Record<string, any>) => Promise<string> } | undefined => undefined,
@@ -12,6 +13,12 @@ const mocks = vi.hoisted(() => ({
     { url: "http://backup.local", key: "k2", model: "backup-model", provider: "backup", fallback: true },
   ]),
   resetAiTargetsForTests: vi.fn(),
+}));
+
+// The writer path requires a verified LIVE identity (a cookie role is a 7-day
+// claim with no revocation), so the members collection is mocked here.
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -26,11 +33,13 @@ vi.mock("@/db", () => ({ db: { insertChatMessage: mocks.insertChatMessage } }));
 
 import { POST, resetAiChatForTests } from "@/app/api/hermes/chat/route";
 
+let authCookie = "";
+
 async function post(body: Record<string, unknown>) {
   return POST(
     new NextRequest("http://localhost/api/hermes/chat", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", cookie: authCookie },
       body: JSON.stringify(body),
     })
   );
@@ -48,13 +57,25 @@ const buffered200 = (content: string) =>
 const BRAIN_URL = "http://brain.local/v1/chat/completions";
 const BACKUP_URL = "http://backup.local/v1/chat/completions";
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+  const { signSession, SESSION_COOKIE } = await import("@/lib/session");
+  authCookie = `${SESSION_COOKIE}=${await signSession({ memberId: "m1", name: "Rebecca", role: "parent" })}`;
   resetAiChatForTests();
   mocks.resolveChatTargets.mockClear();
   mocks.insertChatMessage.mockClear();
   mocks.getTool.mockReset().mockReturnValue(undefined);
   mocks.buildToolsForOpenAI.mockReset().mockReturnValue([]);
+  mocks.withAdmin.mockReset().mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          if (id !== "m1") throw Object.assign(new Error("not found"), { status: 404 });
+          return { id: "m1", name: "Rebecca", role: "parent" };
+        },
+      }),
+    }),
+  );
 });
 
 afterEach(() => {

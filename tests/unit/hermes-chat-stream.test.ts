@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
+  withAdmin: vi.fn(),
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(
     (_name: string): { handler: (args: Record<string, any>) => Promise<string> } | undefined => undefined,
@@ -13,6 +14,18 @@ const mocks = vi.hoisted(() => ({
   resetAiTargetsForTests: vi.fn(),
   recordChatOutcome: vi.fn(),
 }));
+
+// The writer path requires a verified LIVE identity (the cookie role is a
+// 7-day claim with no revocation), so the members collection is mocked here.
+// tests/unit/chat-live-role-authority.test.ts covers the drift/fail-closed cases.
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
+}));
+
+const LIVE_MEMBERS: Record<string, { id: string; name: string; role: string }> = {
+  m1: { id: "m1", name: "Rebecca", role: "parent" },
+  m2: { id: "m2", name: "Emily", role: "child" },
+};
 
 vi.mock("@/lib/hermes-tools", () => ({
   buildToolsForOpenAI: mocks.buildToolsForOpenAI,
@@ -51,19 +64,35 @@ const toolCallRound = (id: string | undefined, name: string, args: string, index
   DONE,
 ].join("");
 
-async function post(body: Record<string, unknown>, signal?: AbortSignal) {
+/**
+ * The Ask Consuela thread wire. The route is the family's only WRITER, so it now
+ * requires a verified live identity, so every post here signs a live PARENT in.
+ * The cookie is minted ONCE in `beforeEach` and `post` stays free of awaits:
+ * the timeout tests drive fake timers and count provider calls, so an extra
+ * microtask before the request would move the route's start off t=0.
+ * tests/unit/chat-thread-write-gate.test.ts and chat-live-role-authority.test.ts
+ * cover the anonymous, drifted-role and fail-closed cases.
+ */
+let authCookie = "";
+
+async function mintCookie(memberId: string, name: string, role: string) {
+  const { signSession, SESSION_COOKIE } = await import("@/lib/session");
+  return `${SESSION_COOKIE}=${await signSession({ memberId, name, role })}`;
+}
+
+function post(body: Record<string, unknown>, signal?: AbortSignal) {
   return POST(
     new NextRequest("http://localhost/api/hermes/chat", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", cookie: authCookie },
       body: JSON.stringify(body),
       signal,
     })
   );
 }
-
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+  authCookie = await mintCookie("m1", "Rebecca", "parent");
   resetAiChatForTests();
   mocks.resolveChatTargets.mockReset().mockResolvedValue([
     { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
@@ -72,6 +101,17 @@ beforeEach(() => {
   mocks.recordChatOutcome.mockClear();
   mocks.getTool.mockReset().mockReturnValue(undefined);
   mocks.buildToolsForOpenAI.mockReset().mockReturnValue([]);
+  mocks.withAdmin.mockReset().mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          const row = LIVE_MEMBERS[id];
+          if (!row) throw Object.assign(new Error("not found"), { status: 404 });
+          return { ...row };
+        },
+      }),
+    }),
+  );
 });
 
 afterEach(() => {
@@ -280,7 +320,7 @@ describe("hermes chat — streaming mode", () => {
     // first Hermes request asked for a stream...
     expect(JSON.parse((globalThis.fetch as any).mock.calls[0][1].body).stream).toBe(true);
     // ...the second one does not (flag flipped after the non-SSE reply)
-    await post({ message: "two", stream: true });
+    await (await post({ message: "two", stream: true })).text();
     expect(JSON.parse((globalThis.fetch as any).mock.calls[1][1].body).stream).toBeUndefined();
   });
 
@@ -1304,9 +1344,15 @@ describe("hermes chat — per-call timeout budgets", () => {
       })));
   }
 
-  /** Fake time only moves when a timer fires, so the request lands at t=0. */
+  /**
+   * Fake time only moves when a timer fires, so the request lands at t=0. The
+   * route now re-reads the live PocketBase identity before it calls the
+   * provider, so drain microtasks (never fake time) until that request lands.
+   */
   async function settleRequestToProvider() {
-    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 20 && (globalThis.fetch as any).mock.calls.length === 0; i++) {
+      await vi.advanceTimersByTimeAsync(0);
+    }
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   }
 
@@ -1529,6 +1575,17 @@ describe("hermes chat — reasoning + tool activity frames", () => {
     expect(json.content).toBe("Done.");
     expect("reasoning" in json).toBe(false);
     expect(Object.keys(json).filter((k) => k !== "content" && k !== "proposals")).toEqual([]);
+    // A buffered turn is not a family-thread turn, so it stores nothing at all.
+    expect(mocks.insertChatMessage).not.toHaveBeenCalled();
+
+    // The storage half of the contract, on the turn that DOES persist: the
+    // persisted row carries the answer and never the reasoning transcript.
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      reasoningToken("thought about it"),
+      token("Done."),
+      DONE,
+    ])));
+    await (await post({ message: "hi", stream: true })).text();
     expect(assistantRow()?.content).toBe("Done.");
     expect(JSON.stringify(mocks.insertChatMessage.mock.calls)).not.toContain("thought about it");
   });

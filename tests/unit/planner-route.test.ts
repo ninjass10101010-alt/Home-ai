@@ -5,6 +5,7 @@ import type { ContextPack } from "@/lib/consuela/assistant-context";
 // Harness copied wholesale from tests/unit/hermes-chat-clem.test.ts — the
 // proven mock idiom for this route (targets resolver, fetch stub, db seam).
 const mocks = vi.hoisted(() => ({
+  withAdmin: vi.fn(),
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(() => undefined),
   insertChatMessage: vi.fn(async () => ({})),
@@ -18,6 +19,13 @@ const mocks = vi.hoisted(() => ({
     today: { iso: "2026-09-14", weekday: "Mon", yesterdayIso: "2026-09-13", weekStartISO: "2026-09-07", tz: "America/Detroit" },
     unavailable: [],
   })),
+}));
+
+// The planner's parent gate re-reads the LIVE PocketBase role (a cookie role is
+// a 7-day claim with no revocation), so the members collection is mocked here.
+// The drift / outage cases live in tests/unit/chat-live-role-authority.test.ts.
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -91,6 +99,22 @@ beforeEach(() => {
   mocks.insertChatMessage.mockClear();
   mocks.buildMemoryContext.mockClear();
   mocks.loadContextPack.mockClear();
+  mocks.withAdmin.mockReset().mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          const row =
+            id === "m1"
+              ? { id: "m1", name: "Rebecca", role: "parent" }
+              : id === "m2"
+                ? { id: "m2", name: "Emily", role: "child" }
+                : null;
+          if (!row) throw Object.assign(new Error("not found"), { status: 404 });
+          return { ...row };
+        },
+      }),
+    }),
+  );
   mocks.resolveChatTargets.mockReset().mockImplementation(async () => [
     { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
   ]);
@@ -133,9 +157,13 @@ describe("hermes chat — planner agent", () => {
     expect(sent.messages[1].content).toContain("Mon, Tue");
   });
 
-  it("planner: child session → 401, provider never called", async () => {
+  it("planner: child session → 403 adult_only, provider never called", async () => {
+    // The parent gate is the sibling `requireLiveSession({requireRole:"parent"})`
+    // seam, so a live non-parent is 403 `adult_only` (not a bare 401). The
+    // response SHAPE is unchanged, because the meal/tasks UI keys its error copy
+    // off `reason`.
     const res = await post({ agent: "planner", intent: "meal_week" }, await childCookie());
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ ok: false, reason: "unauthorized" });
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(mocks.insertChatMessage).not.toHaveBeenCalled();

@@ -1,5 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
+
+// The adult-only gate re-reads the LIVE PocketBase identity (a cookie role is a
+// 7-day claim with no revocation), so the PB seam is mocked here. Rows are
+// keyed by the memberIds these tests sign cookies with.
+const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
+}));
+
 import { middleware, config } from "../../src/middleware";
 import { signSession, SESSION_COOKIE } from "../../src/lib/session";
 
@@ -9,7 +18,26 @@ function req(path: string, cookie?: string): NextRequest {
   });
 }
 
-beforeEach(() => vi.stubEnv("SESSION_SECRET", "test-secret-0123456789"));
+const LIVE_MEMBERS: Record<string, { id: string; name: string; role: string }> = {
+  m1: { id: "m1", name: "R", role: "parent" },
+  m2: { id: "m2", name: "C", role: "child" },
+  p1: { id: "p1", name: "Rocco", role: "pet" },
+};
+
+beforeEach(() => {
+  vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+  mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          const row = LIVE_MEMBERS[id];
+          if (!row) throw Object.assign(new Error("not found"), { status: 404 });
+          return { ...row };
+        },
+      }),
+    }),
+  );
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe("middleware /api gate", () => {

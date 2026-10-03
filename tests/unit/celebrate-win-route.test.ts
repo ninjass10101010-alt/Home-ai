@@ -20,6 +20,22 @@ vi.mock("@/lib/pb-auth", () => ({
 }));
 
 vi.mock("@/lib/server-auth", () => ({
+  // The claim is authorized from the LIVE PocketBase row, not the cookie's role
+  // claim (a cookie role is a 7-day statement with no revocation). This mock
+  // stands in for that whole helper: the signed cookie still has to be valid
+  // (401 without it), and the identity + role it hands back come from the live
+  // roster, exactly as the real `authorizeCurrentMemberRequest` reads them off
+  // the members collection. tests/unit/chat-thread-live-identity.test.ts covers
+  // the drift cases (a cookie claiming a role its live row no longer has).
+  authorizeCurrentMemberRequest: async (request: Request) => {
+    const token = /consuela_session=([^;]+)/.exec(request.headers.get("cookie") || "")?.[1];
+    const session = await mocks.verifySession(token);
+    if (!session) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    const roster: Record<string, any> = { "m-cas": KID_ROW, "m-reb": MOM_ROW };
+    const row = roster[session.memberId];
+    if (!row) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    return { ok: true as const, member: row, session };
+  },
   findMemberByName: (name: string) => mocks.findMemberByName(name),
   // Faithful copy of the pure matcher in src/lib/server-auth.ts (kept real so
   // the ownership check is tested against the same matching rules).
@@ -44,6 +60,9 @@ import { POST } from "@/app/api/hall-of-fame/celebrate/route";
 
 const KID = { id: "m-cas", name: "Caspian Garcia", role: "child" };
 const MOM = { id: "m-reb", name: "Rebecca Garcia", role: "parent" };
+// The same rows as the LIVE members collection the auth helper reads.
+const KID_ROW = { ...KID };
+const MOM_ROW = { ...MOM };
 
 // Session-cookie convention for this suite: "role|full name|memberId".
 const KID_COOKIE = "child|Caspian Garcia|m-cas";

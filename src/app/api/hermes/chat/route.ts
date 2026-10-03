@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildToolsForOpenAI, getTool, type ToolHandlerContext } from "@/lib/hermes-tools";
 import { db } from "@/db";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { authorizeCurrentMemberRequest, requireLiveSession } from "@/lib/server-auth";
 import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt, HOUSE_CONTROL_PROMPT_ADDENDUM } from "@/lib/consuela-prompts";
 import { buildMemoryContext } from "@/lib/family-memory";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -416,31 +416,159 @@ interface ChatRequestBody {
 }
 
 /**
- * Shared preamble for both chat modes: session-derived role, agent routing,
- * tool scoping, and the message stack. Used by the buffered POST and the
- * streamed handler so the two paths can never drift.
+ * A verified LIVE caller. `role` is read off the PocketBase row behind the
+ * session — never off the cookie, whose role is a 7-day claim with no
+ * revocation. `memberId`/`name` are the LIVE row's, so a thread row is
+ * attributed to the member who actually exists today.
  */
-async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
+interface LiveCaller {
+  memberId: string;
+  name: string;
+  role: string;
+}
+
+/**
+ * Agents that are a human-facing CONVERSATION. Everything else on this route
+ * is either the planner (dispatched before this runs, parent-gated, zero
+ * tools) or an internal non-conversational completion.
+ */
+const CONVERSATIONAL_AGENTS = new Set(["clem"]);
+
+/**
+ * The identity this request speaks with.
+ *
+ * `live` is the VERIFIED identity: `authorizeCurrentMemberRequest` re-read the
+ * PocketBase row behind the session cookie, so `role`/`name`/`memberId` are the
+ * live values and never the cookie's 7-day claim.
+ *
+ * `internal` marks the request as one that must not touch family data AT ALL —
+ * no tool manifest is built for it, it can never arm a write tool, and it can
+ * never write to the shared thread. It is set for a request that presents no
+ * live identity (the anonymous completion the API_EXEMPT carve-out exists for)
+ * or one that declares a conversation while its identity cannot be verified.
+ */
+interface ChatCaller {
+  live: LiveCaller | null;
+  internal: boolean;
+}
+
+/**
+ * Is this request a turn in a human chat surface?
+ *
+ * Stated POSITIVELY, because the previous gate inferred it from an ABSENCE:
+ * `persistChatPair` fired on `!isClem`, so a caller that named no agent was
+ * assumed to be the family talking to Consuela. Both recipe-parse callers
+ * (useRecipes.ts:188 in the browser, api/recipes/ingest/route.ts:163
+ * server-side) post a bare `{message}`, satisfied `!isClem`, and landed a
+ * ~3000-char parse prompt plus raw JSON in the shared `chat_messages` as chat
+ * bubbles on every device.
+ *
+ * A conversation declares itself: `stream: true` (the SSE thread contract —
+ * only `src/lib/chat-stream.ts` speaks it) or a named conversational agent
+ * (`clem`, the meal sheet). A bare `{message}` with no live identity is an
+ * internal completion call — the server-side recipe parse has no cookie and no
+ * session, and that read is exactly what the middleware carve-out exists for.
+ */
+function isConversationalChat(body: ChatRequestBody): boolean {
+  return (
+    body.stream === true ||
+    (typeof body.agent === "string" && CONVERSATIONAL_AGENTS.has(body.agent))
+  );
+}
+
+/**
+ * Resolve who this request speaks with.
+ *
+ * B — this route sits on the middleware API_EXEMPT list, and it is the family
+ * thread's only WRITER, so identity is resolved here, in the route, where the
+ * request body can say what kind of call it is.
+ *
+ * The WRITE and the TOOL SURFACE both require a verified live identity. What
+ * stays open is only what the exemption exists for: the completion. A
+ * conversation from an anonymous caller is answered with NO tools and NO store
+ * (the signed-out Ask Consuela surface documented in DESIGN.md — "guest AI
+ * still answers" — keeps working, but it can no longer reach the family's
+ * pantry/grocery/leaderboard/tasks/calendar, and it can no longer put a row in
+ * the shared thread as `guest`). A recipe parse with no live identity is the
+ * same tool-free completion.
+ *
+ * A PocketBase outage is the one case that is refused outright, whatever the
+ * caller: an unverifiable identity fails CLOSED instead of being treated as
+ * anonymous.
+ */
+async function resolveChatCaller(
+  request: NextRequest,
+  body: ChatRequestBody,
+): Promise<ChatCaller | Response> {
+  const live = await authorizeCurrentMemberRequest(request);
+  if (live.status === 503) {
+    return NextResponse.json({ error: live.error }, { status: live.status });
+  }
+  if (live.ok) {
+    return {
+      live: {
+        memberId: String(live.member?.id ?? live.session?.memberId ?? ""),
+        name: String(live.member?.name ?? live.session?.name ?? ""),
+        role: String(live.member?.role ?? live.session?.role ?? ""),
+      },
+      internal: false,
+    };
+  }
+  return { live: null, internal: true };
+}
+
+/**
+ * Shared preamble for both chat modes: live-identity-derived role, agent
+ * routing, tool scoping, and the message stack. Used by the buffered POST and
+ * the streamed handler so the two paths can never drift.
+ *
+ * An `internal` caller (see {@link resolveChatCaller}) gets no tools and can
+ * never persist.
+ */
+async function buildChatContext(
+  request: NextRequest,
+  body: ChatRequestBody,
+  caller: ChatCaller,
+) {
   const { history = [], system, agent } = body;
   const message = body.message ?? "";
+  const { live, internal } = caller;
   // MF-3 — role comes from the signed session cookie only; body.role is
-  // ignored entirely (any kid could otherwise post role:"parent"). No valid
-  // session → child-role default: no house-control tools.
-  // F3 — PARENT ALLOWLIST (the Ledger-gate idiom): the roster's third role
-  // "pet" (Rocco/Rico, default PIN 0000) is NOT an adult. Everything that
-  // isn't a parent session — child, pet, guest — gets the kid soul and the
-  // kid tool surface exactly as child sessions do today.
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  const isAdult = session?.role === "parent";
+  // ignored entirely (any kid could otherwise post role:"parent"). F3 — PARENT
+  // ALLOWLIST (the Ledger-gate idiom): the roster's third role "pet"
+  // (Rocco/Rico, default PIN 0000) is NOT an adult. Everything that isn't a
+  // parent gets the kid soul and the kid tool surface exactly as child
+  // sessions do today.
+  //
+  // C — and the parent decision itself is the LIVE row's, not the cookie's.
+  // `caller` only exists because `authorizeCurrentMemberRequest` already
+  // re-read that row (and refused the request outright when PocketBase could
+  // not answer), so nothing here can re-promote a demoted parent: a stale
+  // `role:"parent"` cookie over a live `child` row yields the kid surface, the
+  // kid soul, and no house-control tools. No session → the same kid default.
+  const isAdult = live?.role === "parent";
   const role = isAdult ? "parent" : "child";
   const houseControl = isAdult;
   const isClem = agent === "clem";
+  // A + B — the one positive declaration that a turn belongs in the family's
+  // SHARED thread: the streamed thread contract, minus the sheet, from a member
+  // whose identity is VERIFIED live. A parse prompt (never streamed) and an
+  // unverified caller (never a `live` identity) can neither satisfy it, so
+  // neither can reach `persistChatPair` — which is what removes the `"guest"`
+  // writer from the thread entirely.
+  const threadTurn = body.stream === true && !isClem && live !== null;
   // Clem used to hardcode a gateway URL — now every agent rides the same
   // dashboard-owned chain (Task 4 of the 2026-09-07 brain cutover).
   const targets = await resolveChatTargets();
-  const tools = isClem
-    ? buildToolsForOpenAI({ houseControl: false, role }).filter((t) => CLEM_TOOLS.includes(t.function.name))
-    : buildToolsForOpenAI({ houseControl, role });
+  // An internal completion call (no live identity — the server-side recipe
+  // parse) is not a chat surface: it gets NO tool manifest at all, and the loop
+  // below sends no `tools` key, so a prompt injected through a scraped recipe
+  // page can neither read nor write family data.
+  const tools = internal
+    ? []
+    : isClem
+      ? buildToolsForOpenAI({ houseControl: false, role }).filter((t) => CLEM_TOOLS.includes(t.function.name))
+      : buildToolsForOpenAI({ houseControl, role });
   const recentHistory = (history || [])
     .slice(-6)
     .filter((h: any) => h && typeof h.content === "string" && h.content.trim())
@@ -454,7 +582,7 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
   let baseSystem = isClem
     ? buildClemSystemPrompt()
     : role === "child"
-      ? buildKidSystemPrompt(undefined, session?.name)
+      ? buildKidSystemPrompt(undefined, live?.name)
       : buildConsuelaSystemPrompt() + (houseControl ? HOUSE_CONTROL_PROMPT_ADDENDUM : "");
   // F4 — adult continuity: the memory bank rides along in every parent prompt
   // (self-formats as "Family Context: …"). Never for child/pet/guest/Clem,
@@ -476,27 +604,33 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
   ];
   return {
     message,
+    internal,
+    threadTurn,
     isClem,
     targets,
     tools,
     messages,
     role,
-    sessionName: session?.name,
+    sessionName: live?.name ?? "",
     // The normalized `role` (pet folds into "child", guest has no session and
     // is non-adult) rides every tool call as the actor identity, so a task
     // command re-checks adulthood instead of trusting the allowlist.
     toolContext: {
       source: "hermes" as const,
       caller: {
-        memberId: session?.memberId ?? "",
-        name: session?.name ?? "Guest",
+        memberId: live?.memberId ?? "",
+        name: live?.name ?? "Guest",
         role,
       },
     } satisfies ToolHandlerContext,
   };
 }
 
-async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): Promise<Response> {
+async function handleStreamedChat(
+  request: NextRequest,
+  body: ChatRequestBody,
+  caller: ChatCaller,
+): Promise<Response> {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
   const enc = new TextEncoder();
@@ -523,7 +657,8 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
     // Health-recorder context hoisted so the catch path records rounds/brain too.
     const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
     try {
-      const { message, isClem, targets, tools, messages, sessionName, toolContext } = await buildChatContext(request, body);
+      const { message, threadTurn, internal, targets, tools, messages, sessionName, toolContext } =
+        await buildChatContext(request, body, caller);
       ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
       ctx.targets = targets.length;
       let finalContent = "";
@@ -556,10 +691,13 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
             write(sseFrame(JSON.stringify({ round: round + 1, target: `t${targetIndex}` }), "attempt"));
             ({ content, tool_calls } = await callAiStream(
               wrapup ? [...messages, { role: "system", content: WRAPUP_NOTE }] : messages,
-              wrapup ? { target } : { tools, target },
+              // `internal` is tool-free for its whole life (see buildChatContext)
+              // — like the wrap-up round, it drops `tools` AND `tool_choice`
+              // together, since some providers 400 on a tool_choice with no set.
+              wrapup || internal ? { target } : { tools, target },
               write,
             ));
-            if (wrapup) tool_calls = undefined; // a wrap-up round never executes tools
+            if (wrapup || internal) tool_calls = undefined; // a tool-free round never executes tools
             // An EMPTY round (reasoning consumed the budget, no content, no
             // tool calls) is not an answer — fail over to the next target.
             // callAiStream already announced "Thinking deeply…" if reasoning
@@ -641,8 +779,9 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       // `[DONE]` therefore means "this answer is complete and has been handed to the
       // requester", not "the row is already in PocketBase" — the two are now one
       // or two PB round trips apart. Two narrower corrections to the older,
-      // stronger phrasing: a **Clem** turn (`!isClem` below) stores nothing at
-      // all, so for that agent the terminator promises delivery and nothing
+      // stronger phrasing: a **Clem** turn (and any non-conversational internal
+      // call — see `threadTurn`) stores nothing at
+      // all, so for those the terminator promises delivery and nothing
       // more; and even for Consuela the promise is conditional, because any
       // client-side abort between this write and the guard still suppresses the
       // store. Nothing in the shipped client depends on the stronger reading: the
@@ -671,7 +810,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       // the watchdog kills then reaches the family thread from no device at all —
       // the only one still holding the answer is the requester showing the offline
       // copy. The buffered and planner calls still budget AI_TIMEOUT_MS(60s).
-      if (!isClem && !clientGone && !request.signal.aborted) {
+      if (threadTurn && !clientGone && !request.signal.aborted) {
         await persistChatPair(request, message, finalContent, sessionName || "");
       }
     } catch (error: any) {
@@ -713,11 +852,20 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
  * touched. Single round per attempt, target-chain fail-over inside an
  * attempt, exactly ONE repair retry when the model ignores the JSON contract,
  * then an honest {ok:false, reason}.
+ *
+ * The parent gate re-reads the LIVE PocketBase row — the same helper and the
+ * same `requireLiveSession({requireRole:"parent"})` seam
+ * /api/consuela/planner/apply and /api/admin/* use — so a cookie whose role
+ * claim has gone stale is refused and a PocketBase outage fails closed. The
+ * response keeps its `{ok:false, reason}` shape (the meal/tasks UI keys its
+ * error copy off `reason`), with the honest `identity_unavailable` reason for
+ * an outage so it never reads as "sign in again".
  */
 async function handlePlanner(request: NextRequest, body: ChatRequestBody) {
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (session?.role !== "parent") {
-    return NextResponse.json({ ok: false, reason: "unauthorized" }, { status: 401 });
+  const live = await requireLiveSession(request, { requireRole: "parent" });
+  if (!live.ok) {
+    const reason = live.status === 503 ? "identity_unavailable" : "unauthorized";
+    return NextResponse.json({ ok: false, reason }, { status: live.status });
   }
   const intent = String(body.intent || "");
   if (!isPlannerIntent(intent)) {
@@ -784,8 +932,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Message is required" }, { status: 400 });
   }
 
+  // B — see resolveChatCaller: the WRITE and the tool surface both require a
+  // verified live identity; only the completion stays open.
+  const resolved = await resolveChatCaller(request, body);
+  if (resolved instanceof Response) return resolved;
+  const { live: caller, internal } = resolved;
+
   if (body.stream === true) {
-    return handleStreamedChat(request, body);
+    return handleStreamedChat(request, body, { live: caller, internal });
   }
 
   const bufferedStartedAt = Date.now();
@@ -793,10 +947,11 @@ export async function POST(request: NextRequest) {
   // carry the REAL rounds/brain/agent instead of zeroed placeholders.
   const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
   try {
-    const { isClem, targets, tools, messages, role, sessionName, toolContext } = await buildChatContext(request, body);
+    const { isClem, internal: isInternal, threadTurn, targets, tools, messages, role, sessionName, toolContext } =
+      await buildChatContext(request, body, { live: caller, internal });
     ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
     ctx.targets = targets.length;
-    console.log(`[ai] agent=${body.agent || "consuela"} isClem=${isClem} brain=${targets[0]?.provider}/${targets[0]?.model} role=${role}`);
+    console.log(`[ai] agent=${body.agent || "consuela"} isClem=${isClem} internal=${isInternal} brain=${targets[0]?.provider}/${targets[0]?.model} role=${role}`);
 
     if (targets.length === 0) {
       recordChatOutcome({ outcome: "unconfigured", agent: ctx.agent, rounds: 0, ms: Date.now() - bufferedStartedAt, brain: null, targets: 0 });
@@ -809,6 +964,11 @@ export async function POST(request: NextRequest) {
       ctx.rounds = round + 1;
       // Final round = forced tool-free wrap-up (mirrors the streamed path).
       const wrapup = round === MAX_ROUNDS - 1;
+      // An internal, non-conversational call (the recipe parse) is tool-free
+      // for its WHOLE life — it arms no manifest and offers no `tools` key to
+      // the provider, exactly like the planner. No tool round can follow, so
+      // round 0 answers and the loop ends.
+      const toolFree = wrapup || isInternal;
       let content = "";
       let tool_calls: ToolCall[] | undefined;
       for (const target of targets) {
@@ -816,9 +976,9 @@ export async function POST(request: NextRequest) {
         try {
           ({ content, tool_calls } = await callAi(
             wrapup ? [...messages, { role: "system", content: WRAPUP_NOTE }] : messages,
-            wrapup ? { target } : { tools, toolChoice: "auto", target },
+            toolFree ? { target } : { tools, toolChoice: "auto", target },
           ));
-          if (wrapup) tool_calls = undefined; // a wrap-up round never executes tools
+          if (toolFree) tool_calls = undefined; // a tool-free round never executes tools
           if (!content && (!tool_calls || tool_calls.length === 0)) {
             lastErr = new Error(`empty round from ${target.model}`);
             console.warn(`[ai] target ${target.model}: empty round (reasoning budget?) (${Date.now() - callStarted}ms) — trying next target`);
@@ -837,7 +997,10 @@ export async function POST(request: NextRequest) {
       }
 
       if (!tool_calls || tool_calls.length === 0) {
-        if (!isClem) await persistChatPair(request, message, content, sessionName || "");
+        // A — the positive thread-turn intent, not `!isClem`. Neither a Clem
+        // sheet turn, nor an internal completion, is a turn in the family's
+        // shared thread, so neither may write a row into it.
+        if (threadTurn) await persistChatPair(request, message, content, sessionName || "");
         recordChatOutcome({
           outcome: wrapup ? "wrapup" : "ok",
           agent: ctx.agent,
