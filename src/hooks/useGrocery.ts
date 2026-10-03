@@ -41,6 +41,11 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
   const [groceryItems, setGroceryItems] = useState<GroceryItem[]>([]);
   const [activeCategory, setActiveCategory] = useState("all");
   const [isSyncing, setIsSyncing] = useState(false);
+  // Last sync failure, kept as a real error state. A sync that did not happen
+  // must never be reported as "✅ Synced +0 items" — the meal/pantry reads fail
+  // for real (signed-out gateway, PB down), and +0 there means "we could not
+  // read your data", not "you need nothing".
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [recentlyBought, setRecentlyBought] = useState<{ name: string; emoji: string; category: string }[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -259,26 +264,58 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
   const syncMealToGrocery = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
+    setSyncError(null);
     try {
       const result = await mealSyncService.syncMealPlanToGrocery("demo", plannedMeals);
-      showToast(`✅ Synced +${result.added} items to grocery`);
+      // Branch on `ok` BEFORE the counts: a failure carries zeros by design and
+      // must never be read as "synced, nothing to add".
+      if (!result.ok) {
+        const message = result.message || "Meal sync failed — nothing was added.";
+        setSyncError(message);
+        showToast(`❌ ${message}`);
+        return;
+      }
+      if (result.writeFailures > 0) {
+        const message = `Synced ${result.added + result.updated + result.removed} item${result.added + result.updated + result.removed === 1 ? "" : "s"}, but ${result.writeFailures} couldn't be saved.`;
+        setSyncError(message);
+        showToast(`⚠️ ${message}`);
+      } else {
+        showToast(`✅ Synced +${result.added} items to grocery`);
+      }
       const fresh = (await db.selectGrocery()).map(mapDbToGrocery);
       mergeFreshIntoState(fresh);
     } catch (e: any) {
-      showToast(`❌ ${e?.message || "Sync failed"}`);
+      const message = e?.message || "Meal sync failed — nothing was added.";
+      setSyncError(message);
+      showToast(`❌ ${message}`);
     } finally { setIsSyncing(false); }
   };
 
   const syncPantryToGrocery = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
+    setSyncError(null);
     try {
       const result = await mealSyncService.syncPantryToGrocery("demo");
-      showToast(`✅ Pantry synced: +${result.added} added, ${result.updated} updated`);
+      if (!result.ok) {
+        const message = result.message || "Pantry sync failed — nothing was changed.";
+        setSyncError(message);
+        showToast(`❌ ${message}`);
+        return;
+      }
+      if (result.writeFailures > 0) {
+        const message = `Pantry synced ${result.added + result.updated} row${result.added + result.updated === 1 ? "" : "s"}, but ${result.writeFailures} couldn't be saved.`;
+        setSyncError(message);
+        showToast(`⚠️ ${message}`);
+      } else {
+        showToast(`✅ Pantry synced: +${result.added} added, ${result.updated} updated`);
+      }
       const fresh = (await db.selectGrocery()).map(mapDbToGrocery);
       mergeFreshIntoState(fresh);
     } catch (e: any) {
-      showToast(`❌ ${e?.message || "Pantry sync failed"}`);
+      const message = e?.message || "Pantry sync failed — nothing was changed.";
+      setSyncError(message);
+      showToast(`❌ ${message}`);
     } finally { setIsSyncing(false); }
   };
 
@@ -288,6 +325,8 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     activeCategory,
     setActiveCategory,
     isSyncing,
+    syncError,
+    clearSyncError: () => setSyncError(null),
     recentlyBought,
     clearRecentlyBought,
     addGroceryItem,
