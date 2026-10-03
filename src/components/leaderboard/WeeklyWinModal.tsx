@@ -43,15 +43,6 @@ export default function WeeklyWinModal({ memberName }: { memberName?: string | n
         if (!found) return;
         setWin(found);
         setOpen(true);
-        // Confetti on open, honoring reduced-motion — mirrors triggerConfetti
-        // in src/app/tasks/page.tsx.
-        if (
-          typeof window !== "undefined" &&
-          typeof window.matchMedia === "function" &&
-          window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ) {
-          return;
-        }
         setConfetti(true);
         confettiTimer = setTimeout(() => setConfetti(false), 1800);
       })
