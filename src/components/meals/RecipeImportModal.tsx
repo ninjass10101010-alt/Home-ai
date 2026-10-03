@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { RECIPE_TAGS, foodEmojis } from "@/data/meals";
 import { Recipe } from "@/types/meals";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 type ImportTab = "url" | "text";
 type Phase = "idle" | "fetching" | "preview" | "saving" | "done" | "error";
@@ -92,14 +93,8 @@ export default function RecipeImportModal({
     };
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  // Shared dialog contract — replaces this sheet's own bare Escape listener.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: open, onClose });
 
   const existingByUrl = useMemo(() => {
     if (!draft.sourceUrl) return undefined;
@@ -225,7 +220,9 @@ export default function RecipeImportModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex flex-col" role="dialog" aria-modal="true" aria-label="Recipe import"
+      ref={panelRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-[200] flex flex-col outline-none" role="dialog" aria-modal="true" aria-label="Recipe import"
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}
       onClick={onClose}
     >

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Upload, Image, FileText, Mic, Video, X } from 'lucide-react';
 import type { ContentType } from '@/db/features/time-capsule';
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface ContentUploaderProps {
   onUpload: (type: ContentType, data: string, caption?: string) => Promise<void>;
@@ -16,6 +17,9 @@ export function ContentUploader({ onUpload, onClose }: ContentUploaderProps) {
   const [caption, setCaption] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Escape is inert while the upload write is in flight.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose, escapeDisabled: loading });
+
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,10 +77,12 @@ export function ContentUploader({ onUpload, onClose }: ContentUploaderProps) {
   
   return (
     <motion.div
+      ref={panelRef}
+      tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Content uploader"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Content uploader"
       onClick={onClose}
     >
       <motion.div

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Recipe } from "@/types/meals";
 import { THEMEALDB_ATTRIBUTION, THEMEALDB_SITE_URL } from "@/lib/themealdb-constants";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 type Phase = "idle" | "loading" | "results" | "empty" | "error" | "detail" | "saving" | "done";
 
@@ -38,14 +39,8 @@ export default function RecipeSearchModal({
     };
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  // Shared dialog contract — replaces this sheet's own bare Escape listener.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: open, onClose });
 
   const existingByUrl = useMemo(() => {
     if (!selected?.sourceUrl) return undefined;
@@ -122,7 +117,9 @@ export default function RecipeSearchModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex flex-col" role="dialog" aria-modal="true" aria-label="Recipe search"
+      ref={panelRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-[200] flex flex-col outline-none" role="dialog" aria-modal="true" aria-label="Recipe search"
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}
       onClick={onClose}
     >

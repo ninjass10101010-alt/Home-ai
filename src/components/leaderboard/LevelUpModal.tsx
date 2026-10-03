@@ -2,6 +2,7 @@
 
 import SoftButton from "@/components/ui/SoftButton";
 import { LEVELS } from "@/types/tasks";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface LevelUpModalProps {
   open: boolean;
@@ -13,13 +14,15 @@ interface LevelUpModalProps {
 }
 
 export default function LevelUpModal({ open, memberName, memberEmoji, oldLevel, newLevel, onClose }: LevelUpModalProps) {
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: open && newLevel > oldLevel, onClose });
+
   if (!open || newLevel <= oldLevel) return null;
 
   const levelInfo = LEVELS[newLevel - 1] || LEVELS[LEVELS.length - 1];
   const firstName = memberName.split(" ")[0];
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Level up" onClick={onClose}>
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm outline-none" role="dialog" aria-modal="true" aria-label="Level up" onClick={onClose}>
       <div
         className="relative mx-4 max-w-sm w-full rounded-2xl border border-[var(--color-accent-amber)]/30 bg-[var(--color-surface-2)] p-8 text-center animate-level-up-pop"
         onClick={(e) => e.stopPropagation()}

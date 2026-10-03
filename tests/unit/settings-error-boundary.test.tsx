@@ -3,6 +3,21 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+// The fallback renders through `PageShell` (the dock has to survive a Settings
+// crash), so the shell's own dependencies need stubbing here: this suite renders
+// the boundary bare, with none of the root layout's providers around it.
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ currentUser: null, hydrated: true }),
+}));
+vi.mock("@/hooks/useWallMode", () => ({ useWallMode: () => ({ wall: false }) }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/settings/me",
+  useRouter: () => ({ push: vi.fn(), prefetch: vi.fn(), replace: vi.fn() }),
+}));
+vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 import SettingsErrorBoundary from "@/components/ui/SettingsErrorBoundary";
 
 let shouldThrow = true;
@@ -52,11 +67,16 @@ describe("SettingsErrorBoundary", () => {
     expect(alert?.classList.contains("w-full")).toBe(true);
     expect(alert?.classList.contains("max-w-2xl")).toBe(true);
     expect(alert?.classList.contains("max-w-lg")).toBe(false);
-    for (const control of Array.from(element.querySelectorAll<HTMLElement>('button, a[href="/settings"]'))) {
+    // Scoped to the alert: the shell the fallback now brings has the dock's own
+    // buttons in the tree, and those are held to the dock's sizing, not this one.
+    for (const control of Array.from(element.querySelectorAll<HTMLElement>('[role="alert"] button, [role="alert"] a[href="/settings"]'))) {
       expect(control.classList.contains("min-h-[64px]")).toBe(true);
     }
     expect(element.querySelector("h1")?.textContent).toContain("Settings");
-    expect(element.querySelector("main")).toBeNull();
+    // The single `<main>` is PageShell's. The boundary has to bring one: it sits
+    // in `settings/layout.tsx`, so tripping it replaces `SettingsSectionView` and
+    // its shell along with the rest of the subtree.
+    expect(element.querySelectorAll("main")).toHaveLength(1);
     expect(element.querySelector("section")).toBeTruthy();
     expect(element.textContent).toContain("Try again");
     expect(element.querySelector('a[href="/settings"]')).toBeTruthy();
@@ -64,12 +84,15 @@ describe("SettingsErrorBoundary", () => {
     expect(element.textContent).not.toContain("private diagnostic detail");
   });
 
-  it("does not nest a main when the incumbent shell already supplies one", () => {
+  it("brings the dock, and only one of it, even nested in an outer main", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     const element = renderBoundary(true);
 
-    expect(element.querySelectorAll("main")).toHaveLength(1);
+    // The dead end this fixes: a Settings crash with no dock and no way out.
+    expect(element.querySelectorAll("nav")).toHaveLength(1);
+    // …and exactly one dock even when something above already supplied a main.
+    expect(element.querySelectorAll("main")).toHaveLength(2);
     expect(element.querySelector("main > section")).toBeTruthy();
   });
 

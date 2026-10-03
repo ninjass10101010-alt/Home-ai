@@ -4,6 +4,7 @@
 import React, { useState } from "react";
 import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface Member {
   name: string;
@@ -103,10 +104,12 @@ export default function MemberModal({ isOpen, onClose, member, onSave, onDelete 
     }
   }, [isOpen, member]);
 
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: isOpen, onClose });
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Member dialog" onClick={onClose}>
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Member dialog" onClick={onClose}>
       <div className="w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <Surface className="border-0 shadow-none bg-transparent">
           <div className="p-6">

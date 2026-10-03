@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { X, Plus, Minus } from 'lucide-react';
 import type { Currency } from '@/db/features/money-mountain';
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface TransactionLoggerProps {
   type: 'deposit' | 'withdrawal';
@@ -45,6 +46,10 @@ export function TransactionLogger({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+
+  // Escape is inert while the deposit/withdrawal write is in flight.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose, escapeDisabled: loading });
+
   const isDeposit = type === 'deposit';
   const currencySymbol = { USD: '$', EUR: '€', GBP: '£', CAD: '$', AUD: '$' }[currency];
   
@@ -81,10 +86,12 @@ export function TransactionLogger({
   
   return (
     <motion.div
+      ref={panelRef}
+      tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Transaction log"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Transaction log"
       onClick={onClose}
     >
       <motion.div

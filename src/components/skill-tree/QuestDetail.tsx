@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { X, Star, Clock, CheckCircle, PlayCircle } from 'lucide-react';
 import type { Quest } from '@/db/features/skill-tree';
 import { XP_REWARDS } from '@/db/features/skill-tree';
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface QuestDetailProps {
   quest: Quest;
@@ -23,6 +24,7 @@ export function QuestDetail({
   onClose,
 }: QuestDetailProps) {
   const xpReward = XP_REWARDS[quest.type]?.[quest.difficulty] || quest.xpReward;
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose });
   
   const difficultyColors = {
     easy: 'text-[var(--color-accent-mint)] bg-[var(--color-accent-mint)]/10',
@@ -32,10 +34,12 @@ export function QuestDetail({
   
   return (
     <motion.div
+      ref={panelRef}
+      tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Quest details"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Quest details"
       onClick={onClose}
     >
       <motion.div

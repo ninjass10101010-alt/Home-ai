@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 import { useWeatherConfig } from "@/hooks/useWeather";
 import { HolidayOverride } from "@/lib/weather-config";
 import { detectAutoHoliday, HOLIDAY_STYLE } from "@/lib/holiday";
@@ -18,6 +19,7 @@ import { useWallMode } from "@/hooks/useWallMode";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook, InsightEvent } from "@/lib/weather-insights";
 import { classifyReadError, type ReadFailure } from "@/lib/read-state";
+import { readReducedMotionPreference } from "@/hooks/useReducedMotionPreference";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -245,7 +247,10 @@ function useAnimatedNumber(target: number, duration = 550): number {
       return;
     }
     isFirstRealValueRef.current = false;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    // The count-up is a 550ms rAF interpolation — real motion, so it has to be
+    // the app's composed preference (OS OR the family's own toggle), not the OS
+    // query alone. Reduced motion snaps to the new value outright.
+    if (readReducedMotionPreference()) {
       prevRef.current = target;
       setDisplay(target);
       return;
@@ -811,13 +816,6 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   }, []);
 
   useEffect(() => {
-    if (!detailsOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDetailsOpen(false); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [detailsOpen]);
-
-  useEffect(() => {
     if (updatedAt === null) return;
     const id = setInterval(() => setClockTick(Date.now()), 60_000);
     return () => clearInterval(id);
@@ -1045,7 +1043,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     if (taughtRef.current || !weatherData || loading || fetchError) return;
     if (stripHours.length < 4) return;
     taughtRef.current = true;
-    if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (typeof window !== "undefined" && readReducedMotionPreference()) return;
     const target = Math.min(stripHours.length - 1, 6);
     let revertId: number | undefined;
     const teachId = window.setTimeout(() => {
@@ -1352,31 +1350,15 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const [scrubIdx, setScrubIdx] = useState(0);
   const [view, setView] = useState<"hourly" | "daily">("hourly");
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose });
 
-  // Focus lands inside the dialog on open; Tab cycles within it; focus
-  // returns to the Details trigger via the parent's close handler.
+  // Focus lands inside on open, Tab / Shift+Tab cycle within the sheet, Escape
+  // goes through `onClose` (so it also returns focus to the Details trigger),
+  // and the page behind is inert while it is up — all via the shared contract.
+  // Close is also the trap's first focusable; kept explicit because it is the
+  // safe landing spot for a keyboard user.
   useEffect(() => {
     closeBtnRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab" || !panelRef.current) return;
-      const focusables = Array.from(
-        panelRef.current.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
-      ).filter((el) => !el.hasAttribute("disabled"));
-      if (focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || !panelRef.current.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (active === last || !panelRef.current.contains(active))) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
   }, []);
 
   const hours = data.hours;
@@ -1459,7 +1441,8 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
     >
       <div
         ref={panelRef}
-        className="weather-details-modal relative flex w-full max-w-[440px] max-h-[92dvh] flex-col overflow-hidden rounded-t-2xl rounded-b-none sm:rounded-2xl sm:max-h-[84vh]"
+        tabIndex={-1}
+        className="weather-details-modal relative outline-none flex w-full max-w-[440px] max-h-[92dvh] flex-col overflow-hidden rounded-t-2xl rounded-b-none sm:rounded-2xl sm:max-h-[84vh]"
         style={{
           background: "linear-gradient(170deg, rgba(16,20,34,0.92) 0%, rgba(10,13,24,0.94) 100%)",
           border: "1px solid rgba(255,255,255,0.12)",

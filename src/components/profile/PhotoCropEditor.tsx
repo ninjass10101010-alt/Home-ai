@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 export const CROP_OUTPUT_SIZE = 256;
 export const MIN_ZOOM = 1;
@@ -85,19 +86,18 @@ export default function PhotoCropEditor({ src, onApply, onCancel }: PhotoCropEdi
     return () => ro.disconnect();
   }, []);
 
-  // Body scroll lock + Escape to cancel.
+  // Body scroll lock stays local; Escape / focus are the shared dialog contract.
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = prevOverflow;
-      document.removeEventListener("keydown", onKey);
     };
-  }, [onCancel]);
+  }, []);
+
+  // Opened from inside the ProfileSheet / Settings member Modal, so this is a
+  // NESTED dialog: the hook's stack keeps one Escape from closing both.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose: onCancel });
 
   const applyZoom = useCallback((nextZoom: number) => {
     const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom));
@@ -192,7 +192,9 @@ export default function PhotoCropEditor({ src, onApply, onCancel }: PhotoCropEdi
   // nav and its Apply/Cancel buttons become untappable.
   return createPortal(
     <div
-      className="fixed inset-0 z-[80] flex flex-col bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Photo crop editor"
+      ref={panelRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-[80] flex flex-col bg-black/70 backdrop-blur-sm outline-none" role="dialog" aria-modal="true" aria-label="Photo crop editor"
       style={{ animation: "consuela-fade-in .2s ease both" }}
     >
       <div className="flex flex-1 items-center justify-center px-6 pt-6">

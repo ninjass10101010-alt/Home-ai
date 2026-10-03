@@ -5,6 +5,7 @@ import { Recipe } from "@/types/meals";
 import { parseIngredientLine } from "@/lib/ingredient-quantity";
 import { parseInstructionsToSteps } from "@/lib/recipe-steps";
 import { localTodayISO } from "@/lib/local-date";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface CookState {
   i: number[];
@@ -42,6 +43,10 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
   const stepsDone = steps.length > 0 && checkedSteps.length >= steps.length;
   const progressPct = steps.length > 0 ? Math.round((checkedSteps.length / steps.length) * 100) : 0;
 
+  // Cook mode is rendered only while it is up, and it is the whole screen —
+  // focus lives inside it, Escape leaves it, and it comes back to the trigger.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose: onExit });
+
   useEffect(() => {
     if (stepsDone) {
       localStorage.removeItem(storageKey);
@@ -54,14 +59,6 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
     }
   }, [storageKey, checkedIngredients, checkedSteps, stepsDone]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onExit();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onExit]);
-
   const toggleIngredient = (idx: number) =>
     setCheckedIngredients((prev) => (prev.includes(idx) ? prev.filter((n) => n !== idx) : [...prev, idx]));
   const toggleStep = (idx: number) =>
@@ -69,7 +66,9 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[300] flex flex-col bg-[var(--color-surface-0)]"
+      ref={panelRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-[300] flex flex-col bg-[var(--color-surface-0)] outline-none"
       role="dialog"
       aria-modal="true"
       aria-label={`Cook mode: ${recipe.name}`}

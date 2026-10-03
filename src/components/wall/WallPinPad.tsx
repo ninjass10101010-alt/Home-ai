@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import Avatar from "@/components/ui/Avatar";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 const WRONG_PIN_COPY = "Wrong PIN — try again.";
 const UNREACHABLE_COPY = "Couldn't reach Consuela — check the connection and try again.";
@@ -37,6 +38,10 @@ export default function WallPinPad({
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Rendered only while the pad is up. Escape must not dismiss a verification
+  // still in flight — the caller may be arming an alarm behind it.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose, escapeDisabled: busy });
 
   const submit = async (code: string) => {
     setBusy(true);
@@ -89,11 +94,13 @@ export default function WallPinPad({
   return (
     <div className="fixed inset-0 z-[90] grid place-items-center bg-black/40 p-6" onClick={onClose}>
       <div
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={`Sign in as ${member.name}`}
         onClick={(e) => e.stopPropagation()}
-        className="material-thick w-full max-w-xl rounded-2xl border border-white/12 p-8 shadow-2xl"
+        className="material-thick w-full max-w-xl rounded-2xl border border-white/12 p-8 shadow-2xl outline-none"
       >
         <div className="flex flex-col items-center gap-3">
           <Avatar name={member.name} color={member.color || "green"} emoji={member.emoji} size="lg" variant="emoji" />

@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { X, Target } from 'lucide-react';
 import type { Currency } from '@/db/features/money-mountain';
 import { MOUNTAIN_THEMES } from '@/db/features/money-mountain';
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface CreateMountainFormProps {
   onClose: () => void;
@@ -43,6 +44,8 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
   const [matchPercentage, setMatchPercentage] = useState(50);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose });
+
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,10 +95,12 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
   
   return (
     <motion.div
+      ref={panelRef}
+      tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Create mountain"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Create mountain"
       onClick={onClose}
     >
       <motion.div

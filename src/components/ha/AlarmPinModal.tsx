@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface AlarmPinModalProps {
   action: "arm_home" | "disarm";
@@ -15,6 +16,11 @@ export default function AlarmPinModal({ action, onSubmit, onClose }: AlarmPinMod
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Rendered only while the confirmation is up. Escape is inert while the
+  // arm/disarm call is in flight — a half-applied alarm state must not be
+  // dismissible.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose, escapeDisabled: loading });
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -39,7 +45,9 @@ export default function AlarmPinModal({ action, onSubmit, onClose }: AlarmPinMod
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Alarm PIN entry"
+      ref={panelRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm outline-none" role="dialog" aria-modal="true" aria-label="Alarm PIN entry"
       onClick={loading ? undefined : onClose}
     >
       <div

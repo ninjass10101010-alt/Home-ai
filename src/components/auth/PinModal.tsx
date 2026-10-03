@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import SigmaImage from "@/components/ui/SigmaImage";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface PinModalProps {
   memberName: string;
@@ -31,6 +32,9 @@ export default function PinModal({ memberName, memberEmoji, memberColor, onClose
   const safeEmoji = memberEmoji || "😊";
   const safeName = memberName || "User";
 
+  // This component only renders while the pad is up, so the trap is always on.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose, escapeDisabled: loading });
+
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
@@ -53,7 +57,9 @@ export default function PinModal({ memberName, memberEmoji, memberColor, onClose
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="PIN entry"
+      ref={panelRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm outline-none" role="dialog" aria-modal="true" aria-label="PIN entry"
       onClick={onClose}
     >
       <div

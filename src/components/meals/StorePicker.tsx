@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { PINNED_STORES, ALL_STORES, StoreId } from "@/lib/stores";
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface StorePickerProps {
   open: boolean;
@@ -14,10 +15,12 @@ export default function StorePicker({ open, onClose, currentStore, onSelect }: S
   const [showAll, setShowAll] = useState(false);
   const displayStores = showAll ? ALL_STORES : PINNED_STORES;
 
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: open, onClose });
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label="Store picker">
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center outline-none" role="dialog" aria-modal="true" aria-label="Store picker">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative z-10 w-full max-w-sm rounded-t-2xl bg-[var(--color-surface-1)] p-6 shadow-2xl sm:rounded-2xl">
         <h3 className="mb-4 text-center text-lg font-bold text-text-primary">Pick a store</h3>

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { X, Calendar, Users, Tag, Sparkles } from 'lucide-react';
 import type { CreateCapsuleRequest } from '@/db/features/time-capsule';
+import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface CreateCapsuleFormProps {
   onClose: () => void;
@@ -26,6 +27,9 @@ export function CreateCapsuleForm({
   const [currentTag, setCurrentTag] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Escape is inert while the capsule write is in flight.
+  const panelRef = useDialogA11y<HTMLDivElement>({ active: true, onClose, escapeDisabled: loading });
+
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,10 +101,12 @@ export function CreateCapsuleForm({
   
   return (
     <motion.div
+      ref={panelRef}
+      tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Create time capsule"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Create time capsule"
       onClick={onClose}
     >
       <motion.div
