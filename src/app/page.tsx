@@ -143,9 +143,13 @@ function MorningBriefingSlot({ span }: { span: string }) {
 // data-holiday hook for holiday-scoped CSS. The attribute + a display:contents
 // wrapper carry them because PageShell forwards no unknown props; `contents`
 // adds no box, so the shell layout is unchanged.
-function HomeShell({ children, wall }: { children: ReactNode; wall: boolean }) {
+function HomeShell({ children, wall, mounted }: { children: ReactNode; wall: boolean; mounted: boolean }) {
   const { holiday, accentColor, glowColor } = useAtmosphericTheme();
-  const activeHoliday = holiday !== "none" && holiday !== "auto" ? holiday : null;
+  // Mounted-gated like the rest of the date-derived Home chrome: detectAutoHoliday()
+  // reads the wall clock, so SSR and client can straddle a window boundary (holiday
+  // start/end midnight, UTC-vs-local devices). Server output is always the no-holiday
+  // pair; the tint applies on the first client render after mount.
+  const activeHoliday = mounted && holiday !== "none" && holiday !== "auto" ? holiday : null;
   const pal = activeHoliday ? HOLIDAY_PALETTE[activeHoliday] : undefined;
   return (
     <div className="contents" data-holiday={activeHoliday ?? undefined}>
@@ -538,7 +542,7 @@ export default function HomePage() {
       <AtmosphericProvider>
         <AnimationBudgetProvider>
         <FogBackground />
-        <HomeShell wall={wall}>
+        <HomeShell wall={wall} mounted={mounted}>
           <EmergencyButton />
 
           <div className="relative z-10 px-4 pt-10 pb-6">

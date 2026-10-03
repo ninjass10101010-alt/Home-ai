@@ -163,9 +163,13 @@ it.each(Object.entries(EXPECTED_DIGIT_SEGMENTS))(
     expect(segments.map((segment) => segment.getAttribute("fill"))).toEqual(EXPECTED_DIGIT_COLORS[digit]);
     expect(segments.every((segment) => segment.tagName.toLowerCase() === "rect")).toBe(true);
     expect(segments.every((segment) => Number(segment.getAttribute("rx")) > 0)).toBe(true);
-    expect(segments.every((segment) => segment.hasAttribute("fill") && !segment.hasAttribute("stroke"))).toBe(true);
+    // Flat fills carry the color; a thin light outline is the silhouette carrier
+    // so low-contrast sections (blue/purple on storm/heavySnow washes) stay legible.
+    expect(segments.every((segment) => segment.hasAttribute("fill"))).toBe(true);
+    expect(segments.every((segment) => segment.getAttribute("stroke") === MONSTER.glint)).toBe(true);
     const depthFaces = Array.from(svg!.querySelectorAll<SVGRectElement>("[data-digit-depth]"));
     expect(depthFaces.map((face) => face.getAttribute("data-digit-depth"))).toEqual(expectedSegments);
+    expect(depthFaces.every((face) => !face.hasAttribute("stroke"))).toBe(true);
     for (const segment of segments) {
       const depthFace = depthFaces.find((face) => face.getAttribute("data-digit-depth") === segment.getAttribute("data-digit-segment"));
       expect(Number(depthFace?.getAttribute("x"))).toBe(Number(segment.getAttribute("x")) + 7);

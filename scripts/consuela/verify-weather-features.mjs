@@ -129,7 +129,7 @@ const heroDigits = await page.evaluate((selector) => {
   const digits = Array.from(card?.querySelectorAll('[data-testid="wx-hero-temp"] [data-weather-digit]') ?? []);
   return { count: digits.length, value: digits.map((d) => d.getAttribute("data-weather-digit")).join("") };
 }, CARD);
-ok(heroDigits.count === 2 && heroDigits.value === "70", "hero temp renders as Monster capsule digits", JSON.stringify(heroDigits));
+ok(heroDigits.count === 2 && heroDigits.value === "70", "hero temp renders as Monster segmented digits", JSON.stringify(heroDigits));
 const birdsD = await page.evaluate(() => {
   const b = document.querySelector('[data-testid="wx-birds"]');
   if (!b) return null;

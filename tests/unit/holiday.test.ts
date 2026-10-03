@@ -1,7 +1,7 @@
 // Home-ai/tests/unit/holiday.test.ts
 import { describe, it, expect } from "vitest";
 import { detectAutoHoliday, HOLIDAY_PALETTE, HOLIDAY_STYLE } from "@/lib/holiday";
-import { parseHexColor } from "@/lib/weather-contrast";
+import { parseHexColor, contrastRatio } from "@/lib/weather-contrast";
 import { contrastSafeTextAccent } from "@/components/ui/WeatherSkins";
 
 const d = (iso: string) => new Date(`${iso}T12:00:00`);
@@ -40,7 +40,8 @@ describe("HOLIDAY_PALETTE", () => {
   it("every accent is opaque hex and yields a 4.5:1 foreground", () => {
     for (const [k,v] of Object.entries(HOLIDAY_PALETTE)) {
       expect(parseHexColor((v as any).accent), k).not.toBeNull();
-      expect(() => contrastSafeTextAccent((v as any).accent, "#FFFFFF", "#000000")).not.toThrow();
+      const safe = contrastSafeTextAccent((v as any).accent, "#FFFFFF", "#000000");
+      expect(contrastRatio(safe, "#FFFFFF"), `${k} safe text vs light surface`).toBeGreaterThanOrEqual(4.5);
     }
   });
 });

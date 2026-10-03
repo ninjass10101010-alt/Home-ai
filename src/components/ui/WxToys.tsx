@@ -1022,7 +1022,7 @@ export function MonsterDigit({ digit, size }: { digit: string; size?: number }) 
               rx="12"
               fill={depthColor}
             />
-            <rect data-digit-segment={segment} {...rect} rx="12" fill={color} />
+            <rect data-digit-segment={segment} {...rect} rx="12" fill={color} stroke={MONSTER.glint} strokeOpacity="0.85" strokeWidth="6" />
           </g>
         );
       })}
