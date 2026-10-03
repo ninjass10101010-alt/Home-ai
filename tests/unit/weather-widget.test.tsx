@@ -80,8 +80,8 @@ function modalCondition(dialog: HTMLElement): Element | null {
   return dialog.querySelector('[data-testid="wx-modal-condition"]')?.firstElementChild ?? null;
 }
 
-// The hero temp renders as Monster capsule-digit SVGs — its glyphs are read
-// through the data-weather-digit hooks, not textContent.
+// The hero temp renders as segmented 3D Monster digits — read glyphs through
+// their data-weather-digit hooks, not textContent.
 function heroDigitsText(root: Element | null | undefined): string {
   return Array.from(root?.querySelectorAll('[data-testid="wx-hero-temp"] [data-weather-digit]') ?? [])
     .map((node) => node.getAttribute("data-weather-digit") ?? "")

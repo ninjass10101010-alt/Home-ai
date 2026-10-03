@@ -874,7 +874,8 @@ export function Wind({ width = 72 }: { width?: number }) {
 
 // ─── MonsterDigit — simple numeric sections + one eye ────────────
 // The Monster treatment is the number itself: familiar seven-segment geometry,
-// flat color per section, and one eye. No knots, glints, mouths, or shadows.
+// flat color per section, and one eye. No knots, glints, or mouth marks; the
+// shaded offset copy is the only depth treatment.
 type DigitSegment = "top" | "upperRight" | "lowerRight" | "bottom" | "lowerLeft" | "upperLeft" | "middle";
 type DigitSection = { segment: DigitSegment; color: string };
 
