@@ -10,7 +10,7 @@
 import { runReviews, ROLES, VIEWPORTS } from "./harness.mjs";
 
 function parseArgs(argv) {
-  const args = { route: "/", role: "parent", viewport: "phone", theme: "", out: "/tmp/warmglass/shots", settle: 1200 };
+  const args = { route: "/", role: "parent", viewport: "phone", theme: "", tod: "", out: "/tmp/warmglass/shots", settle: 1200 };
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
     const value = argv[i + 1];
@@ -18,6 +18,7 @@ function parseArgs(argv) {
     else if (key === "--role") { args.role = value; i += 1; }
     else if (key === "--viewport") { args.viewport = value; i += 1; }
     else if (key === "--theme") { args.theme = value; i += 1; }
+    else if (key === "--tod") { args.tod = value; i += 1; }
     else if (key === "--out") { args.out = value; i += 1; }
     else if (key === "--settle") { args.settle = Number(value); i += 1; }
     else if (key === "--help") { args.help = true; }
@@ -32,6 +33,8 @@ if (args.help) {
   --role <r>            ${ROLES.join(" | ")} (default parent)
   --viewport <v>        ${Object.keys(VIEWPORTS).join(" | ")} (comma-separated ok)
   --theme <t>           dark | light | dark,light — comma-separated ok
+  --tod <t>             day | night | day,night — pins <html data-timeofday>, the
+                        atmosphere layer's clock seam (default: the real clock)
   --out <dir>           screenshot dir (default /tmp/warmglass/shots)
   --settle <ms>         post-load settle time (default 1200)`);
   process.exit(0);
@@ -40,6 +43,7 @@ if (args.help) {
 const viewports = args.viewport.split(",").map((s) => s.trim()).filter(Boolean);
 const roles = args.role.split(",").map((s) => s.trim()).filter(Boolean);
 const themes = args.theme ? args.theme.split(",").map((s) => s.trim()).filter(Boolean) : [undefined];
+const tods = args.tod ? args.tod.split(",").map((s) => s.trim()).filter(Boolean) : [undefined];
 
 for (const v of viewports) {
   if (!VIEWPORTS[v]) { console.error(`Unknown viewport: ${v}`); process.exit(2); }
@@ -47,11 +51,16 @@ for (const v of viewports) {
 for (const r of roles) {
   if (!ROLES.includes(r)) { console.error(`Unknown role: ${r}`); process.exit(2); }
 }
+for (const t of tods) {
+  if (t !== undefined && t !== "day" && t !== "night") { console.error(`Unknown --tod: ${t}`); process.exit(2); }
+}
 
 const targets = [];
 for (const role of roles) {
   for (const viewport of viewports) {
-    for (const theme of themes) targets.push({ route: args.route, role, viewport, themeMode: theme });
+    for (const theme of themes) {
+      for (const timeOfDay of tods) targets.push({ route: args.route, role, viewport, themeMode: theme, timeOfDay });
+    }
   }
 }
 
@@ -59,7 +68,7 @@ const { reports } = await runReviews(targets, { outDir: args.out, settleMs: args
 
 let errorCount = 0;
 for (const report of reports) {
-  const label = `${report.route} [${report.role}/${report.viewport}${report.themeMode !== "(default)" ? `/${report.themeMode}` : ""}]`;
+  const label = `${report.route} [${report.role}/${report.viewport}${report.themeMode !== "(default)" ? `/${report.themeMode}` : ""}${report.timeOfDay !== "(real clock)" ? `/${report.timeOfDay}` : ""}]`;
   console.log(`\n=== ${label} ===`);
   console.log(`screenshot: ${report.screenshot}`);
   if (report.navError) { console.log(`  NAV ERROR: ${report.navError}`); errorCount += 1; }

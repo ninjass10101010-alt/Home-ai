@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-import { useFogConfig } from "@/hooks/useFogConfig";
-import { getFogParams } from "@/lib/fog-weather-mapping";
+import { useFogConfig, defaultFogConfig } from "@/hooks/useFogConfig";
+import { getFogParams, resolveFogColor } from "@/lib/fog-weather-mapping";
 import type { FogEffect } from "@/lib/vanta-fog";
 import type { ShaderOptions } from "@/lib/vanta-shader-base";
 import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
@@ -30,11 +30,6 @@ function wmoToCondition(code: number): Condition {
   return "partly-cloudy";
 }
 
-function hexToNum(hex: string): number {
-  const clean = hex.replace("#", "");
-  return parseInt(clean, 16);
-}
-
 export default function FogBackground() {
   const containerRef = useRef<HTMLDivElement>(null);
   const effectRef = useRef<FogEffect | null>(null);
@@ -43,15 +38,43 @@ export default function FogBackground() {
   const { config: fogConfig } = useFogConfig();
   const { runtime } = useRuntimeConfig();
   const [weatherCondition, setWeatherCondition] = useState<Condition>("partly-cloudy");
-  const prefersReducedMotion = useRef(false);
+  // Read the REACTIVE preference, not a mirrored ref: the old code stashed
+  // `window.matchMedia` in a ref that only ever saw the OS, so the family's
+  // Settings → Appearance toggle left the fog drifting. `reduceMotion` already
+  // merges both, and the fog is frozen by handing the shader speed 0.
   const reduceMotion = usePrefersReducedMotion();
 
-  // The canvas draw loop reads a ref, so mirror the reactive preference into it.
-  // The old listener read `window.matchMedia` directly and therefore only ever
-  // saw the OS — the family's Settings → Appearance toggle left the fog drifting.
-  useEffect(() => {
-    prefersReducedMotion.current = reduceMotion;
-  }, [reduceMotion]);
+  // One resolution of the shader options, shared by init and update so the two
+  // can never drift. The palette leg is the resolved THEME (`atmosphere.leg`),
+  // because this canvas is opaque and full-viewport: it IS the page's
+  // background. `atmosphere.isNight` only moves it within that leg.
+  const shaderOptions = useMemo(() => {
+    const weatherParams = getFogParams(
+      weatherCondition,
+      atmosphere.leg,
+      atmosphere.holiday,
+      atmosphere.isNight,
+    );
+    const highlight = resolveFogColor(
+      fogConfig.highlightColor,
+      defaultFogConfig.highlightColor,
+      weatherParams.highlightColor,
+    );
+    const lowlight = resolveFogColor(
+      fogConfig.lowlightColor,
+      defaultFogConfig.lowlightColor,
+      weatherParams.lowlightColor,
+    );
+    return {
+      baseColor: highlight,
+      lowlightColor: lowlight,
+      midtoneColor: weatherParams.midtoneColor,
+      highlightColor: highlight,
+      blurFactor: fogConfig.blurFactor ?? weatherParams.blurFactor,
+      speed: reduceMotion ? 0 : fogConfig.speed ?? weatherParams.speed,
+      zoom: weatherParams.zoom,
+    };
+  }, [weatherCondition, atmosphere.leg, atmosphere.isNight, atmosphere.holiday, fogConfig.highlightColor, fogConfig.lowlightColor, fogConfig.speed, fogConfig.blurFactor, reduceMotion]);
 
   useEffect(() => {
     const lat = Number(runtime?.weather_location?.LAT ?? 42.7875);
@@ -96,23 +119,10 @@ export default function FogBackground() {
 
         if (cancelled || !containerRef.current) return;
 
-        const weatherParams = getFogParams(
-          weatherCondition,
-          atmosphere.isNight,
-          atmosphere.holiday,
-        );
-        const speed = prefersReducedMotion.current ? 0 : fogConfig.speed ?? weatherParams.speed;
-
         const effect = createFogEffect({
           el: containerRef.current,
           THREE: THREE_MOD as Parameters<typeof createFogEffect>[0]["THREE"],
-          baseColor: hexToNum(fogConfig.highlightColor) ?? weatherParams.highlightColor,
-          lowlightColor: hexToNum(fogConfig.lowlightColor) ?? weatherParams.lowlightColor,
-          midtoneColor: weatherParams.midtoneColor,
-          highlightColor: hexToNum(fogConfig.highlightColor) ?? weatherParams.highlightColor,
-          blurFactor: fogConfig.blurFactor ?? weatherParams.blurFactor,
-          speed,
-          zoom: weatherParams.zoom,
+          ...shaderOptions,
           mouseControls: false,
           touchControls: false,
           scale: 1,
@@ -145,24 +155,10 @@ export default function FogBackground() {
 
   useEffect(() => {
     if (!effectRef.current || !fogConfig.enabled) return;
-
-    const weatherParams = getFogParams(
-      weatherCondition,
-      atmosphere.isNight,
-      atmosphere.holiday,
+    effectRef.current.setOptions(
+      shaderOptions as unknown as Partial<ShaderOptions>,
     );
-    const speed = prefersReducedMotion.current ? 0 : fogConfig.speed ?? weatherParams.speed;
-
-    effectRef.current.setOptions({
-      baseColor: hexToNum(fogConfig.highlightColor) ?? weatherParams.highlightColor,
-      lowlightColor: hexToNum(fogConfig.lowlightColor) ?? weatherParams.lowlightColor,
-      midtoneColor: weatherParams.midtoneColor,
-      highlightColor: hexToNum(fogConfig.highlightColor) ?? weatherParams.highlightColor,
-      blurFactor: fogConfig.blurFactor ?? weatherParams.blurFactor,
-      speed,
-      zoom: weatherParams.zoom,
-    } as unknown as Partial<ShaderOptions>);
-  }, [weatherCondition, atmosphere.isNight, atmosphere.holiday, fogConfig.highlightColor, fogConfig.lowlightColor, fogConfig.speed, fogConfig.blurFactor, fogConfig.enabled]);
+  }, [shaderOptions, fogConfig.enabled]);
 
   if (!fogConfig.enabled) return null;
 

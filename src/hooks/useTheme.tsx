@@ -114,18 +114,31 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     // When Time-of-day is "day"/"night" we let it override system.
     const tod = (typeof window !== 'undefined' && (window as any).__consuelaTod) as 'day' | 'night' | undefined;
 
+    let resolvedTod: 'day' | 'night';
+    if (tod === 'day' || tod === 'night') {
+      resolvedTod = tod;
+    } else {
+      // fallback — same clock as WeatherProvider/Atmosphere (6am-7pm day).
+      const hour = new Date().getHours();
+      resolvedTod = hour >= 6 && hour < 19 ? 'day' : 'night';
+    }
+
+    // Publish the answer to "is it night outside?" for the atmosphere layer.
+    // WeatherProvider resolves that clock into `__consuelaTod` and ThemeProvider
+    // is where it is applied to the document, so this is the one write that
+    // makes it readable from `<html>`. It is written as a DEFAULT: an existing
+    // value is an explicit pin (the visual-review harness forces a clock state
+    // with it) and is left alone.
+    if (!document.documentElement.hasAttribute('data-timeofday')) {
+      document.documentElement.setAttribute('data-timeofday', resolvedTod);
+    }
+
     if (theme.mode === 'dark') {
       isDark = true;
     } else if (theme.mode === 'light') {
       isDark = false;
     } else if (theme.mode === 'system') {
-      if (tod === 'day') isDark = false;
-      else if (tod === 'night') isDark = true;
-      else {
-        // fallback — same clock as WeatherProvider/Atmosphere (6am-7pm day).
-        const hour = new Date().getHours();
-        isDark = hour < 6 || hour >= 19;
-      }
+      isDark = resolvedTod === 'night';
     }
 
 

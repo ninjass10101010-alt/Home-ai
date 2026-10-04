@@ -144,7 +144,7 @@ function fulfillJson(route, body, status = 200) {
  * `overrides` lets a reviewer customize specific endpoints per review.
  */
 export async function installSanitizedState(context, opts) {
-  const { role = "parent", mode = "dark", contrastBoost = false, accentColor = "violet", wallMode = "off", overrides = {} } = opts ?? {};
+  const { role = "parent", mode = "dark", contrastBoost = false, accentColor = "violet", wallMode = "off", timeOfDay, overrides = {} } = opts ?? {};
   const user = roleUser(role);
 
   await context.addInitScript(
@@ -156,6 +156,30 @@ export async function installSanitizedState(context, opts) {
     },
     { sanitizedUser: user, theme: themeConfig(mode, contrastBoost, accentColor), wall: wallMode },
   );
+
+  // Time-of-day pin. The atmosphere layer reads `data-timeofday` off <html>
+  // (the same seam the app itself publishes), so a reviewer can force either
+  // clock state without touching the wall clock or the weather config. It is
+  // re-asserted on mutation because ThemeProvider owns the attribute in normal
+  // operation and would otherwise stomp the pin on its next publish.
+  if (timeOfDay === "day" || timeOfDay === "night") {
+    await context.addInitScript((pinned) => {
+      const apply = () => {
+        if (!document.documentElement) return;
+        if (document.documentElement.getAttribute("data-timeofday") !== pinned) {
+          document.documentElement.setAttribute("data-timeofday", pinned);
+        }
+      };
+      apply();
+      document.addEventListener("DOMContentLoaded", apply, { once: true });
+      new MutationObserver(apply).observe(document, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["data-timeofday"],
+      });
+    }, timeOfDay);
+  }
 
   // Kill external font calls so reviews are hermetic + offline-safe.
   await context.route("https://fonts.googleapis.com/**", (route) => route.abort("blockedbyclient"));
@@ -450,7 +474,7 @@ export async function withBrowser(fn) {
 /**
  * One-shot review of a route. Returns a structured report + writes screenshots.
  */
-export async function reviewRoute(browser, { baseUrl, route, role = "parent", viewport = "phone", outDir, themeMode, wallMode = "off", overrides = {}, settleMs = 1200, fullPage = true }) {
+export async function reviewRoute(browser, { baseUrl, route, role = "parent", viewport = "phone", outDir, themeMode, wallMode = "off", timeOfDay, overrides = {}, settleMs = 1200, fullPage = true }) {
   const vp = typeof viewport === "string" ? VIEWPORTS[viewport] : viewport;
   if (!vp) throw new Error(`Unknown viewport: ${viewport}`);
   mkdirSync(outDir, { recursive: true });
@@ -464,7 +488,7 @@ export async function reviewRoute(browser, { baseUrl, route, role = "parent", vi
   const consoleErrors = [];
   const pageErrors = [];
   const failedRequests = [];
-  const { unstubbed } = await installSanitizedState(context, { role, mode: themeMode, wallMode, overrides });
+  const { unstubbed } = await installSanitizedState(context, { role, mode: themeMode, wallMode, timeOfDay, overrides });
 
   const page = await context.newPage();
   page.on("console", (msg) => {
@@ -488,7 +512,7 @@ export async function reviewRoute(browser, { baseUrl, route, role = "parent", vi
   }
 
   const slug = route === "/" ? "home" : route.replace(/^\//, "").replace(/[/?=&]/g, "-");
-  const base = `${slug}__${role}__${vp.width}x${vp.height}${themeMode ? `__${themeMode}` : ""}`;
+  const base = `${slug}__${role}__${vp.width}x${vp.height}${themeMode ? `__${themeMode}` : ""}${timeOfDay ? `__tod-${timeOfDay}` : ""}`;
   // Viewport-only is the shot of record: it is the only one that shows
   // position:fixed chrome (the CapsuleNav dock) where a human would see it.
   // A fullPage shot renders fixed elements at the scroll origin, so it lies.
@@ -507,6 +531,7 @@ export async function reviewRoute(browser, { baseUrl, route, role = "parent", vi
 
   return {
     route, role, viewport: vp.label, themeMode: themeMode ?? "(default)",
+    timeOfDay: timeOfDay ?? "(real clock)",
     screenshot: shot, screenshotFull: shotFull,
     navError,
     consoleErrors: [...new Set(consoleErrors)],

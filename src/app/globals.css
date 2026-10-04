@@ -539,18 +539,18 @@ body {
 
 /* ─── Seasonal atmosphere layer (theme-aware) ───────────────────────────────
    `FogBackground` mounts one full-viewport three.js canvas as a direct child
-   of <body>, and its palette is chosen by `AtmosphericTheme`, which keys off
-   the CLOCK (isNight + season) and never off the active theme. Light mode was
-   therefore getting the night palette — a near-opaque brown flood sitting
-   between the near-white canvas and every white glass card above it. That is
-   the single reason light mode read as a murky brown/olive wash: the stat
-   tiles came out as three unrelated pastels (they were faithfully transmitting
-   a brown backdrop), and every neutral ink read cold against the warm flood.
+   of <body>. It is OPAQUE, so it is not an overlay at all — it is the page's
+   background, and a background has to belong to the theme it sits in. Its
+   palette is chosen by `AtmosphericTheme.leg`, which is the resolved THEME
+   (`<html data-theme>`); the clock (`isNight`) only leans the fog toward its
+   own leg's cloud tone.
 
-   So: in light theme the atmosphere is an ATMOSPHERE — a light/temperature
-   shift — not a colour fill. Capping its alpha lets the canvas read through,
-   which keeps the seasonal cast as a whisper and restores one shared card
-   material. Dark keeps the full-strength fog it was tuned for.
+   The layer used to key off the CLOCK instead, which inverted both ways: light
+   mode after dusk wore the near-black night palette — the brown/olive flood
+   that made every stat tile an unrelated pastel — and dark mode at noon wore
+   the pale day palette, a milky amber wash over a near-black canvas. The cap
+   below was added to survive that light-mode symptom; with the palette
+   correct it is what keeps the atmosphere an ATMOSPHERE in both themes.
 
    Selector note: the layer ships no class hook, so it is matched by shape —
    a `body > div` whose child is the engine canvas. That is unique to this
@@ -562,8 +562,13 @@ body {
      SMOKE — the first pass at 30% left a dirty grey cloud behind the greeting.
      The alpha has to drop far enough that the canvas dominates, and the hue
      has to be pushed back UP so what survives is a warm champagne cast rather
-     than neutral grey: light and saturated-but-pale, not dark and hazy. */
-  opacity: 0.085;
+     than neutral grey: light and saturated-but-pale, not dark and hazy.
+     0.085 was set against the INVERTED palette (the dark leg's near-black,
+     because the layer keyed off the clock). With the palette keyed to the
+     theme it is pale to begin with, so a whisper at 0.10 reads as a seasonal
+     cast instead of a smudge — and still sits under the 0.12 ceiling the
+     contract pins. */
+  opacity: 0.1;
   filter: saturate(2.2);
 }
 
@@ -573,7 +578,7 @@ body {
    mode with the full-strength night fog and the AA text tokens get measured
    against brown instead of the light canvas. */
 :root:not([data-theme="dark"])[data-contrast="boost"] body > div:has(> canvas[data-engine]) canvas[data-engine] {
-  opacity: 0.085 !important;
+  opacity: 0.1 !important;
 }
 
 .warm-glass-card {
@@ -2539,8 +2544,16 @@ a.widget-accent-text {
 .calendar-panel-day { display: flex; flex-direction: column; }
 /* Grown empty state: a soft fill, not a dashed outline. Stretched to a 600×390
    box on a wall, a dashed border reads as an empty form field you are supposed
-   to fill in; a quiet filled panel with the note centred reads as a quiet day. */
-.calendar-empty-grow {
+   to fill in; a quiet filled panel with the note centred reads as a quiet day.
+
+   The doubled class is load-bearing. `.calendar-empty` (below) declares the
+   shorthand `border: 1px dashed …`, and it sits LATER in this unlayered
+   stylesheet, so at equal specificity it reinstated the dashed outline and made
+   this whole rule inert — the grown state was still shipping the dashed box the
+   rule was written to remove. `html` + the doubled class lifts it to (0,2,1) so
+   the fill wins regardless of source order. A Tailwind `border-solid` utility
+   could not do this: unlayered rules out-rank `@layer utilities`. */
+html .calendar-empty.calendar-empty-grow {
   flex: 1 1 auto; align-items: center; justify-content: center; min-height: 7rem;
   border-style: solid; border-color: rgba(255,255,255,.08); background: rgba(255,255,255,.025);
 }
@@ -3331,8 +3344,8 @@ a.widget-accent-text {
 /* ─── Wall canvas fit ────────────────────────────────────────────────────────
    A wall panel is read in one glance from across the room, so nothing may hide
    behind a scroll. The previous 2-col × 6-row / fixed 440px grid measured
-   2760px of content on a 1920px canvas (70% of the grid visible, 1768px of
-   page overflow). `main` becomes a 100dvh flex column: the greeting and stat
+   2760px of content on a 1920px canvas (70% of the grid visible, 1768px of page
+   overflow). `main` becomes a 100dvh flex column: the greeting and stat
    strip keep their natural height, and the widget grid absorbs exactly the
    remaining space, where the 220px row floor resolves against that
    definite height. Twelve widgets, zero scrolling, at any wall canvas.
@@ -3341,13 +3354,24 @@ a.widget-accent-text {
    padding + 2px border = 98px, plus the `mb-3` page margin = 110px — so the last
    row of the widget grid sat under the dock's top edge at rest (measured: the
    "Open Tasks" action ended at y=976 against a dock top of y=970). 7rem = 112px
-   clears it with 2px to spare. */
-html[data-wall="true"] main.wall-home-fit {
+   clears it with 2px to spare.
+
+   These rules are deliberately NOT scoped to `html[data-wall="true"]`. The
+   `data-wall` attribute is the profile's *preference* seam — a panel rotated to
+   1920×1080 reports landscape and never sets it, and that canvas is the same
+   physical wall with the same one-glance requirement: without the fit it ran
+   2162px tall, and the fixed dock painted straight over the middle of the
+   third row ("Security"). Home adds `wall-home-fit` when `wall || board`
+   (`computeWallBoard` in layout-config), so the class — not the attribute —
+   is the thing that means "this canvas does not scroll". Nothing else in the app
+   sets it, and the empty-state compaction below rides on `.wall-widget-grid`,
+   which is likewise only ever on Home's wall/board grid. */
+main.wall-home-fit {
   display: flex;
   flex-direction: column;
   height: 100dvh;
   padding-bottom: 7rem;
-  /* The 220px row floor can exceed the canvas on a rotated (1920×1080) mount.
+  /* The row floor can exceed the canvas on a rotated (1920×1080) mount.
      PageShell clips at the page root, so without a scroll container of its own
      the overflow would be sliced off and unreachable — main absorbs it. In
      portrait the grid fits exactly, so this never actually scrolls. */
@@ -3355,42 +3379,151 @@ html[data-wall="true"] main.wall-home-fit {
   overscroll-behavior: contain;
   scrollbar-width: none;
 }
-html[data-wall="true"] main.wall-home-fit > div {
+main.wall-home-fit > div {
   flex: 0 0 auto;
 }
-html[data-wall="true"] main.wall-home-fit > div:last-child {
-  flex: 1 1 auto;
+/* The bento's own wrapper — the one child that grows. It used to be
+   `> div:last-child`, which meant the week strip and the action row shared the
+   grid's area and the grid could never claim the space they held (measured at
+   1920×1080: a 692px area, a 337px grid, and 360px of the board clipped away
+   because the 220px row floor out-ranks `flex`). They live in `.wall-home-tail`
+   now, so the grid gets everything the dock leaves. */
+main.wall-home-fit > .wall-home-grid-area {
+  /* `flex-basis: 0`, not `auto`: with `auto` the basis is the grid's own
+     intrinsic height, the box is then shrunk after the fact, and Chromium does
+     not re-resolve `1fr` rows against the shrunken size — which is how a
+     150px floor ended up clipping 33px off the last row. Basis 0 makes the
+     area's size exactly the leftover from the start, so `1fr` has a definite
+     height to divide. */
+  flex: 1 1 0%;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
 }
-/* `space-y-6` margins would double-count next to the flex gap above. */
-html[data-wall="true"] main.wall-home-fit > div:last-child > * + * {
+/* `space-y-6` margins would double-count next to a flex gap. */
+main.wall-home-fit > .wall-home-grid-area > * + * {
   margin-top: 0;
 }
-html[data-wall="true"] main.wall-home-fit .wall-widget-grid {
-  flex: 1 1 auto;
+main.wall-home-fit .wall-widget-grid {
+  flex: 1 1 0%;
   min-height: 0;
+}
+
+/* ─── The landscape wall board (1920×1080) ──────────────────────────────────
+   The profile above was measured on the portrait 1080×1920 mount. A panel
+   rotated into landscape is the same physical wall with a different shape, and
+   on that canvas it failed three ways (all measured at 1920×1080):
+   - **Three columns of 618px** wasted the width AND forced five rows of 220px
+     into a 1080px fold, so the visible board was one and a half rows.
+   - **Without `wall-home-fit`** — a rotated panel reports landscape and never
+     sets `data-wall` — Home rendered 2162px and the fixed dock painted over the
+     middle of the third row.
+   - **With it**, the 220px row floor decided the grid's size instead of the
+     leftover height, because `flex: 1 1 auto` cannot shrink a floor.
+
+   So the board is four columns of three rows: twelve cells — eleven 1×1
+   widgets plus the 2-cell photo hero — is exactly what fits above the dock, and
+   a 454px cell is still a comfortable read from across a room. The row floor
+   drops to 150px so `1fr` can distribute the space the wrapper actually has.
+
+   These are class rules, not a media query: `computeWallBoard` in
+   layout-config owns the breakpoint, so the stylesheet and the JS can never
+   disagree, and the classes are inert anywhere the board is not active. */
+.wall-board-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(150px, 1fr);
+  gap: 0.75rem;
+}
+/* The board's measure, for every data route that declares `measure="board"`.
+   104rem = 1664px, which on a 1920 canvas leaves ~112px of page margin a side —
+   the same breathing the portrait wall has. Gated by the SAME breakpoint the JS
+   uses, so the shell needs no viewport read of its own; and unlayered, so it
+   out-ranks the `xl:max-w-7xl` utility it is overriding (a Tailwind
+   `min-[1600px]:` variant would NOT — arbitrary min-width variants are emitted
+   before the named breakpoints and would silently lose). */
+@media (min-width: 1600px) and (max-height: 1300px) {
+  .wall-board-measure {
+    max-width: 104rem;
+  }
+  /* Chat's own ceiling: 80rem, not the board's 104rem. A thread's bubbles are
+     already `max-w-[82%]` of whatever it is given, so a 1664px shell would make
+     a 1360px line of text — the measure problem the board measure exists to
+     solve, applied to the one route where it is most true. 1280px is a wide
+     thread with the hero's two-column brief laid out beside it. */
+  .wall-board-chat {
+    max-width: 80rem;
+  }
+}
+/* The header band gives 56px of its budget back to the grid. */
+.wall-board-header {
+  padding-top: 1.25rem;
+  padding-bottom: 1rem;
+}
+/* 3.25rem of greeting over two lines is 104px of the fold; the board reads the
+   name, not the descender. */
+.wall-board-greeting {
+  font-size: 2.75rem;
+}
+/* …and on a 1920 canvas the greeting has 869px to itself, so the forced line
+   break is now 48px of fold spent keeping a two-word line short. */
+.wall-board-greeting br {
+  display: none;
+}
+
+/* ─── The board's filter rail ───────────────────────────────────────────────
+   The Tasks roster is a horizontal snap-scroller: eleven 67px tiles in a strip
+   that scrolls sideways, with a mask fading the trailing edge to say "there is
+   more". In a 26rem board rail, side-scrolling is the wrong instrument — the
+   rail has 700px of height and 400px of width, which is exactly the other way
+   round. Two columns of tiles use the space it actually has, and the "there is
+   more, scroll" affordance goes away because nothing is hidden.
+
+   Scoped to the board class rather than to a breakpoint so the rail and the
+   `2xl:grid-cols-[…]` that created it stay in step, and inert everywhere else:
+   below 1536px the strip is the strip it has always been. The 1536px is
+   Tailwind's `2xl`, spelled out because this rule and that utility have to
+   agree and only one of them can be a class name. */
+@media (min-width: 1536px) {
+  .wall-board-member-strip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+    overflow: visible;
+    overscroll-behavior: auto;
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+  .wall-board-member-strip .member-tile {
+    min-width: 0;
+  }
+  /* …and the rail's stat row, which was three tiles across 1664px on Home's
+     header band, becomes three tiles down a 26rem rail. A 130px-wide tile is
+     not a stat tile; a 380px-wide one is. Unlayered, so it out-ranks the
+     `grid-cols-3` utility it overrides. */
+  .wall-board-rail .grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wall-board-rail .grid-cols-3 > .widget-card {
+    min-height: 0;
+  }
 }
 
 /* ─── Wall empty states ──────────────────────────────────────────────────────
    EmptyState's card variant reserves `min-h-56 p-8` — 224px, which alone nearly
-   fills a 249px wall row, so the card's header and footer
-   spilled past the card edge and were clipped (measured on Today, Climate,
-   Lights, Tasks). On a wall the title alone answers the question — "Quiet day"
+   fills a wall row, so the card's header and footer spilled past the card edge
+   and were clipped. On a wall the title alone answers the question — "Quiet day"
    needs no caption from three feet away — so the variant chrome, the oversized
    icon and the caption give their height back to the row. */
-html[data-wall="true"] .wall-widget-grid [data-empty-state] {
+.wall-widget-grid [data-empty-state] {
   min-height: 0;
   padding: 0.25rem;
   gap: 0.125rem;
 }
-html[data-wall="true"] .wall-widget-grid [data-empty-state] > div:first-child {
+.wall-widget-grid [data-empty-state] > div:first-child {
   font-size: 1.5rem;
   margin-bottom: 0.125rem;
 }
-html[data-wall="true"] .wall-widget-grid [data-empty-state] > p {
+.wall-widget-grid [data-empty-state] > p {
   display: none;
 }
 /* ─── Wall photo tile ────────────────────────────────────────────────────────
