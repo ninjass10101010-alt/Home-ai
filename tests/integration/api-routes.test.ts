@@ -44,9 +44,17 @@ vi.mock('@/lib/pb', () => ({
   })),
 }));
 
-// Mock server-side PIN verification so PATCH routes can pass auth gate in tests
+// Mock server-side PIN verification so PATCH routes can pass auth gate in tests.
+// `requireLiveSession` is the parent-only gate the money-mountain writes now use;
+// it returns a passing parent identity here (the real helper is covered by
+// tests/unit/live-session.test.ts and the child/pet/outage refusals by
+// tests/unit/money-mountain-write-gate.test.ts).
 vi.mock('@/lib/server-auth', () => ({
   verifyPinAgainstAnyMember: vi.fn(() => Promise.resolve({ id: 'member-1', name: 'Test Member' })),
+  requireLiveSession: vi.fn(async () => ({
+    ok: true,
+    identity: { memberId: 'member-1', name: 'Test Member', role: 'parent' },
+  })),
 }));
 
 // Mock skill tree lib functions

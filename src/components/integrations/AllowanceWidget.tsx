@@ -1,20 +1,27 @@
 /**
- * AllowanceWidget — Convert Consuela points to real money.
+ * AllowanceWidget — what Consuela's points are worth, and the truth about
+ * cashing them out.
  *
  * Shows:
- *   - Current points balance + cash equivalent
- *   - Conversion rate set by parent
- *   - "Cash out" button to transfer to Greenlight card
- *   - Transaction history
+ *   - Current points balance (real: the server-owned weekData ledger)
+ *   - The cash equivalent, ONLY when a parent has actually configured a rate
+ *   - The honest state of cash-out (see below)
  *
- * For Kid Mode: shows their balance and cash-out option.
- * For Adult Mode: shows settings + approval queue.
+ * ⚠️ Cash-out is NOT AVAILABLE, and this widget must never imply that it is.
+ * The old kid-mode "Cash Out $X" button made no API call, deducted nothing,
+ * wrote a fabricated withdrawal into localStorage and congratulated the child
+ * that their money had gone to a hardcoded account fragment. There is no
+ * transfer endpoint anywhere in the app: `GREENLIGHT_API_KEY` is registered
+ * "stored for when the integration is enabled" and `pointsToCashRate` is read
+ * but never written by any settings surface. So the button is disabled with a
+ * real explanation rather than wired to a fiction — a child is never told their
+ * money moved when it did not.
  *
  * Requires: Greenlight connected via Settings → Connections.
  */
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import { isConnected, getCredentials } from "@/lib/connections/store";
@@ -22,21 +29,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { useDashboardMode } from "@/hooks/useDashboardMode";
 import { currentWeekPoints } from "@/modes/kid/kid-store";
 
-interface Transaction {
-  id: string;
-  type: "deposit" | "withdrawal";
-  amount: number;
-  points: number;
-  date: string;
-  description: string;
-}
+const NO_CASH_OUT =
+  "Cashing out isn't set up yet — Consuela can show your points, but it can't move money.";
 
 export default function AllowanceWidget() {
   const [enabled, setEnabled] = useState(false);
   const [points, setPoints] = useState(0);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [cashingOut, setCashingOut] = useState(false);
-  const [cashOutAmount, setCashOutAmount] = useState(0);
 
   const { currentUser } = useAuth();
   const { mode } = useDashboardMode();
@@ -51,60 +49,16 @@ export default function AllowanceWidget() {
     // Load points — same weekData ledger KidHome/RewardsShop read (the old
     // per-member "consuela-points-*" key was a dead ledger nothing wrote).
     setPoints(currentWeekPoints(currentUser.name).points);
-
-    // Load transaction history
-    try {
-      const stored = localStorage.getItem(`consuela-allowance-history-${currentUser.name}`);
-      if (stored) setTransactions(JSON.parse(stored));
-    } catch {}
   }, [enabled, currentUser]);
 
-  // Get conversion rate from credentials
+  // The conversion rate is a parent-configured credential. Nothing in the app
+  // writes it, so an unset rate must read as UNSET — not silently default to
+  // an invented "50 points = $1" that then prices a child's savings.
   const creds = enabled ? getCredentials("greenlight") : null;
-  const conversionRate = creds?.pointsToCashRate ? parseInt(creds.pointsToCashRate) : 50;
-  const cashValue = points / conversionRate;
-
-  const handleCashOut = useCallback(async () => {
-    if (points <= 0 || cashingOut) return;
-
-    const amount = Math.floor(cashValue * 100) / 100; // Round to cents
-    if (amount <= 0) return;
-
-    setCashingOut(true);
-
-    try {
-      // In production: call Greenlight API to transfer funds
-      // For demo: simulate the transfer
-      const newTransaction: Transaction = {
-        id: `txn-${Date.now()}`,
-        type: "withdrawal",
-        amount,
-        points,
-        date: new Date().toISOString(),
-        description: "Consuela points → Greenlight",
-      };
-
-      // Update transaction history
-      const updated = [...transactions, newTransaction];
-      setTransactions(updated);
-      if (currentUser) {
-        localStorage.setItem(
-          `consuela-allowance-history-${currentUser.name}`,
-          JSON.stringify(updated),
-        );
-      }
-
-      // Deduct points (session-local — the real ledger is weekData, and the
-      // Greenlight transfer above is still a simulation; the dead
-      // per-member "consuela-points-*" write is gone with its read).
-      const newPoints = 0;
-      setPoints(newPoints);
-    } catch {
-      // Failed to cash out
-    } finally {
-      setCashingOut(false);
-    }
-  }, [points, cashValue, cashingOut, transactions, currentUser]);
+  const parsedRate = Number.parseInt(creds?.pointsToCashRate ?? "", 10);
+  const rateConfigured = Number.isFinite(parsedRate) && parsedRate > 0;
+  const conversionRate = rateConfigured ? parsedRate : 0;
+  const cashValue = rateConfigured ? points / conversionRate : 0;
 
   if (!enabled) return null;
 
@@ -141,85 +95,59 @@ export default function AllowanceWidget() {
             </div>
             <div className="text-right">
               <p className="text-xs text-text-muted uppercase tracking-wider">Cash Value</p>
-              <p className="text-2xl font-black text-[var(--color-accent-mint)] tabular-nums">${cashValue.toFixed(2)}</p>
+              <p className="text-2xl font-black text-[var(--color-accent-mint)] tabular-nums">
+                {rateConfigured ? `$${cashValue.toFixed(2)}` : "—"}
+              </p>
             </div>
           </div>
           <p className="text-xs text-text-muted mt-2">
-            {conversionRate} points = $1.00
+            {rateConfigured
+              ? `${conversionRate} points = $1.00`
+              : "No cash rate set yet"}
           </p>
         </div>
 
-        {/* Cash Out (Kid Mode) */}
+        {/* Cash Out — unavailable, and honest about it */}
         {isKid && (
           <div>
             <SoftButton
-              onClick={handleCashOut}
-              loading={cashingOut}
-              disabled={points <= 0}
+              onClick={() => {}}
+              disabled
+              aria-label="Cash Out is not available yet"
               className="w-full text-base py-3"
             >
-              {cashingOut
-                ? "💳 Transferring..."
-                : points > 0
-                  ? `💸 Cash Out $${cashValue.toFixed(2)}`
-                  : "No points to cash out"
-              }
+              💸 Cash Out
             </SoftButton>
             <p className="text-xs text-text-muted text-center mt-2">
-              {points > 0
-                ? "Money goes to your Greenlight card! 🎉"
-                : "Complete quests to earn points!"}
+              {NO_CASH_OUT} Your points are safe right here — ask a grown-up if you
+              want to cash out.
             </p>
+            {points <= 0 && (
+              <p className="text-xs text-text-muted text-center mt-1">
+                Complete quests to earn points!
+              </p>
+            )}
           </div>
         )}
 
-        {/* Parent View — Approval Settings */}
+        {/* Parent View — the cash-out state, stated once and honestly */}
         {!isKid && (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-xs">
               <span className="text-text-secondary">Conversion Rate</span>
-              <span className="font-bold text-text-primary tabular-nums">{conversionRate} pts = $1</span>
+              <span className="font-bold text-text-primary tabular-nums">
+                {rateConfigured ? `${conversionRate} pts = $1` : "Not set"}
+              </span>
             </div>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-text-secondary">Weekly Cap</span>
-              <span className="font-bold text-text-primary tabular-nums">$10.00</span>
+              <span className="text-text-secondary">Cash-Out</span>
+              <span className="font-bold text-text-primary">Not set up</span>
             </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-text-secondary">Requires Approval</span>
-              <span className="font-bold text-[var(--color-accent-mint)]">Yes</span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-text-secondary">Auto-Deposit</span>
-              <span className="font-bold text-text-primary">Greenlight ****2847</span>
-            </div>
-          </div>
-        )}
-
-        {/* Transaction History */}
-        {transactions.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-white/[0.04]">
-            <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">
-              Recent Transactions
+            <p className="text-xs text-text-muted">
+              {NO_CASH_OUT} Points are real and stay in Consuela; there is no
+              Greenlight transfer wired up yet, so nothing can be moved to a card
+              from here.
             </p>
-            <div className="space-y-1.5">
-              {transactions.slice(-5).reverse().map((txn) => (
-                <div key={txn.id} className="flex items-center gap-2.5 py-1">
-                  <span className="text-sm">{txn.type === "deposit" ? "💰" : "💸"}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-text-primary truncate">{txn.description}</p>
-                    <p className="text-xs text-text-muted">
-                      {new Date(txn.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      {" · "}{txn.points} pts
-                    </p>
-                  </div>
-                  <span className={`text-xs font-bold tabular-nums ${
-                    txn.type === "deposit" ? "text-[var(--color-accent-mint)]" : "text-[var(--color-accent-amber)]"
-                  }`}>
-                    {txn.type === "deposit" ? "+" : "-"}${txn.amount.toFixed(2)}
-                  </span>
-                </div>
-              ))}
-            </div>
           </div>
         )}
       </div>

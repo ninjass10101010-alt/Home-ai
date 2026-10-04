@@ -126,6 +126,21 @@ vi.mock('@/lib/pb-auth', () => {
         delete: vi.fn(async () => true),
       }),
     })),
+    // The money-mountain write routes are parent-gated on the LIVE PocketBase
+    // identity (`requireLiveSession` → `withAdmin`), so this mock needs the
+    // seam. The signed sessions in this file are all `role: 'parent'`, which
+    // is the live row returned here; a child/pet refusal is covered in
+    // tests/unit/money-mountain-write-gate.test.ts.
+    withAdmin: vi.fn(async (fn: (pb: unknown) => Promise<unknown>) =>
+      fn({
+        collection: (name: string) => ({
+          getOne: async (id: string) =>
+            name === 'members'
+              ? { id, name: 'Rebecca', role: 'parent', pin: '', phone: 'private' }
+              : undefined,
+        }),
+      }),
+    ),
   };
 });
 
