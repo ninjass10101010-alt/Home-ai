@@ -5,6 +5,7 @@ import {
   hasUnreversedTaskEarn,
   LEDGER_OPERATION_SOURCES,
   LEDGER_TRANSACTION_TYPES,
+  computeMemberBalances,
   parseCanonicalTransactions,
   recomputeWeekPoints,
 } from "@/lib/task-ledger";
@@ -301,15 +302,33 @@ function canonicalWeek(
   };
 }
 
-function hasNegativeOutcome(history: Transaction[]): boolean {
-  const balances: Record<string, number> = {};
-  for (const transaction of history) {
-    const next = (balances[transaction.member] ?? 0) + transaction.amount;
-    if (next < 0) return true;
-    if (!Number.isSafeInteger(next)) return true;
-    balances[transaction.member] = next;
+/**
+ * True when ANY of the members an operation touches would end up below zero.
+ *
+ * Replaces a week-scoped `hasNegativeOutcome(history)` that (a) implicated every
+ * member because it walked the whole week's history, and (b) reported
+ * `insufficient_balance` for a merely FRACTIONAL running balance, since it
+ * conflated precision with insolvency. Amounts are integer-guarded on every
+ * write path (`signedAmount` requires `Number.isSafeInteger`) and the canonical
+ * parser rejects a non-finite amount, so a fractional balance is not a reason
+ * to refuse anything.
+ */
+function anyAffectedMemberGoNegative(
+  history: Transaction[],
+  members: ReadonlySet<string>,
+): boolean {
+  if (members.size === 0) return false;
+  const balances = computeMemberBalances(history);
+  for (const member of members) {
+    const balance = balances[member];
+    if (balance !== undefined && balance < 0) return true;
   }
   return false;
+}
+
+/** The members whose balance an operation can change. */
+function affectedMembers(entries: readonly NormalizedLedgerEntry[]): Set<string> {
+  return new Set(entries.map((entry) => entry.member));
 }
 
 function sameOperationEntry(
@@ -553,9 +572,14 @@ export async function applyWeekLedgerOperationLocked(
         if (replay.conflict) {
           return failure("operation_conflict", current, normalizedOperation.operationId);
         }
-        if (replay.missing.length > 0 && hasNegativeOutcome(current.history)) {
-          return failure("insufficient_balance", current, normalizedOperation.operationId);
-        }
+        // NOTE: there is deliberately no pre-check on the CURRENT history here.
+        // The old week-scoped `hasNegativeOutcome(current.history)` refused every
+        // operation — for every member — whenever any member's stored balance was
+        // already negative, which froze the whole family's ledger for the week
+        // while the screen showed the short member a confident "0 points". It
+        // also blocked the very operation that would REPAIR a deficit. The only
+        // meaningful rule is the post-merge one below: after this operation, no
+        // member it actually touches may be below zero.
 
         const nowMs = now.getTime();
         const workingHistory = [...current.history];
@@ -586,7 +610,7 @@ export async function applyWeekLedgerOperationLocked(
         }
 
         const mergedHistory = [...current.history, ...newTransactions];
-        if (replay.missing.length > 0 && hasNegativeOutcome(mergedHistory)) {
+        if (replay.missing.length > 0 && anyAffectedMemberGoNegative(mergedHistory, affectedMembers(replay.missing))) {
           return failure("insufficient_balance", current, normalizedOperation.operationId);
         }
         const points = recomputeWeekPoints(mergedHistory);
@@ -622,7 +646,8 @@ export async function applyWeekLedgerOperationLocked(
             !containsTransactions(verified.history, mergedHistory) ||
             !samePoints(verified.points, points) ||
             verifiedRead.pointsNeedRepair ||
-            (newTransactions.length > 0 && hasNegativeOutcome(verified.history))
+            (newTransactions.length > 0 &&
+              anyAffectedMemberGoNegative(verified.history, affectedMembers(replay.missing)))
           ) {
             throw new LedgerOperationAbort("ledger_write_conflict", current);
           }

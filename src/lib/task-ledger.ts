@@ -166,6 +166,63 @@ export function mergeCanonicalTransactions(histories: Transaction[][]): Transact
   return history;
 }
 
+/**
+ * The single owner of the balance invariant.
+ *
+ * This used to be implemented twice with OPPOSITE negative-value policies:
+ * `recomputeWeekPoints` clamped every running step to >= 0 (erasing the deficit
+ * and making the result order-dependent — `[-5, +10]` displayed 10 while
+ * `[+10, -5]` displayed 5, for the same net balance of 5), while the gate in
+ * `ledger-operations` refused to clamp and was evaluated over the whole week.
+ *
+ * The true balance is plain arithmetic: sum the member's transactions. Callers
+ * decide what to do about a negative (the display clamps for kids; the gate
+ * scopes to the member being acted on).
+ */
+export function computeMemberBalances(history: Transaction[]): Record<string, number> {
+  const canonicalHistory = parseCanonicalTransactions(history);
+  if (!canonicalHistory) throw new TypeError("invalid_transaction_history");
+
+  const balances: Record<string, number> = {};
+  for (const transaction of canonicalHistory) {
+    balances[transaction.member] = (balances[transaction.member] ?? 0) + transaction.amount;
+  }
+  return balances;
+}
+
+/**
+ * True only when THIS member's balance is below zero.
+ *
+ * Scoped to the acting member on purpose. A member's deficit must never block a
+ * different member's earn: the week-scoped version of this check meant one
+ * legacy negative froze the entire family's ledger for the week, while the
+ * screen showed the short member a confident "0 points" because the display
+ * clamped the same deficit away.
+ */
+export function memberWouldGoNegative(history: Transaction[], member: string): boolean {
+  const balances = computeMemberBalances(history);
+  const balance = balances[member];
+  return balance !== undefined && balance < 0;
+}
+
+/**
+ * The kids-facing balance, and the SECOND of the two things that used to
+ * disagree.
+ *
+ * The floor of zero is applied AS EACH TRANSACTION IS REPLAYED, not once at the
+ * end. That is a deliberate product semantic, pinned by `task-ledger-contract`
+ * ("replays every ledger type without allowing a negative balance"): a child
+ * can never owe points, so a penalty or adjustment larger than the balance
+ * simply floors at 0 and later credits build on 0.
+ *
+ * It is worth being precise about the relationship to `computeMemberBalances`,
+ * which sums instead. The two AGREE on every history the write gate has ever
+ * permitted — `anyAffectedMemberGoNegative` in `ledger-operations` rejects any
+ * operation whose summed balance would go below zero, so a stored history never
+ * dips negative in the first place. They diverge only on a legacy or
+ * hand-edited row, where the gate no longer holds; there this function keeps
+ * the friendly floor of zero rather than showing a child a negative number.
+ */
 export function recomputeWeekPoints(history: Transaction[]): Record<string, number> {
   const canonicalHistory = parseCanonicalTransactions(history);
   if (!canonicalHistory) throw new TypeError("invalid_transaction_history");

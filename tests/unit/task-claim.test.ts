@@ -1743,9 +1743,20 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
     expect(snapshotData().tasks.some((row: any) => row.id === 79)).toBe(false);
   });
 
-  it("maps a stable insufficient-balance ledger result to conflict", async () => {
+  it("does NOT let one member's legacy negative block a different member's claim", async () => {
+    // This used to be asserted the other way round: a single legacy -1 for SAM
+    // made ALEX's claim return 409 insufficient_balance, because the ledger gate
+    // walked the whole week's history instead of the member being acted on. One
+    // member's deficit froze every member's ledger for the week — while the
+    // screen showed Sam a confident "0 points", since the display floor erased
+    // the very deficit that caused the freeze.
+    //
+    // A claim only ever EARNS, so it can never legitimately drive a balance
+    // negative; the insufficient_balance -> HTTP mapping is pinned where it is
+    // actually reachable, on the spending path, by rewards-redeem-route.test.ts
+    // (400 + "needs 11 more pts").
     const task = { id: 81, title: "Race", assignee: "Open", points: 5, universal: true, completed: false };
-    const { pb, updateCalls } = makePb({
+    const { pb } = makePb({
       taskPoints: 5,
       taskRow: task,
       snapshotTasks: [task],
@@ -1763,9 +1774,11 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
       pin: "1234",
     }));
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ reason: "insufficient_balance" });
-    expect(updateCalls.week_data).toBeUndefined();
+    // Alex is unaffected by Sam's deficit, so the claim lands. This fixture
+    // resolves Alex as an adult, so the earn is immediate (200); a child
+    // claimant would be 202 pendingApproval. Either way it must NOT be refused.
+    expect([200, 202]).toContain(response.status);
+    expect(await response.json()).not.toMatchObject({ reason: "insufficient_balance" });
   });
 
   it("keeps the authority week stable when a request crosses Monday", async () => {
