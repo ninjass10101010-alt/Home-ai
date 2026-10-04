@@ -19,7 +19,7 @@ export default function DayStrip({ days, onChange, value, className = "", compac
             type="button"
             aria-pressed={isActive}
             onClick={() => onChange(day.id)}
-            className={`snap-start rounded-2xl border text-center transition-all active:scale-95 ${
+            className={`snap-start rounded-2xl border text-center transition-all active:scale-95 min-h-11 ${
               compact ? "min-w-12 p-2" : "min-w-16 p-3"
             } ${
               isActive

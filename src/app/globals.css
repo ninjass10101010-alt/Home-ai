@@ -2426,21 +2426,60 @@ a.widget-accent-text {
 /* Glass shell comes from .widget-card (applied in JSX); this class keeps the
    hero's layout, larger radius, and accent orb. */
 .calendar-hero-card {
-  overflow: hidden; border-radius: 2rem; padding: 1.25rem;
+  overflow: hidden; border-radius: 2rem; padding: .95rem 1.1rem;
 }
+@media (min-width: 768px) { .calendar-hero-card { padding: 1.25rem; } }
 .calendar-hero-card::after {
-  content: ""; position: absolute; right: -3rem; top: -3rem; width: 9rem; height: 9rem;
-  border-radius: 999px; background: radial-gradient(circle, rgba(var(--calendar-accent-rgb, 59,130,246), .32), transparent 70%);
-  filter: blur(10px);
+  content: ""; position: absolute; right: 1.25rem; top: -4.5rem; width: 9rem; height: 9rem;
+  border-radius: 999px; background: radial-gradient(circle, color-mix(in srgb, var(--color-accent-selected) 26%, transparent), transparent 70%);
+  filter: blur(10px); pointer-events: none;
 }
 .calendar-hero-card > * { position: relative; }
-.calendar-hero-content { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; }
-.calendar-hero-kicker { font-size: .76rem; font-weight: 600; color: var(--color-text-secondary); letter-spacing: .04em; text-transform: uppercase; }
-.calendar-hero-title { font-size: 1.45rem; font-weight: 800; color: var(--color-text-primary); margin-top: .25rem; letter-spacing: -.02em; }
-.calendar-hero-copy { font-size: .78rem; color: var(--color-text-secondary); margin-top: .25rem; }
+/* The flex child that holds the date block MUST be allowed to shrink: the Google
+   status sentence is a long unbreakable-ish line and without `min-width: 0` it
+   pushed 48px of its own copy past the card's overflow-x clip. */
+.calendar-hero-content { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.calendar-hero-main { display: flex; align-items: center; gap: .9rem; min-width: 0; flex: 1 1 auto; }
+
+/* The hero leads with the DATE, not a greeting. A wall calendar read from across
+   the room answers "which day is it and what's on" — `Good Evening 🌙 / Here's
+   your day at a glance` spent the card's whole height restating the route name.
+   The tabular numeral is the largest type on the page, so the eye lands on the
+   day before it lands on chrome. */
+.calendar-hero-numeral {
+  font-family: var(--font-geist-mono); font-variant-numeric: tabular-nums;
+  font-size: clamp(2.6rem, 7vw, 3.9rem); font-weight: 700; line-height: .82;
+  letter-spacing: -.05em; color: var(--color-text-primary); flex: 0 0 auto;
+}
+.calendar-hero-text { min-width: 0; }
+.calendar-hero-kicker {
+  font-size: .78rem; font-weight: 700; color: var(--color-text-secondary);
+  letter-spacing: .1em; text-transform: uppercase; font-variant-numeric: tabular-nums;
+}
+.calendar-hero-title { font-size: 1.05rem; font-weight: 650; color: var(--color-text-primary); margin-top: .18rem; letter-spacing: -.01em; }
+.calendar-hero-copy { font-size: .8rem; color: var(--color-text-secondary); margin-top: .22rem; overflow-wrap: anywhere; }
+
+/* The Google-connection sentence, on its own row. Quiet by design: it is a
+   status line, so it stays out of the headline's optical weight. */
+.calendar-google-status {
+  display: flex; align-items: flex-start; gap: .5rem;
+  font-size: .78rem; line-height: 1.45; color: var(--color-text-secondary);
+  padding: 0 .35rem; margin-top: -.5rem; overflow-wrap: anywhere;
+}
+.calendar-google-status::before {
+  content: ""; flex: 0 0 auto; width: .5rem; height: .5rem; margin-top: .42rem;
+  border-radius: 999px; background: var(--color-accent-amber);
+}
 
 /* ─── Member filter chips (shared: Calendar + Tasks) ─── */
-.calendar-member-strip, .member-strip { display: flex; gap: .45rem; overflow-x: auto; padding-bottom: .25rem; }
+/* The roster scrolls horizontally with 11 members. The mask fades the trailing
+   edge so the last visible chip reads as "there are more, scroll" instead of as
+   a chip sliced in half by the viewport edge. */
+.calendar-member-strip, .member-strip {
+  display: flex; gap: .45rem; overflow-x: auto; padding-bottom: .25rem;
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 2rem), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 2rem), transparent 100%);
+}
 .calendar-member-chip, .member-chip {
   display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap;
   padding: .5rem .8rem; border-radius: 999px;
@@ -2479,33 +2518,12 @@ a.widget-accent-text {
 }
 .member-tile.is-active .member-tile-name { color: var(--chip-color, var(--color-accent-selected)); }
 
-/* ─── Tabs ─── */
-.calendar-tabs {
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: .35rem; padding: .35rem;
-  border-radius: 1.25rem;
-  background: rgba(30,35,48,.42); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255,255,255,.08);
-}
-:root[data-theme="light"] .calendar-tabs {
-  background: rgba(255,255,255,.48); border-color: rgba(0,0,0,.06);
-}
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .calendar-tabs {
-    background: rgba(255,255,255,.48); border-color: rgba(0,0,0,.06);
-  }
-}
-.calendar-tab {
-  flex: 1; padding: .55rem 0; border-radius: .9rem;
-  font-size: .78rem; font-weight: 600; color: var(--color-text-muted);
-  transition: all .2s ease; cursor: pointer; border: none; text-align: center;
-}
-.calendar-tab:hover { color: var(--color-text-secondary); }
-.calendar-tab.is-active {
-  color: #fff;
-  background: linear-gradient(135deg, var(--color-accent-button, var(--color-accent-selected)), color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 76%, #111827));
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--color-accent-selected) 35%, transparent), inset 0 1px 0 rgba(255,255,255,.22);
-}
-.calendar-tab.is-active:hover { color: #fff; }
+/* ─── Tabs ───
+   DELETED. `.calendar-tabs` / `.calendar-tab` were a hand-rolled duplicate of
+   the `SegmentedControl` primitive: a 36px-tall pair of buttons, which is a
+   tap-target contract violation on a control the whole page hangs off. The
+   primitive already guarantees `min-h-[44px]`, `role="radiogroup"` and the
+   accent pill, so the page now uses it and these rules are gone. */
 
 /* ─── Panels ─── */
 /* Glass shell comes from .widget-card (applied in JSX with a per-panel
@@ -2513,28 +2531,87 @@ a.widget-accent-text {
 .calendar-panel {
   border-radius: 1.75rem; padding: 1rem;
 }
+/* The day column stretches to the month card's height instead of shrink-wrapping
+   beside it. With `items-start` a quiet month left ~500px of dead page to the
+   right of a 130px card, which reads as a broken layout rather than as a quiet
+   month; a stretched column with the empty state centred inside reads as
+   deliberate. */
+.calendar-panel-day { display: flex; flex-direction: column; }
+/* Grown empty state: a soft fill, not a dashed outline. Stretched to a 600×390
+   box on a wall, a dashed border reads as an empty form field you are supposed
+   to fill in; a quiet filled panel with the note centred reads as a quiet day. */
+.calendar-empty-grow {
+  flex: 1 1 auto; align-items: center; justify-content: center; min-height: 7rem;
+  border-style: solid; border-color: rgba(255,255,255,.08); background: rgba(255,255,255,.025);
+}
+:root[data-theme="light"] .calendar-empty-grow { border-color: rgba(0,0,0,.07); background: rgba(0,0,0,.015); }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-empty-grow { border-color: rgba(0,0,0,.07); background: rgba(0,0,0,.015); }
+}
 .calendar-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: .6rem; }
 .calendar-panel-heading { display: flex; align-items: center; gap: .7rem; }
 .calendar-panel-icon {
   width: 2.2rem; height: 2.2rem; border-radius: .8rem; display: grid; place-items: center; flex-shrink: 0;
-  background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .8), rgba(99,102,241,.8));
-  box-shadow: 0 8px 24px rgba(var(--calendar-accent-rgb, 59,130,246), .28);
+  background: linear-gradient(135deg, var(--color-accent-selected), color-mix(in srgb, var(--color-accent-selected) 70%, #111827));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-accent-selected) 30%, transparent);
   color: #fff; font-size: 1rem;
 }
 .calendar-panel-kicker { font-size: .75rem; font-weight: 600; color: var(--color-text-muted); letter-spacing: .06em; text-transform: uppercase; }
 .calendar-panel-title { font-size: .82rem; font-weight: 700; color: var(--color-text-primary); }
 .calendar-panel-subtitle { font-size: .76rem; color: var(--color-text-muted); }
 .calendar-add-link { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 .6rem; border-radius: .85rem; font-size: .8rem; font-weight: 600; color: var(--color-accent-selected); background: none; border: none; cursor: pointer; transition: background .2s, opacity .2s; }
-.calendar-add-link:hover { background: rgba(var(--calendar-accent-rgb, 59,130,246), .1); }
+.calendar-add-link:hover { background: color-mix(in srgb, var(--color-accent-selected) 12%, transparent); }
 
 /* ─── Empty state ─── */
+/* Compact and left-aligned. It used to be a centred sparkle inside a
+   1.5rem-padded dashed box that a 620px wall column stretched to ~350px tall —
+   300px of the screen's best real estate spent on "nothing is happening", with
+   the copy stranded in the middle of it. */
 .calendar-empty {
-  border: 1px dashed rgba(255,255,255,.08); border-radius: 1.25rem; padding: 1.5rem;
-  text-align: center; background: rgba(255,255,255,.03);
+  border: 1px dashed rgba(255,255,255,.1); border-radius: 1rem; padding: 1rem 1.1rem;
+  display: flex; align-items: center; gap: .8rem; text-align: left;
+  background: rgba(255,255,255,.025);
 }
-.calendar-empty-icon { font-size: 2.25rem; margin-bottom: .5rem; }
-.calendar-empty-title { font-size: .8rem; font-weight: 600; color: var(--color-text-secondary); }
-.calendar-empty-subtitle { font-size: .78rem; color: var(--color-text-muted); margin-top: .15rem; }
+:root[data-theme="light"] .calendar-empty { border-color: rgba(0,0,0,.1); background: rgba(0,0,0,.015); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .calendar-empty { border-color: rgba(0,0,0,.1); background: rgba(0,0,0,.015); } }
+.calendar-empty-icon { font-size: 1.6rem; line-height: 1; flex: 0 0 auto; }
+.calendar-empty-title { font-size: .82rem; font-weight: 650; color: var(--color-text-primary); }
+.calendar-empty-subtitle { font-size: .78rem; color: var(--color-text-secondary); margin-top: .1rem; }
+
+/* ─── Rest of week ───
+   What fills the wall column below the selected day. Without it the agenda
+   panel was a single short list floating at the top of a 620px card. */
+.calendar-week-section { margin-top: 1rem; padding-top: .85rem; border-top: 1px solid rgba(255,255,255,.07); }
+:root[data-theme="light"] .calendar-week-section { border-top-color: rgba(0,0,0,.08); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .calendar-week-section { border-top-color: rgba(0,0,0,.08); } }
+.calendar-week-heading {
+  font-size: .75rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--color-text-muted); margin-bottom: .55rem;
+}
+.calendar-week-row {
+  display: flex; align-items: center; gap: .6rem; width: 100%; text-align: left;
+  padding: .5rem .55rem; border-radius: .85rem; border: 1px solid transparent;
+  background: transparent; cursor: pointer; min-height: 2.75rem;
+  transition: background .18s var(--ease-settle), border-color .18s var(--ease-settle);
+}
+.calendar-week-row:hover { background: rgba(255,255,255,.055); border-color: rgba(255,255,255,.09); }
+:root[data-theme="light"] .calendar-week-row:hover { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.07); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .calendar-week-row:hover { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.07); } }
+.calendar-week-day {
+  flex: 0 0 auto; width: 2.4rem; text-align: center; border-radius: .6rem; padding: .2rem 0;
+  background: rgba(255,255,255,.05);
+}
+:root[data-theme="light"] .calendar-week-day { background: rgba(0,0,0,.05); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .calendar-week-day { background: rgba(0,0,0,.05); } }
+.calendar-week-day-abbr { display: block; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--color-text-secondary); line-height: 1.1; }
+.calendar-week-day-num { display: block; font-size: .9rem; font-weight: 700; color: var(--color-text-primary); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.calendar-week-row.is-today .calendar-week-day { background: color-mix(in srgb, var(--color-accent-selected) 22%, transparent); }
+.calendar-week-body { min-width: 0; flex: 1; }
+.calendar-week-item { display: flex; align-items: center; gap: .4rem; min-width: 0; }
+.calendar-week-dot { width: .34rem; height: .34rem; border-radius: 999px; flex: 0 0 auto; }
+.calendar-week-time { font-size: .75rem; font-weight: 700; color: var(--color-text-secondary); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.calendar-week-title { font-size: .8rem; font-weight: 550; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.calendar-week-title.is-muted { color: var(--color-text-secondary); font-weight: 450; }
 
 /* ─── Event list ─── */
 .calendar-event-list { display: flex; flex-direction: column; gap: .55rem; }
@@ -2568,13 +2645,14 @@ a.widget-accent-text {
 }
 
 .calendar-event-time-col {
-  display: flex; flex-direction: column; align-items: center; width: 3.2rem; flex-shrink: 0; gap: .15rem;
+  display: flex; flex-direction: column; align-items: center; width: 3.9rem; flex-shrink: 0; gap: .15rem;
 }
 .calendar-event-dot {
   width: .45rem; height: .45rem; border-radius: 999px; border: 2px solid rgba(255,255,255,.5);
   background: var(--event-color, var(--color-accent-selected));
 }
-.calendar-event-time { font-size: .78rem; font-weight: 700; color: var(--color-text-secondary); }
+/* "12:00 PM" broke onto two lines in a 3.2rem column, which read as two times. */
+.calendar-event-time { font-size: .78rem; font-weight: 700; color: var(--color-text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .calendar-event-divider {
   width: 2px; flex: 1; border-radius: 999px; background: color-mix(in srgb, var(--event-color, var(--color-accent-selected)) 18%, transparent);
 }
@@ -2590,15 +2668,15 @@ a.widget-accent-text {
   position: relative;
 }
 .calendar-edit-btn::after { content: ""; position: absolute; inset: -.5rem; }
-.calendar-edit-btn:hover { color: var(--color-accent-selected); background: rgba(var(--calendar-accent-rgb, 59,130,246), .12); }
+.calendar-edit-btn:hover { color: var(--color-accent-selected); background: color-mix(in srgb, var(--color-accent-selected) 14%, transparent); }
 .calendar-edit-btn svg { width: .8rem; height: .8rem; }
 
 /* ─── Upcoming ─── */
 .calendar-upcoming-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .6rem; }
 .calendar-upcoming-icon {
   width: 1.9rem; height: 1.9rem; border-radius: .7rem; display: grid; place-items: center;
-  background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .85), rgba(99,102,241,.85));
-  box-shadow: 0 6px 20px rgba(var(--calendar-accent-rgb, 59,130,246), .25);
+  background: linear-gradient(135deg, var(--color-accent-selected), color-mix(in srgb, var(--color-accent-selected) 72%, #111827));
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--color-accent-selected) 28%, transparent);
 }
 .calendar-upcoming-scroll { display: flex; gap: .55rem; overflow-x: auto; padding-bottom: .35rem; }
 
@@ -2653,23 +2731,23 @@ a.widget-accent-text {
 .calendar-sync-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
   min-height: 2.75rem; padding: .4rem .9rem; border-radius: 999px;
-  background: rgba(var(--calendar-accent-rgb, 59,130,246), .12);
-  border: 1px solid rgba(var(--calendar-accent-rgb, 59,130,246), .2);
+  background: color-mix(in srgb, var(--color-accent-selected) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent-selected) 28%, transparent);
   color: var(--color-accent-selected); font-size: .8rem; font-weight: 600;
   cursor: pointer; transition: all .2s;
 }
-.calendar-sync-btn:hover { background: rgba(var(--calendar-accent-rgb, 59,130,246), .2); }
+.calendar-sync-btn:hover { background: color-mix(in srgb, var(--color-accent-selected) 22%, transparent); }
 .calendar-sync-btn:disabled { opacity: .5; cursor: not-allowed; }
 .calendar-sync-btn svg { width: .8rem; height: .8rem; }
 .calendar-today-btn {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 2.75rem; padding: .34rem 1rem; border-radius: 999px;
   font-size: .8rem; font-weight: 700; color: var(--color-accent-selected);
-  background: rgba(var(--calendar-accent-rgb, 59,130,246), .12);
-  border: 1px solid rgba(var(--calendar-accent-rgb, 59,130,246), .18);
+  background: color-mix(in srgb, var(--color-accent-selected) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent-selected) 26%, transparent);
   cursor: pointer; transition: all .2s;
 }
-.calendar-today-btn:hover { background: rgba(var(--calendar-accent-rgb, 59,130,246), .22); }
+.calendar-today-btn:hover { background: color-mix(in srgb, var(--color-accent-selected) 22%, transparent); }
 
 /* ─── Calendar grid card ─── */
 .calendar-grid-card { overflow: hidden; }
@@ -2683,28 +2761,56 @@ a.widget-accent-text {
 }
 .calendar-month-title.is-animating { animation: calendarMonthSettle .24s var(--ease-settle) both; }
 
-/* Day strip inside the grid card */
-.calendar-day-strip-wrap { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; padding: .1rem .85rem .45rem; border-bottom: 1px solid rgba(255,255,255,.05); }
+/* ─── Week strip inside the grid card ───
+   This replaces the old 31-cell horizontal month strip. That strip was a
+   horizontally-scrolling runway of every day in the month, two rows above a
+   month grid that already showed all of them — two calendars on one card, with
+   the strip clipped mid-cell at 1920 and its weekday letter disagreeing with
+   the grid whenever the month didn't start on Sunday. The family question a
+   calendar answers off the wall is "what is THIS week", so the strip is the
+   selected day's Sunday–Saturday week, laid out on the same 7 columns as the
+   grid below it so each column lines up. */
+.calendar-day-strip-wrap {
+  overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
+  padding: .5rem .75rem .55rem; border-bottom: 1px solid rgba(255,255,255,.05);
+}
 .calendar-day-strip-wrap::-webkit-scrollbar { display: none; }
-.calendar-day-strip { display: flex; gap: .45rem; min-width: max-content; }
+.calendar-day-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: .2rem; }
 .calendar-strip-day {
-  display: flex; flex-direction: column; align-items: center; gap: .15rem;
-  padding: .4rem .6rem; border-radius: 1rem; border: 1px solid transparent; background: transparent;
-  color: var(--color-text-secondary); cursor: pointer; min-width: 2.75rem;
+  display: flex; flex-direction: column; align-items: center; gap: .1rem;
+  padding: .3rem .1rem .35rem; border-radius: .8rem; border: 1px solid transparent; background: transparent;
+  color: var(--color-text-secondary); cursor: pointer; min-height: 2.75rem; min-width: 0;
   transition: background .18s var(--ease-settle), color .18s var(--ease-settle);
 }
-.calendar-strip-day .wd { font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.calendar-strip-day .wd { font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .calendar-strip-day .num {
-  width: 1.9rem; height: 1.9rem; border-radius: 999px; display: flex; align-items: center; justify-content: center;
-  font-size: .82rem; font-weight: 600;
+  width: 2rem; height: 2rem; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; font-weight: 650; font-variant-numeric: tabular-nums;
 }
+/* Week-strip event marks — up to three dots, so a school day reads as busy from
+   across the room instead of requiring a tap. */
+.calendar-strip-dots { display: flex; align-items: center; justify-content: center; gap: .18rem; height: .34rem; }
+.calendar-strip-dot { width: .3rem; height: .3rem; border-radius: 999px; }
+.calendar-strip-day.is-outside { visibility: hidden; pointer-events: none; }
 .calendar-strip-day:hover { background: rgba(255,255,255,.06); color: var(--color-text-primary); }
 :root[data-theme="light"] .calendar-strip-day:hover { background: rgba(0,0,0,.05); }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .calendar-strip-day:hover { background: rgba(0,0,0,.05); } }
-.calendar-strip-day.is-today .num { border: 1.5px solid color-mix(in srgb, var(--color-accent-selected) 60%, transparent); }
+/* Today, unselected, wears the highest-contrast ink on the strip: it is the one
+   day the wall has to resolve without being tapped. Ring only — a wash here
+   read as a SECOND selection sitting next to the real one in the grid. */
+.calendar-strip-day.is-today .num { color: var(--color-text-primary); border: 1.5px solid color-mix(in srgb, var(--color-accent-selected) 70%, transparent); }
+.calendar-strip-day.is-today .wd { color: var(--color-text-primary); }
+.calendar-strip-day.is-selected { color: var(--color-text-primary); }
 .calendar-strip-day.is-selected .num {
-  background: linear-gradient(135deg, var(--color-accent-button, var(--color-accent-selected)), color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 72%, #111827));
-  color: #fff; box-shadow: 0 6px 16px color-mix(in srgb, var(--color-accent-selected) 30%, transparent);
+  background: var(--color-accent-button, var(--color-accent-selected));
+  color: #fff; box-shadow: 0 6px 18px color-mix(in srgb, var(--color-accent-selected) 34%, transparent);
+}
+.calendar-strip-day.is-selected .wd { color: var(--color-accent-selected); }
+:root[data-theme="light"] .calendar-strip-day.is-selected .wd,
+:root[data-theme="light"] .calendar-strip-day.is-selected:hover { color: var(--color-accent-selected); }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-strip-day.is-selected .wd,
+  :root:not([data-theme="dark"]) .calendar-strip-day.is-selected:hover { color: var(--color-accent-selected); }
 }
 .calendar-month-nav { display: flex; align-items: center; gap: .3rem; }
 .calendar-month-nav .calendar-icon-btn {
@@ -2716,104 +2822,98 @@ a.widget-accent-text {
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .calendar-month-nav .calendar-icon-btn:hover { background: rgba(0,0,0,.06); }
 }
-.calendar-weekday-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: .15rem; padding: .35rem .85rem; border-bottom: 1px solid rgba(255,255,255,.04); margin-bottom: .3rem; }
-.calendar-weekday { text-align: center; font-size: .75rem; font-weight: 600; color: var(--color-text-muted); letter-spacing: .05em; text-transform: uppercase; padding: .3rem 0; }
-.calendar-day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .2rem; padding: 0 .75rem .85rem; }
+/* DELETED: `.calendar-weekday-row` / `.calendar-weekday`. The week strip now
+   spells SU…SA in the same seven columns directly above the grid, so the second
+   header row only made the card read as two calendars stacked together. */
+/* The month card is a flex column and the grid takes the slack, so the six rows
+   divide whatever height the card is given. Stretched to match the agenda column
+   on a wall, the grid used to leave ~140px of dead card under 31 October. */
+.calendar-grid-card { display: flex; flex-direction: column; }
+.calendar-day-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: minmax(2.75rem, 1fr);
+  gap: .2rem; padding: 0 .75rem .9rem; flex: 1 1 auto;
+}
 
+/* Month cells are WIDER than tall. `aspect-ratio: 1 / 1` made every cell a 90px
+   square at 1920 — the grid read as an oversized keyboard with a small number
+   floating in the middle of each key, not as a calendar. A min-height lets the
+   cell follow the column width instead of fighting it. */
 .calendar-day-btn {
-  aspect-ratio: 1 / 1; border-radius: .85rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .2rem;
-  border: 1px solid color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 16%, rgba(255,255,255,.07));
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)),
-    color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 7%, rgba(255,255,255,.03));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  min-height: max(2.75rem, clamp(2.75rem, 1.6vw + 2.1rem, 3.4rem)); border-radius: .7rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .22rem;
+  border: 1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,.025);
   color: var(--color-text-secondary);
-  transition: all .25s var(--ease-spring); cursor: pointer; font-size: .78rem; font-weight: 600;
+  transition: background .18s var(--ease-settle), color .18s var(--ease-settle),
+    border-color .18s var(--ease-settle), box-shadow .18s var(--ease-settle);
+  cursor: pointer; font-size: .8rem; font-weight: 650;
 }
 .calendar-day-btn:hover {
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.03)),
-    color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 12%, rgba(255,255,255,.05));
-  border-color: color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 30%, rgba(255,255,255,.14));
+  background: rgba(255,255,255,.07);
+  border-color: rgba(255,255,255,.16);
   color: var(--color-text-primary);
 }
 .calendar-day-btn.is-empty { visibility: hidden; pointer-events: none; }
+/* Today, unselected: the numeral takes PRIMARY ink (not an accent tint, which
+   lands at 4.47:1 on the card in dark) and the cell takes the accent ring. It is
+   the one day the wall has to resolve without a tap, so it gets the contrast. */
 .calendar-day-btn.is-today {
-  color: var(--color-accent-selected);
-  background: color-mix(in srgb, var(--color-accent-selected) 8%, transparent);
-  border-color: color-mix(in srgb, var(--color-accent-selected) 28%, transparent);
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-accent-selected) 11%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent-selected) 55%, transparent);
 }
+/* Selected: a FLAT accent-button fill, not a gradient. The token is defined as
+   "accent mixed 60% toward black" precisely so white text clears AA on it in
+   both themes (8.3:1 dark, 10.9:1 light), and a flat fill is what a contrast
+   checker can actually resolve — the old 135deg gradient measured 3.84:1. */
 .calendar-day-btn.is-selected {
   color: #fff;
-  background: linear-gradient(135deg, var(--color-accent-button, var(--color-accent-selected)), color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 70%, #111827));
-  border-color: color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 62%, rgba(255,255,255,.35));
-  transform: scale(1.06);
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--color-accent-selected) 32%, transparent);
+  background: var(--color-accent-button, var(--color-accent-selected));
+  border-color: color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 70%, rgba(255,255,255,.4));
+  box-shadow: 0 10px 26px color-mix(in srgb, var(--color-accent-selected) 34%, transparent);
   z-index: 1;
 }
-.calendar-day-btn.is-selected:hover { transform: scale(1.06); }
-:root[data-theme="light"] .calendar-day-btn:not(.is-selected):not(.is-today) {
-  border-color: color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 18%, rgba(0,0,0,.08));
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.7), rgba(255,255,255,.35)),
-    color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 6%, rgba(0,0,0,.03));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.8);
+.calendar-day-btn.is-selected:hover {
+  background: var(--color-accent-button, var(--color-accent-selected));
+  color: #fff;
+}
+:root[data-theme="light"] .calendar-day-btn:not(.is-selected) {
+  border-color: rgba(0,0,0,.07);
+  background: rgba(0,0,0,.015);
 }
 :root[data-theme="light"] .calendar-day-btn:not(.is-selected):hover {
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.9), rgba(255,255,255,.5)),
-    color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 12%, rgba(0,0,0,.05));
-  border-color: color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 34%, rgba(0,0,0,.12));
+  background: rgba(0,0,0,.05);
+  border-color: rgba(0,0,0,.14);
 }
-:root[data-theme="light"] .calendar-day-btn.is-today {
-  background: color-mix(in srgb, var(--color-accent-selected) 7%, transparent);
-  border-color: color-mix(in srgb, var(--color-accent-selected) 32%, transparent);
-}
-:root[data-theme="light"] .calendar-day-btn.is-selected.is-today {
-  background: linear-gradient(135deg, var(--color-accent-button, var(--color-accent-selected)), color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 70%, #111827));
-  border-color: color-mix(in srgb, var(--color-accent-selected) 62%, rgba(255,255,255,.3));
+:root[data-theme="light"] .calendar-day-btn.is-today:not(.is-selected) {
+  background: color-mix(in srgb, var(--color-accent-selected) 9%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent-selected) 55%, transparent);
 }
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .calendar-day-btn:not(.is-selected):not(.is-today) {
-    border-color: color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 18%, rgba(0,0,0,.08));
-    background:
-      linear-gradient(180deg, rgba(255,255,255,.7), rgba(255,255,255,.35)),
-      color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 6%, rgba(0,0,0,.03));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.8);
+  :root:not([data-theme="dark"]) .calendar-day-btn:not(.is-selected) {
+    border-color: rgba(0,0,0,.07);
+    background: rgba(0,0,0,.015);
   }
   :root:not([data-theme="dark"]) .calendar-day-btn:not(.is-selected):hover {
-    background:
-      linear-gradient(180deg, rgba(255,255,255,.9), rgba(255,255,255,.5)),
-      color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 12%, rgba(0,0,0,.05));
-    border-color: color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 34%, rgba(0,0,0,.12));
+    background: rgba(0,0,0,.05);
+    border-color: rgba(0,0,0,.14);
   }
-  :root:not([data-theme="dark"]) .calendar-day-btn.is-today {
-    background: color-mix(in srgb, var(--color-accent-selected) 7%, transparent);
-    border-color: color-mix(in srgb, var(--color-accent-selected) 32%, transparent);
-  }
-  :root:not([data-theme="dark"]) .calendar-day-btn.is-selected.is-today {
-    background: linear-gradient(135deg, var(--color-accent-button, var(--color-accent-selected)), color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 70%, #111827));
-    border-color: color-mix(in srgb, var(--color-accent-selected) 62%, rgba(255,255,255,.3));
+  :root:not([data-theme="dark"]) .calendar-day-btn.is-today:not(.is-selected) {
+    background: color-mix(in srgb, var(--color-accent-selected) 9%, transparent);
+    border-color: color-mix(in srgb, var(--color-accent-selected) 55%, transparent);
   }
 }
-.calendar-day-number { font-size: .82rem; font-weight: 700; line-height: 1; }
-.calendar-day-number.is-today-number {
-  width: 1.45rem; height: 1.45rem; border-radius: 999px; display: grid; place-items: center;
-  background: var(--color-accent-selected); color: #fff;
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--color-accent-selected) 35%, transparent);
+/* One numeral scale for the whole grid, growing with the viewport so a wall
+   panel resolves the date from the sofa. */
+.calendar-day-number {
+  font-size: clamp(.95rem, .55vw + .82rem, 1.2rem); font-weight: 650; line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
-.calendar-day-btn.is-selected .calendar-day-number.is-today-number {
-  box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 4px 12px color-mix(in srgb, var(--color-accent-selected) 35%, transparent);
-}
-.calendar-day-btn.is-selected.is-today {
-  background: color-mix(in srgb, var(--color-accent-selected) 20%, transparent);
-  border-color: color-mix(in srgb, var(--color-accent-selected) 60%, rgba(255,255,255,.3));
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.25), 0 10px 26px color-mix(in srgb, var(--color-accent-selected) 28%, transparent);
-}
-.calendar-day-btn.is-selected.is-today .calendar-day-dot { background: var(--color-accent-selected) !important; }
+.calendar-day-btn.is-today .calendar-day-number { font-weight: 800; }
+.calendar-day-btn.is-selected .calendar-day-number { font-weight: 750; color: #fff; }
 .calendar-day-dots { display: flex; gap: .16rem; }
-.calendar-day-dot { width: .26rem; height: .26rem; border-radius: 999px; }
-.calendar-day-btn.is-selected .calendar-day-dot { background: rgba(255,255,255,.8) !important; }
+.calendar-day-dot { width: .28rem; height: .28rem; border-radius: 999px; }
+.calendar-day-btn.is-selected .calendar-day-dot { background: rgba(255,255,255,.9) !important; }
 
 /* ─── Form ─── */
 .calendar-form-card { padding: 1rem; }
@@ -2827,8 +2927,8 @@ a.widget-accent-text {
   transition: border-color .2s, box-shadow .2s;
 }
 .calendar-input:focus {
-  border-color: rgba(var(--calendar-accent-rgb, 59,130,246), .5);
-  box-shadow: 0 0 0 3px rgba(var(--calendar-accent-rgb, 59,130,246), .1);
+  border-color: color-mix(in srgb, var(--color-accent-selected) 62%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-selected) 22%, transparent);
 }
 .calendar-input::placeholder { color: var(--color-text-dim); }
 :root[data-theme="light"] .calendar-input { background: rgba(255,255,255,.6); border-color: rgba(0,0,0,.08); }
@@ -2858,7 +2958,7 @@ a.widget-accent-text {
   background: var(--color-accent-button);
   color: #fff;
   border-color: transparent;
-  box-shadow: 0 0 10px rgba(var(--calendar-accent-rgb, 59,130,246), .35);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent-selected) 38%, transparent);
 }
 :root[data-theme="light"] .calendar-time-ampm-btn { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.06); }
 
@@ -2910,8 +3010,13 @@ a.widget-accent-text {
 
 /* ─── Schedule redesign (Routines-style) ─── */
 
+/* Same trailing fade as the member strip: four time-of-day pills overflow a
+   390px phone, and a pill sliced mid-word at the viewport edge reads as broken
+   rather than scrollable. */
 .calendar-filter-tabs {
   display: flex; gap: .4rem; overflow-x: auto; padding-bottom: .15rem;
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1.75rem), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1.75rem), transparent 100%);
 }
 .calendar-filter-pill {
   display: inline-flex; align-items: center; gap: .35rem;
@@ -2922,10 +3027,10 @@ a.widget-accent-text {
 }
 .calendar-filter-pill:hover { background: rgba(255,255,255,.1); color: var(--color-text-primary); }
 .calendar-filter-pill.is-active {
-  background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .24), rgba(255,255,255,.08));
-  border-color: rgba(var(--calendar-accent-rgb, 59,130,246), .3);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 24%, transparent), rgba(255,255,255,.08));
+  border-color: color-mix(in srgb, var(--color-accent-selected) 34%, transparent);
   color: var(--color-text-primary);
-  box-shadow: 0 4px 14px rgba(var(--calendar-accent-rgb, 59,130,246), .10);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-accent-selected) 14%, transparent);
 }
 
 .calendar-category-group { margin-bottom: 1.25rem; }
@@ -3004,7 +3109,7 @@ a.widget-accent-text {
   position: relative;
 }
 .calendar-routine-toggle::after { content: ""; position: absolute; inset: -.5rem; }
-.calendar-routine-toggle:hover { color: var(--color-accent-selected); background: rgba(var(--calendar-accent-rgb, 59,130,246), .12); }
+.calendar-routine-toggle:hover { color: var(--color-accent-selected); background: color-mix(in srgb, var(--color-accent-selected) 14%, transparent); }
 .calendar-routine-toggle svg { width: .8rem; height: .8rem; }
 
 /* ─── Task / Leaderboard kid-friendly animations ─── */

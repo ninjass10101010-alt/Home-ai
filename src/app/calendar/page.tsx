@@ -7,6 +7,7 @@ import WidgetCard from "@/components/patterns/WidgetCard";
 import ConsuelaWeekCard from "@/components/calendar/ConsuelaWeekCard";
 import { useAuth } from "@/hooks/useAuth";
 import Chip, { type ChipTone } from "@/components/ui/Chip";
+import SegmentedControl from "@/components/ui/SegmentedControl";
 import Avatar from "@/components/ui/Avatar";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { readReducedMotionPreference } from "@/hooks/useReducedMotionPreference";
@@ -301,13 +302,6 @@ const subscribeNoop = () => () => {};
 const clientTrue = () => true;
 const serverFalse = () => false;
 
-function getGreeting() {
-  const hour = new Date().getHours();
-  if (hour < 12) return "Good Morning \u2600\uFE0F";
-  if (hour < 17) return "Good Afternoon \uD83C\uDF24";
-  return "Good Evening \uD83C\uDF19";
-}
-
 function getWeekdayName(year: number, month: number, day: number) {
   return new Date(year, month, day).toLocaleDateString("en-US", { weekday: "long" });
 }
@@ -347,7 +341,7 @@ const GOOGLE_STATUS_COPY: Record<Exclude<GoogleCalendarStatus, "idle">, string> 
 function CalendarGoogleStatusLine({ status }: { status: GoogleCalendarStatus }) {
   if (status === "idle") return null;
   return (
-    <p className="calendar-hero-copy" role="status" data-testid="calendar-google-status">
+    <p className="calendar-google-status" role="status" data-testid="calendar-google-status">
       {GOOGLE_STATUS_COPY[status]}
     </p>
   );
@@ -476,6 +470,51 @@ export default function CalendarPage() {
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
 
+  /**
+   * The selected day's Sunday–Saturday week, as 7 grid-aligned slots. Days that
+   * fall outside the viewed month keep their slot (so the strip's columns line
+   * up with the month grid under it) but carry no day number and are inert.
+   *
+   * This replaced a strip that rendered EVERY day of the month as a
+   * horizontally scrolling chip — two full calendars inside one card, clipped
+   * mid-cell at 1920, with a weekday letter that disagreed with the grid below
+   * whenever the month didn't begin on a Sunday. The family question a calendar
+   * answers off a wall is "what is this week", so that is what the strip is.
+   */
+  const weekSlots = useMemo(() => {
+    const weekStart = selectedDay - ((firstDay + selectedDay - 1) % 7);
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = weekStart + i;
+      return day >= 1 && day <= daysInMonth ? day : null;
+    });
+  }, [selectedDay, firstDay, daysInMonth]);
+
+  /** Every event in the selected day, regardless of the member filter. */
+  const unfilteredSelectedEvents = useMemo(() => {
+    return renderEvents
+      .filter((e) => e.day === selectedDay && eventInMonth(e, month, year))
+      .sort((a, b) => parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time));
+  }, [renderEvents, selectedDay, month, year]);
+
+  /** The rest of the selected week, member filter applied, grouped by day. */
+  const restOfWeek = useMemo(() => {
+    return weekSlots
+      .filter((day): day is number => day !== null && day !== selectedDay)
+      .map((day) => ({
+        day,
+        events: renderEvents
+          .filter(
+            (e) =>
+              e.day === day &&
+              eventInMonth(e, month, year) &&
+              (filterMember === "All" || e.member === filterMember || e.member === "All")
+          )
+          .sort((a, b) => parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time)),
+      }));
+  }, [weekSlots, renderEvents, selectedDay, filterMember, month, year]);
+
+const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
+
   const dayEventMap = useMemo(() => {
     const map = new Map<number, CalEvent[]>();
     renderEvents.forEach((e) => {
@@ -516,6 +555,13 @@ export default function CalendarPage() {
     }
     return cards;
   }, [upcomingByDay, selectedDay, daysInMonth]);
+
+  /** Upcoming cards, but only for days that actually hold an event — a row of
+   *  "Free day" cards reads as missing data rather than as a quiet month. */
+  const upcomingDays = useMemo(
+    () => upcomingCards.filter((card) => card.events.length > 0),
+    [upcomingCards],
+  );
 
   const selectViewMonth = (m: number, y: number) => {
     setMonth(m);
@@ -894,17 +940,32 @@ export default function CalendarPage() {
         }
       />
 
-      <div className="px-4 mt-4 space-y-4">
+      {/* `space-y-3` on the phone: at `space-y-4` the banner + status + 11 member
+          chips + tab row pushed the month card's first dates ~100px below the
+          fold on a 390×844 phone. */}
+        <div className="px-4 mt-4 space-y-3 md:space-y-4">
+        {/* Date-led banner. The greeting ("Good Evening 🌙 / Here's your day at
+            a glance") used to own this card and restated the route name while
+            the most valuable surface on a wall calendar said nothing about the
+            date. The day number is now the largest type on the page. */}
         <section className="calendar-hero-card widget-card">
           <div className="calendar-hero-content">
-            <div>
-              <p className="calendar-hero-kicker">{weekdayName} &middot; {selectedEvents.length} event{selectedEvents.length !== 1 ? "s" : ""}</p>
-              {/* h2, not h1 — the TopBar "Calendar" is the page's single h1. */}
-              <h2 className="calendar-hero-title" suppressHydrationWarning>{getGreeting()}</h2>
-              <p className="calendar-hero-copy">
-                {isSelectedToday ? "Here\u2019s your day at a glance" : `What\u2019s on for ${weekdayName} ${MONTHS[month].slice(0, 3)} ${selectedDay}`}
-              </p>
-            <CalendarGoogleStatusLine status={googleStatus} />
+            <div className="calendar-hero-main">
+              <p className="calendar-hero-numeral">{selectedDay}</p>
+              <div className="calendar-hero-text">
+                <p className="calendar-hero-kicker">{weekdayName}</p>
+                {/* h2, not h1 — the TopBar "Calendar" is the page's single h1.
+                    Deliberately NOT the month name: the month card header 200px
+                    below already says "October 2026", and repeating it here
+                    wrapped the line to two on a 390px phone. */}
+                <h2 className="calendar-hero-title">
+                  {unfilteredSelectedEvents.length > 0
+                    ? `${unfilteredSelectedEvents.length} event${unfilteredSelectedEvents.length === 1 ? "" : "s"}`
+                    : isSelectedToday
+                      ? "Nothing else today"
+                      : "Nothing on"}
+                </h2>
+              </div>
             </div>
             {canPullFreshFromGoogle && (
               <button
@@ -923,6 +984,12 @@ export default function CalendarPage() {
             )}
           </div>
         </section>
+
+        {/* Its own row under the banner. It is a long sentence about a
+            connection state, not a headline — inside the card it pushed the
+            date block into four wrapped lines and made the hero 350px tall on a
+            390px phone. */}
+        <CalendarGoogleStatusLine status={googleStatus} />
 
         <div className="calendar-member-strip scrollbar-hide">
           <button
@@ -950,23 +1017,26 @@ export default function CalendarPage() {
           })}
         </div>
 
-        <div className="calendar-tabs">
-          {(["calendar", "schedule"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`calendar-tab ${activeTab === tab ? "is-active" : ""}`}
-            >
-              {tab === "calendar" ? "\uD83D\uDCC5 Calendar" : "\u23F0 Schedule"}
-            </button>
-          ))}
-        </div>
+        {/* `SegmentedControl`, not the old hand-rolled `.calendar-tabs`: the
+            hand-rolled pair measured 170×36 / 615×36 — a tap-target contract
+            violation on the control the entire page hangs off. The primitive
+            guarantees 44px and the accent pill. */}
+        <SegmentedControl
+          aria-label="Calendar view"
+          emphasize
+          value={activeTab}
+          onChange={(next) => setActiveTab(next as "calendar" | "schedule")}
+          options={[
+            { id: "calendar", label: "Calendar", icon: <span aria-hidden="true">{`\uD83D\uDCC5`}</span> },
+            { id: "schedule", label: "Schedule", icon: <span aria-hidden="true">{`\u23F0`}</span> },
+          ]}
+        />
 
         {/* Phone: stacked cards. md+: Home's two-column idiom — month grid
             left, the selected-day agenda pinned beside it (col-start/row-start
             so the week card and forms flow full-width underneath). */}
         {activeTab === "calendar" && (
-          <div key="calendar" className="panel-swap space-y-4 md:grid md:grid-cols-2 md:items-start md:gap-4 md:space-y-0">
+          <div key="calendar" className="panel-swap space-y-4 md:grid md:grid-cols-2 md:gap-4 md:space-y-0">
             <WidgetCard tone="#3b82f6" className="calendar-grid-card">
               <div className="calendar-panel-header calendar-grid-header">
                 <h2 key={`${year}-${month}`} className="calendar-month-title is-animating">
@@ -983,33 +1053,44 @@ export default function CalendarPage() {
                 </div>
               </div>
               <div className="calendar-day-strip-wrap">
-                <div className="calendar-day-strip" role="group" aria-label="Jump to day">
-                  {Array.from({ length: daysInMonth }, (_, i) => {
-                    const d = i + 1;
-                    const isT = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-                    const sel = d === selectedDay;
-                    const weekday = new Date(year, month, d).getDay();
+                <div className="calendar-day-strip" role="group" aria-label="This week">
+                  {weekSlots.map((day, i) => {
+                    if (day === null) {
+                      return <div key={`pad-${i}`} className="calendar-strip-day is-outside" aria-hidden="true" />;
+                    }
+                    const isT = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+                    const sel = day === selectedDay;
+                    const weekday = new Date(year, month, day).getDay();
+                    const dayEvents = (dayEventMap.get(day) ?? []).slice(0, 3);
                     return (
                       <button
-                        key={d}
+                        key={day}
                         type="button"
-                        onClick={() => setSelectedDay(d)}
-                        aria-label={`${MONTHS[month]} ${d}`}
+                        onClick={() => setSelectedDay(day)}
+                        aria-label={`${DAYS[weekday]} ${MONTHS[month]} ${day}`}
                         aria-pressed={sel}
                         className={`calendar-strip-day${sel ? " is-selected" : ""}${isT ? " is-today" : ""}`}
                       >
-                        <span className="wd">{DAYS[weekday].charAt(0)}</span>
-                        <span className="num">{d}</span>
+                        <span className="wd">{DAYS[weekday]}</span>
+                        <span className="num">{day}</span>
+                        <span className="calendar-strip-dots" aria-hidden="true">
+                          {dayEvents.map((ev, di) => (
+                            <span
+                              key={di}
+                              className="calendar-strip-dot"
+                              style={{ background: sel ? "rgba(255,255,255,0.9)" : eventColorOf(ev) }}
+                            />
+                          ))}
+                        </span>
                       </button>
                     );
                   })}
                 </div>
               </div>
-              <div className="calendar-weekday-row">
-                {DAYS.map((d) => (
-                  <div key={d} className="calendar-weekday">{d}</div>
-                ))}
-              </div>
+              {/* No separate weekday header row: the week strip above already
+                  spells SU…SA in the same 7 columns, and a second identical
+                  header directly under it is what made the card read as two
+                  calendars stacked on each other. */}
               <div className="calendar-day-grid">
                 {cells.map((day, i) => {
                   if (!day) return <div key={i} className="calendar-day-btn is-empty" />;
@@ -1025,7 +1106,7 @@ export default function CalendarPage() {
                       onClick={() => setSelectedDay(day)}
                       className={`calendar-day-btn${isSelected ? " is-selected" : ""}${isToday ? " is-today" : ""}`}
                     >
-                      <span className={`calendar-day-number${isToday ? " is-today-number" : ""}`}>{day}</span>
+                      <span className="calendar-day-number">{day}</span>
                       {visibleDots.length > 0 && (
                         <div className="calendar-day-dots">
                           {visibleDots.map((ev, di) => (
@@ -1049,7 +1130,7 @@ export default function CalendarPage() {
               </div>
             )}
 
-            <section className="calendar-panel widget-card md:col-start-2 md:row-start-1" style={{ "--widget-tone": "#22d3ee" } as CSSProperties}>
+            <section className="calendar-panel calendar-panel-day widget-card md:col-start-2 md:row-start-1" style={{ "--widget-tone": "#22d3ee" } as CSSProperties}>
               <div className="calendar-panel-header">
                 <div className="calendar-panel-heading">
                   <div className="calendar-panel-icon">{`\uD83D\uDCC5`}</div>
@@ -1062,11 +1143,16 @@ export default function CalendarPage() {
               </div>
 
               {selectedEvents.length === 0 ? (
-                <div className="calendar-empty mt-3">
-                  <div className="calendar-empty-icon">{`\u2728`}</div>
-                  <p className="calendar-empty-title">Nothing scheduled</p>
-                  <p className="calendar-empty-subtitle">Enjoy your free time</p>
-                  <button onClick={startAddEvent} className="calendar-add-link mt-2 block">+ Add an event</button>
+                <div className="calendar-empty calendar-empty-grow mt-3">
+                  <div className="calendar-empty-icon" aria-hidden="true">{`\u2728`}</div>
+                  <div>
+                    <p className="calendar-empty-title">Nothing scheduled</p>
+                    <p className="calendar-empty-subtitle">
+                      {filterMember === "All"
+                        ? `No events on ${weekdayName}. Enjoy the free time.`
+                        : `No ${filterMember} events on ${weekdayName}.`}
+                    </p>
+                  </div>
                 </div>
               ) : (
                 <div className="calendar-event-list mt-3">
@@ -1106,6 +1192,50 @@ export default function CalendarPage() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Rest of the week. On a 1920 wall the agenda panel is a 620px
+                  card that a single day list left mostly empty; this is what a
+                  family actually reads next to the month grid. Quiet days are
+                  omitted — seven rows of "free day" is noise, not information. */}
+              {restOfWeekWithEvents.length > 0 && (
+                <div className="calendar-week-section">
+                  <p className="calendar-week-heading">Rest of this week</p>
+                  <div>
+                    {restOfWeekWithEvents.map(({ day, events }) => {
+                      const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          onClick={() => setSelectedDay(day)}
+                          className={`calendar-week-row${isToday ? " is-today" : ""}`}
+                        >
+                          <span className="calendar-week-day">
+                            <span className="calendar-week-day-abbr">{getShortWeekday(year, month, day)}</span>
+                            <span className="calendar-week-day-num">{day}</span>
+                          </span>
+                          <span className="calendar-week-body">
+                            {events.slice(0, 2).map((ev) => (
+                              <span key={ev.id} className="calendar-week-item">
+                                <span className="calendar-week-dot" style={{ background: eventColorOf(ev) }} />
+                                <span className="calendar-week-time">{ev.time}</span>
+                                <span className="calendar-week-title">{ev.title}</span>
+                              </span>
+                            ))}
+                            {events.length > 2 && (
+                              <span className="calendar-week-item">
+                                <span className="calendar-week-title is-muted">
+                                  +{events.length - 2} more
+                                </span>
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </section>
@@ -1150,8 +1280,8 @@ export default function CalendarPage() {
               </WidgetCard>
             )}
 
-            {upcomingCards.length > 0 && (
-              <section className="calendar-panel widget-card" style={{ "--widget-tone": "#10b981" } as CSSProperties}>
+            {upcomingDays.length > 0 && (
+              <section className="calendar-panel widget-card md:col-span-2" style={{ "--widget-tone": "#10b981" } as CSSProperties}>
                 <div className="calendar-upcoming-header">
                   <div className="calendar-upcoming-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.5} className="w-3.5 h-3.5">
@@ -1159,12 +1289,17 @@ export default function CalendarPage() {
                     </svg>
                   </div>
                   <div>
-                    <h3 className="calendar-panel-title">Upcoming</h3>
-                    <p className="calendar-panel-subtitle">Next {upcomingCards.length} days</p>
+                    <h3 className="calendar-panel-title">Later this month</h3>
+                    {/* Only days that actually hold something. This used to
+                        render all seven days including "Free day" cards, which
+                        is a row of noise that reads as missing data. */}
+                    <p className="calendar-panel-subtitle">
+                      {upcomingDays.length} day{upcomingDays.length === 1 ? "" : "s"} with events
+                    </p>
                   </div>
                 </div>
                 <div className="calendar-upcoming-scroll scrollbar-hide mt-2">
-                  {upcomingCards.map((card) => (
+                  {upcomingDays.map((card) => (
                     <button
                       key={card.day}
                       type="button"
@@ -1173,21 +1308,17 @@ export default function CalendarPage() {
                     >
                       <p className="calendar-upcoming-day-label">{getShortWeekday(year, month, card.day)}</p>
                       <p className="calendar-upcoming-day-num">{card.day}</p>
-                      {card.events.length > 0 ? (
-                        <div className="calendar-upcoming-events">
-                          {card.events.slice(0, 3).map((ev) => (
-                            <div key={ev.id} className="calendar-upcoming-event">
-                              <span className="calendar-upcoming-dot" style={{ background: eventColorOf(ev) }} />
-                              <span className="calendar-upcoming-event-title">{ev.title}</span>
-                            </div>
-                          ))}
-                          {card.events.length > 3 && (
-                            <p className="calendar-upcoming-more">+{card.events.length - 3} more</p>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="calendar-upcoming-empty">Free day</p>
-                      )}
+                      <div className="calendar-upcoming-events">
+                        {card.events.slice(0, 3).map((ev) => (
+                          <div key={ev.id} className="calendar-upcoming-event">
+                            <span className="calendar-upcoming-dot" style={{ background: eventColorOf(ev) }} />
+                            <span className="calendar-upcoming-event-title">{ev.title}</span>
+                          </div>
+                        ))}
+                        {card.events.length > 3 && (
+                          <p className="calendar-upcoming-more">+{card.events.length - 3} more</p>
+                        )}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -1335,10 +1466,16 @@ export default function CalendarPage() {
 
               {filteredSchedules.length === 0 ? (
                 <div className="calendar-empty mt-3">
-                  <div className="calendar-empty-icon">{`\u23F0`}</div>
-                  <p className="calendar-empty-title">{renderSchedules.length === 0 ? "No routine items yet" : "Nothing at this time of day"}</p>
-                  <p className="calendar-empty-subtitle">{renderSchedules.length === 0 ? "Build your family\u2019s daily rhythm" : "Try another filter above"}</p>
-                  <button onClick={startAddSched} className="calendar-add-link mt-2 block">{renderSchedules.length === 0 ? "+ Add your first" : "+ Add a routine"}</button>
+                  <div className="calendar-empty-icon" aria-hidden="true">{`\u23F0`}</div>
+                  {/* One wrapper, because `.calendar-empty` is a two-column
+                      flex row (icon | copy). Four direct children laid the
+                      title, the body and the CTA out as three squeezed columns
+                      and wrapped each of them onto three lines. */}
+                  <div className="min-w-0">
+                    <p className="calendar-empty-title">{renderSchedules.length === 0 ? "No routine items yet" : "Nothing at this time of day"}</p>
+                    <p className="calendar-empty-subtitle">{renderSchedules.length === 0 ? "Build your family\u2019s daily rhythm" : "Try another filter above"}</p>
+                    <button onClick={startAddSched} className="calendar-add-link mt-2">{renderSchedules.length === 0 ? "+ Add your first" : "+ Add a routine"}</button>
+                  </div>
                 </div>
               ) : (
                 <div className="mt-3 space-y-0">

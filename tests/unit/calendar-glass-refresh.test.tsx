@@ -43,6 +43,7 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 let activeRoot: Root | null = null;
 
@@ -126,38 +127,57 @@ describe("calendar glass refresh — month title + day strip", () => {
     expect(titleAfter).not.toBe(titleBefore);
   });
 
-  it("renders a day strip with exactly one selected day matching selectedDay (today initially)", async () => {
+  /**
+   * CHANGED 2026-10-04 (harsh-critic pass). This suite used to assert the strip
+   * rendered `daysInMonth` buttons — a horizontally scrolling chip per day of
+   * the month, sitting two rows above a month grid that already showed all of
+   * them. That was two calendars inside one card, clipped mid-cell at 1920, and
+   * the two disagreed about weekdays whenever the month did not start on a
+   * Sunday. The strip is now the selected day's Sunday–Saturday week on the same
+   * seven columns as the grid; everything below that still holds.
+   */
+  it("renders a seven-slot week strip with exactly one selected day matching selectedDay (today initially)", async () => {
     const today = new Date();
-    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
     const el = await renderCalendar();
 
     const strip = el.querySelector(".calendar-day-strip-wrap .calendar-day-strip");
     expect(strip).toBeTruthy();
     expect(strip!.getAttribute("role")).toBe("group");
-    expect(strip!.getAttribute("aria-label")).toBe("Jump to day");
+    expect(strip!.getAttribute("aria-label")).toBe("This week");
+
+    // Seven slots always — that is what aligns the strip with the month grid.
+    const slots = Array.from(strip!.children);
+    expect(slots.length).toBe(7);
 
     const days = Array.from(strip!.querySelectorAll("button.calendar-strip-day"));
-    expect(days.length).toBe(daysInMonth);
+    expect(days.length).toBeGreaterThan(0);
+    expect(days.length).toBeLessThanOrEqual(7);
     for (const btn of days) {
       expect(btn.querySelector(".wd")).toBeTruthy();
       expect(btn.querySelector(".num")).toBeTruthy();
     }
+    // Today's own slot is always present.
+    expect(days.some((b) => b.querySelector(".num")!.textContent === String(today.getDate()))).toBe(true);
 
     const selected = stripSelected(el);
     expect(selected.length).toBe(1);
     expect(selected[0].querySelector(".num")!.textContent).toBe(String(today.getDate()));
     expect(selected[0].getAttribute("aria-pressed")).toBe("true");
-    expect(selected[0].getAttribute("aria-label")).toBe(`${MONTHS[today.getMonth()]} ${today.getDate()}`);
+    const day = today.getDate();
+    expect(selected[0].getAttribute("aria-label")).toBe(
+      `${DAYS[new Date(today.getFullYear(), today.getMonth(), day).getDay()]} ${MONTHS[today.getMonth()]} ${day}`,
+    );
   });
 
   it("clicking a strip day updates the shared selectedDay — the grid cell gets is-selected too", async () => {
     const today = new Date();
-    const target = today.getDate() === 1 ? 2 : 1;
     const el = await renderCalendar();
 
+    // Pick a sibling that is actually in this week's strip.
     const stripBtn = Array.from(el.querySelectorAll(".calendar-strip-day"))
-      .find((b) => b.querySelector(".num")?.textContent === String(target)) as HTMLButtonElement;
+      .find((b) => b.querySelector(".num")?.textContent !== String(today.getDate())) as HTMLButtonElement;
     expect(stripBtn).toBeTruthy();
+    const target = Number(stripBtn.querySelector(".num")!.textContent);
     await act(async () => { stripBtn.click(); });
 
     // The strip moved its selection...

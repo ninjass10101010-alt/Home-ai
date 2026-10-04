@@ -7,6 +7,7 @@ import { Calendar, TrendingUp, Repeat } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
 import SoftButton from '@/components/ui/SoftButton';
 import Surface from '@/components/ui/Surface';
+import PageHeader from '@/components/patterns/PageHeader';
 import Skeleton from '@/components/ui/Skeleton';
 import EmergencyButton from '@/components/ui/EmergencyButton';
 import { AtmosphericProvider } from '@/hooks/useAtmosphericTheme';
@@ -35,17 +36,21 @@ export default function AnalyticsPage() {
       <FogBackground />
       <PageShell style={{ backgroundColor: 'transparent' }}>
         <EmergencyButton />
-        <div className="relative z-10 px-4 pt-10 pb-6">
-          {/* Header */}
-          <div className="mb-8 flex items-center gap-4">
-            <Surface variant="warm" radius="xl" padding="md" className="flex h-14 w-14 shrink-0 items-center justify-center floating">
-              <TrendingUp className="h-7 w-7 text-[var(--color-accent-cyan)]" />
-            </Surface>
-            <div className="min-w-0">
-              <h1 className="text-3xl font-bold text-text-primary">Family Analytics</h1>
-              <p className="text-text-secondary">Insights and patterns to optimize your family schedule</p>
-            </div>
-          </div>
+        <div className="relative z-10">
+          {/* Title convergence: this was a hand-rolled `text-3xl font-bold`
+              header — a third page-title system beside the serif `text-display`
+              `PageHeader` (meals / tasks / suggestions / settings) and the
+              `text-2xl sm:text-3xl` one on money-mountain / time-capsule. The
+              serif display ramp is the standard, so this joins it. The subtitle
+              is a sentence, not a label, hence `lede`: it wraps instead of
+              being truncated. */}
+          <PageHeader
+            title="Family Analytics"
+            subtitle="Insights and patterns to optimize your family schedule"
+            subtitleTone="lede"
+            icon={<TrendingUp className="h-6 w-6 text-[var(--color-accent-cyan)]" />}
+            className="pb-4"
+          />
 
           {/* Tabs */}
           <div className="mb-6 flex flex-wrap gap-2">

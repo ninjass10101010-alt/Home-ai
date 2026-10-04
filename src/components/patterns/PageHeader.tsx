@@ -6,6 +6,16 @@ import type { ReactNode } from "react";
 interface PageHeaderProps {
   title: string;
   subtitle?: string;
+  /**
+   * How `subtitle` is set. `eyebrow` (the default, and what every existing call
+   * site uses) is a short uppercase label ABOVE the title. `lede` is a
+   * sentence BELOW the title in body type — for the routes whose subtitle is
+   * real copy ("Insights and patterns to optimize your family schedule") rather
+   * than a label. Those were being `truncate`d inside a hand-rolled bold-sans
+   * header, which cut "Set goals, save money, climb mountai…" mid-word on a
+   * phone; `lede` wraps instead and cannot truncate.
+   */
+  subtitleTone?: "eyebrow" | "lede";
   action?: ReactNode;
   icon?: ReactNode;
   className?: string;
@@ -13,14 +23,17 @@ interface PageHeaderProps {
   backLabel?: string;
 }
 
-export default function PageHeader({ title, subtitle, action, icon, className = "", backHref, backLabel = "Back" }: PageHeaderProps) {
+export default function PageHeader({ title, subtitle, subtitleTone = "eyebrow", action, icon, className = "", backHref, backLabel = "Back" }: PageHeaderProps) {
   const content = (
     <div className="min-w-0">
-      {subtitle && <p className="text-eyebrow mb-1">{subtitle}</p>}
+      {subtitle && subtitleTone === "eyebrow" && <p className="text-eyebrow mb-1">{subtitle}</p>}
       <div className="flex items-center gap-2.5">
         {icon && <span aria-hidden="true" className="text-2xl leading-none">{icon}</span>}
         <h1 className="truncate text-display text-[1.75rem] sm:text-[2rem] text-text-primary">{title}</h1>
       </div>
+      {subtitle && subtitleTone === "lede" && (
+        <p className="mt-1.5 max-w-prose text-pretty text-sm leading-relaxed text-text-secondary">{subtitle}</p>
+      )}
     </div>
   );
 

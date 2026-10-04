@@ -7,6 +7,7 @@ import { Plus, Mountain } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
 import SoftButton from '@/components/ui/SoftButton';
 import Surface from '@/components/ui/Surface';
+import PageHeader from '@/components/patterns/PageHeader';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import EmergencyButton from '@/components/ui/EmergencyButton';
@@ -171,30 +172,29 @@ export default function MoneyMountainPage() {
       <FogBackground />
       <PageShell style={{ backgroundColor: 'transparent' }}>
         <EmergencyButton />
-        <div className="relative z-10 px-4 pt-10 pb-6">
-          {/* Header */}
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-8"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-              <div className="flex min-w-0 items-center gap-4">
-                <Surface variant="warm" radius="xl" padding="md" className="flex h-14 w-14 shrink-0 items-center justify-center floating">
-                  <Mountain className="h-7 w-7 text-[var(--color-accent-mint)]" />
-                </Surface>
-                <div className="min-w-0">
-                  <h1 className="text-2xl sm:text-3xl font-bold text-text-primary">Money Mountain</h1>
-                  <p className="text-text-secondary truncate">Set goals, save money, climb mountains!</p>
-                </div>
-              </div>
-
-              <SoftButton onClick={() => setShowCreateForm(true)} className="shrink-0">
-                <Plus className="h-4 w-4" />
-                New Goal
-              </SoftButton>
-            </div>
-          </motion.div>
+        <div className="relative z-10">
+          {/* Title convergence onto `PageHeader` (the serif `text-display` ramp
+              used by meals / tasks / suggestions / settings). This was the third
+              system: bold sans `text-2xl sm:text-3xl`, and its `truncate`d
+              subtitle cut "Set goals, save money, climb mountai…" mid-word on a
+              390px phone. `subtitleTone="lede"` wraps instead. */}
+          <PageHeader
+            title="Money Mountain"
+            subtitle="Set goals, save money, climb mountains!"
+            subtitleTone="lede"
+            icon={<Mountain className="h-6 w-6 text-[var(--color-accent-mint)]" />}
+            className="pb-4"
+          />
+          {/* The CTA sits BELOW the header, not in `PageHeader`'s action slot:
+              `EmergencyButton` is `fixed top-4 right-4` on every route that
+              carries it (these three), so an action in the header's top-right
+              sits directly underneath it and the two overlap. */}
+          <div className="px-4 pb-1">
+            <SoftButton onClick={() => setShowCreateForm(true)}>
+              <Plus className="h-4 w-4" />
+              New Goal
+            </SoftButton>
+          </div>
 
           {error ? (
             <EmptyState
