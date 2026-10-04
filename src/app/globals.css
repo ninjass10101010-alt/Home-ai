@@ -263,8 +263,13 @@
   --color-accent-apricot: #ea580c;
   --color-accent-sage: #65a30d;
 
-  --glass-tint-strong: rgba(255,255,255,0.62);
-  --glass-tint-soft: rgba(255,255,255,0.32);
+  /* Light glass is a LIFT off the canvas, not a veil over it. At 0.62/0.32 a
+     card composited to ~13 levels above the canvas, so figure/ground separation
+     came almost entirely from the border and the page read as one flat sheet;
+     0.78/0.5 puts the glass clearly above the canvas in value the way the dark
+     theme's does, so the same hairline + shadow does the same job in both. */
+  --glass-tint-strong: rgba(255,255,255,0.78);
+  --glass-tint-soft: rgba(255,255,255,0.50);
   --border-frost-1: 1px solid rgba(0,0,0,0.06);
   --border-frost-2: 1px solid rgba(0,0,0,0.10);
   --border-frost-3: 1px solid rgba(0,0,0,0.16);
@@ -334,8 +339,8 @@
     --color-accent-apricot: #ea580c;
     --color-accent-sage: #65a30d;
 
-    --glass-tint-strong: rgba(255,255,255,0.62);
-    --glass-tint-soft: rgba(255,255,255,0.32);
+    --glass-tint-strong: rgba(255,255,255,0.78);
+    --glass-tint-soft: rgba(255,255,255,0.50);
     --border-frost-1: 1px solid rgba(0,0,0,0.06);
     --border-frost-2: 1px solid rgba(0,0,0,0.10);
     --border-frost-3: 1px solid rgba(0,0,0,0.16);
@@ -532,6 +537,45 @@ body {
   background-blend-mode: screen, screen, normal;
 }
 
+/* ─── Seasonal atmosphere layer (theme-aware) ───────────────────────────────
+   `FogBackground` mounts one full-viewport three.js canvas as a direct child
+   of <body>, and its palette is chosen by `AtmosphericTheme`, which keys off
+   the CLOCK (isNight + season) and never off the active theme. Light mode was
+   therefore getting the night palette — a near-opaque brown flood sitting
+   between the near-white canvas and every white glass card above it. That is
+   the single reason light mode read as a murky brown/olive wash: the stat
+   tiles came out as three unrelated pastels (they were faithfully transmitting
+   a brown backdrop), and every neutral ink read cold against the warm flood.
+
+   So: in light theme the atmosphere is an ATMOSPHERE — a light/temperature
+   shift — not a colour fill. Capping its alpha lets the canvas read through,
+   which keeps the seasonal cast as a whisper and restores one shared card
+   material. Dark keeps the full-strength fog it was tuned for.
+
+   Selector note: the layer ships no class hook, so it is matched by shape —
+   a `body > div` whose child is the engine canvas. That is unique to this
+   layer; every other canvas (weather toys, particle fields) lives inside a
+   card, and this block is the only place in the app that mounts one at the
+   body level. */
+:root:not([data-theme="dark"]) body > div:has(> canvas[data-engine]) canvas[data-engine] {
+  /* Faint, not grey. A dark desaturated fog at low alpha over white reads as
+     SMOKE — the first pass at 30% left a dirty grey cloud behind the greeting.
+     The alpha has to drop far enough that the canvas dominates, and the hue
+     has to be pushed back UP so what survives is a warm champagne cast rather
+     than neutral grey: light and saturated-but-pale, not dark and hazy. */
+  opacity: 0.085;
+  filter: saturate(2.2);
+}
+
+/* The High Contrast block force-resets `opacity` on every element to kill
+   translucent decoration. That is right for content and wrong for this
+   layer, so re-assert the cap explicitly — otherwise boost re-floods light
+   mode with the full-strength night fog and the AA text tokens get measured
+   against brown instead of the light canvas. */
+:root:not([data-theme="dark"])[data-contrast="boost"] body > div:has(> canvas[data-engine]) canvas[data-engine] {
+  opacity: 0.085 !important;
+}
+
 .warm-glass-card {
   position: relative;
   background: linear-gradient(180deg, var(--glass-tint-strong), var(--glass-tint-soft));
@@ -666,16 +710,33 @@ body {
 :root:not([data-theme="dark"]) .widget-card {
   --widget-accent: color-mix(in srgb, var(--color-accent-selected) 72%, black);
   --widget-accent-strong: color-mix(in srgb, var(--widget-tone) 60%, black);
+  /* ONE material, content does the differentiating. A card's tone is an
+     identity cue, not a fill. At the dark theme's 16%/6% wash plus a 35% tone
+     border plus a tone glow, the Home bento turned into a pastel quilt — eight
+     cards, six hues — and stopped reading as one system. Light keeps the same
+     glass and the same hairline, and spends its tone budget on a barely-there
+     wash and a hairline with only a 12% tint in it, so the surface is white
+     and the colour lives in the content (icon, accent text, CTA). Measured:
+     the wash alone moved a large flat card ~6 levels of chroma, which at wall
+     size is the whole card. */
   background:
     linear-gradient(160deg,
-      color-mix(in srgb, var(--widget-tone) 10%, transparent) 0%,
-      color-mix(in srgb, var(--widget-tone) 4%, transparent) 100%),
+      color-mix(in srgb, var(--widget-tone) 3%, transparent) 0%,
+      color-mix(in srgb, var(--widget-tone) 1%, transparent) 100%),
     linear-gradient(180deg, var(--glass-tint-strong), var(--glass-tint-soft));
-  border: 1px solid color-mix(in srgb, var(--widget-tone) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--widget-tone) 12%, rgba(0, 0, 0, 0.10));
   box-shadow:
     0 0 16px color-mix(in srgb, var(--widget-tone) 8%, transparent),
     0 8px 24px rgba(0, 0, 0, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  /* Light glass must NOT amplify the backdrop's chroma. `saturate(1.35)` is a
+     dark-theme trick — it makes a dark backdrop glow. Over the light canvas it
+     only drags the season's hue into every white card, which is exactly how
+     three unrelated pastels ended up as the stat tiles. A whisper (1.04) keeps
+     a colour-coded widget faintly alive while the card itself stays the one
+     shared white material. */
+  backdrop-filter: blur(24px) saturate(1.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.04);
 }
 
 :root[data-theme="light"] .widget-card:hover,
@@ -722,6 +783,20 @@ body {
    raw app accent outside cards, e.g. on the calendar page). */
 .widget-accent-text {
   color: var(--widget-accent, var(--color-accent-selected));
+}
+
+/* Eyebrows inside a card are DATA, not decoration — the stat tiles carry their
+   fill fraction there ("91%", "0%") as `.text-eyebrow` + `opacity-60`. Sixty
+   percent of `--color-text-muted` over white glass composites to ~2.2:1, which
+   is an AA failure the machine audit cannot see: it resolves the element's own
+   opacity separately from its colour and reads the un-faded token. So the fade
+   is dropped here and the level steps up to `--color-text-secondary` (7:1
+   light / 5.6:1 dark), which keeps the eyebrow quiet next to the value while
+   making the number readable. Declared unlayered, so it out-ranks the
+   `opacity-60` utility the tiles carry. */
+.widget-card .text-eyebrow {
+  opacity: 1;
+  color: var(--color-text-secondary);
 }
 
 /* Widget footer links ("+3 more · See all →", quick-prompt chips) were the
@@ -816,24 +891,127 @@ a.widget-accent-text {
   height: max(100%, 44px);
 }
 
-/* ─── CapsuleNav (expanding pill bottom nav) ───
-   The active item expands into a neon-lime pill; inactive items stay
-   compact dark circles. Width expansion is driven by a 0fr -> 1fr
-   grid-column transition on each item (CSS-only, no JS measurement).
-   `--capsule-scale` keeps the full 6-item dock inside narrow viewports. */
+/* ─── CapsuleNav (the dock — the app's ONLY navigation surface) ─────────────
+   The active item expands into an accent pill (icon circle + label); inactive
+   items are compact circles. Width expansion is a CSS-only 0fr -> 1fr
+   grid-column transition — and below 540px there is no room for it, so the
+   active section is named by `.capsule-caption` instead (see the note on
+   `--capsule-col-active`).
+
+   `--border-frost-1/2` are BORDER SHORTHANDS (`1px solid rgba(...)`), not
+   colours: `border: 1px solid var(--border-frost-2)` and
+   `border-color: var(--border-frost-1)` are invalid declarations the browser
+   drops, which is how the dock ended up with no bar edge and with all seven
+   IDLE caps wearing a 1px ring at 100% `--color-text-primary` (near-white on
+   Night, near-black on Day) — a louder signal than the active state it was
+   meant to sit behind. The dock therefore derives its own hairlines from
+   `--color-text-primary`, the one token that inverts with the theme. */
 .capsule-nav {
   /* Legacy alias — the active ink now lives in `--color-nav-active*` (the rail
      reads the same tokens). Kept so any older rule that referenced this var
      still resolves. */
   --capsule-accent: var(--color-nav-active);
-  --capsule-scale: min(1, calc((100vw - 1.5rem) / 500px));
+  --capsule-edge-ink: color-mix(in srgb, var(--color-text-primary) 13%, transparent);
+  --capsule-ring: color-mix(in srgb, var(--color-text-primary) 11%, transparent);
+  --capsule-ring-hover: color-mix(in srgb, var(--color-text-primary) 22%, transparent);
+
+  /* The active cap's label column. Declared here, not in the component, because
+     whether the pill has room is a WIDTH question, not a state question: at 480px
+     the 1fr column is 4px of visible label and at 540px it is 58px, so the switch
+     has to live in a media query rather than in a render branch. */
+  --capsule-col-active: var(--capsule-cap) 1fr;
+  --capsule-col-idle: var(--capsule-cap) 0fr;
+}
+@media (max-width: 559.98px) {
+  .capsule-nav {
+    /* No room for a label, so the pill must not pretend to expand: a 2px
+       expansion only pushed the active circle off centre and jogged its six
+       neighbours on every route change. All seven circles share one grid. */
+    --capsule-col-active: var(--capsule-cap) 0fr;
+  }
 }
 
+/* ─── The dock's caption row ───────────────────────────────────────────────
+   Below 540px the name of the current section is the ONE thing the dock could
+   not say: the in-pill label column measures 2.1px of visible text at 320px and
+   390px, so every phone showed seven icons and never named the place. The name
+   lives inside the same capsule (not floating above it) so it cannot be
+   separated from the caps by scrolling content, and costs no extra occlusion.
+   `aria-hidden` in the markup: the active cap already carries this string. */
+.capsule-heading {
+  display: grid;
+  place-items: center;
+  /* The bottom padding is the tab's lane. Without it the caption's line box runs
+     straight into the caps row, and because `.capsule-tick` is anchored to the
+     bar's BOTTOM edge (so it stays 5px above the cap no matter how the bar grows)
+     the tab then lands on the caption's own baseline instead of between the two
+     rows. 6px buys the lane; the tick's own offset is unchanged. */
+  padding: calc(var(--capsule-pad) + 3px) calc(var(--capsule-pad) + 12px) 6px;
+}
+.capsule-caption {
+  font-size: 0.875rem;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  animation: capsuleCaptionIn 0.34s var(--ease-settle) both;
+}
+/* An accent tab on the caption's baseline line, sitting over whichever cap is
+   active — it is what turns "a row of seven icons" into "you are here". Position
+   is arithmetic, not measurement: the index is a custom property the component
+   sets on the bar, so the browser owns the slide. `left`/`bottom` resolve against
+   the bar's PADDING box, so the 1px border is already excluded — adding it back
+   put the marker 1px right of every circle's centre. */
+.capsule-tick {
+  position: absolute;
+  left: calc(var(--capsule-pad) + var(--capsule-cap) / 2);
+  bottom: calc(var(--capsule-pad) + var(--capsule-cap) + 5px);
+  width: 14px;
+  height: 3px;
+  border-radius: 9999px;
+  background: var(--color-nav-active);
+  translate: calc(var(--capsule-index) * (var(--capsule-cap) + var(--capsule-gap)) - 50%) 0;
+  transition: translate 0.38s var(--ease-settle);
+  box-shadow: 0 0 12px -2px var(--color-nav-active-glow);
+}
+@keyframes capsuleCaptionIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 560px is measured, not guessed. The bar's cap stops growing at 56px, so from
+   480px up all the slack appears at once and the active label's column is
+   exactly `100vw − 478px`. Measured, with `Calendar` — the longest of the seven —
+   needing 62px including its padding:
+     480px →  0px     538px →  0px     560px → 68px  (6px spare)
+     520px →  0px     540px → 62px  (0px spare: one font-metric wobble and the
+                        longest label truncates)      580px → 74px
+   540px is where the label first appears AND where it first clips, so it is not a
+   breakpoint worth shipping on. Above 560px the in-pill label is the better
+   answer, so the caption and its tab are withdrawn — the two never appear
+   together, and the wall never mounts either (see `CapsuleNav`). Declared last so
+   it wins on source order against the `display` values above. */
+@media (min-width: 560px) {
+  .capsule-heading,
+  .capsule-tick {
+    display: none;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .capsule-item,
-  .capsule-item .capsule-label-text {
+  .capsule-item .capsule-label-text,
+  .capsule-caption,
+  .capsule-tick {
     transition: none !important;
+    animation: none !important;
   }
   .capsule-item .capsule-label-text {
     opacity: 1 !important;
@@ -3053,12 +3231,17 @@ a.widget-accent-text {
    strip keep their natural height, and the widget grid absorbs exactly the
    remaining space, where the 220px row floor resolves against that
    definite height. Twelve widgets, zero scrolling, at any wall canvas.
-   The bottom padding is the dock clearance `pb-32` used to provide. */
+   The bottom padding is the dock clearance. It used to be `6.5rem` (104px),
+   which is 6px SHORT of what the wall dock actually occupies — 72px caps + 24px
+   padding + 2px border = 98px, plus the `mb-3` page margin = 110px — so the last
+   row of the widget grid sat under the dock's top edge at rest (measured: the
+   "Open Tasks" action ended at y=976 against a dock top of y=970). 7rem = 112px
+   clears it with 2px to spare. */
 html[data-wall="true"] main.wall-home-fit {
   display: flex;
   flex-direction: column;
   height: 100dvh;
-  padding-bottom: 6.5rem;
+  padding-bottom: 7rem;
   /* The 220px row floor can exceed the canvas on a rotated (1920×1080) mount.
      PageShell clips at the page root, so without a scroll container of its own
      the overflow would be sliced off and unreachable — main absorbs it. In

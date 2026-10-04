@@ -518,8 +518,22 @@ export async function reviewRoute(browser, { baseUrl, route, role = "parent", vi
   };
 }
 
-/** Convenience: boot, review many route/role/viewport combos, boot down. Always tears down. */
+/** Convenience: review many route/role/viewport combos and tear down. Always tears down.
+ *
+ * If `VISUAL_REVIEW_BASE_URL` is set, that already-running server is adopted and
+ * left alone. That is how several critic agents iterate against ONE `next dev`
+ * instance: Next takes a per-directory lock, so only one dev server can exist,
+ * and it reflects source changes without a rebuild.
+ */
 export async function runReviews(targets, opts = {}) {
+  const adopted = process.env.VISUAL_REVIEW_BASE_URL;
+  if (adopted) {
+    return withBrowser(async (browser) => {
+      const reports = [];
+      for (const t of targets) reports.push(await reviewRoute(browser, { ...opts, ...t, baseUrl: adopted }));
+      return { baseUrl: adopted, reports };
+    });
+  }
   const server = await bootServer();
   try {
     return await withBrowser(async (browser) => {
