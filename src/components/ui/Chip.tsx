@@ -46,7 +46,17 @@ export default function Chip({ children, tone = "neutral", size = "md", selected
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center gap-1.5 border bg-[var(--color-surface-0)]/20 backdrop-blur-xl tap-sm hit-44 disabled:pointer-events-none disabled:opacity-50 ${toneMap[tone]} ${sizeMap[size]} ${
+      /* The base translucent fill is OMITTED when selected, not merely
+         overridden. `bg-[var(--color-surface-0)]/20` and
+         `bg-[var(--color-accent-button)]` are both Tailwind `bg-*` utilities in
+         the same layer, so the later rule in the STYLESHEET wins — not the later
+         class in the attribute. With both present the translucent surface won
+         while `text-white` still applied, so a selected chip rendered as white
+         ink on a 20%-opacity fill: an AA failure, and a chip that looked
+         unselected. Same family as the two source-order traps already recorded
+         in globals.css (`.calendar-empty-grow` behind `.calendar-empty`, and
+         `.glass-strong`'s unlayered `position` beating `@layer utilities`). */
+      className={`inline-flex items-center justify-center gap-1.5 border ${selected ? "" : "bg-[var(--color-surface-0)]/20"} backdrop-blur-xl tap-sm hit-44 disabled:pointer-events-none disabled:opacity-50 ${toneMap[tone]} ${sizeMap[size]} ${
         selected ? "chip-selected bg-[var(--color-accent-button)] text-white border-transparent" : ""
       } ${className}`}
       {...props}

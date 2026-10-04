@@ -304,6 +304,11 @@ export default function ShopTab({
   };
 
   const filteredGrocery = activeCategory === "all" ? groceryItems : groceryItems.filter((i: any) => i.category === activeCategory);
+  // Names the aisle an empty state is about, so the state can say which filter is
+  // hiding everything instead of claiming the whole list is empty.
+  const activeCategoryMeta = activeCategory === "all"
+    ? null
+    : groceryCategories.find((c) => c.id === activeCategory) ?? null;
 
   const priceCompareItems: PriceCompareItem[] = groceryItems
     .filter((i: any) => i.needed !== false)
@@ -380,17 +385,30 @@ export default function ShopTab({
             <div className="border-b border-white/10 p-4 pl-[72px]">
               <h3 className="text-base font-bold text-text-primary">Sync and order</h3>
             </div>
-            <div className="space-y-2 p-4">
-              <SoftButton variant="primary" size="md" onClick={openMealSync} disabled={syncBusy} className="w-full">
-                🍽️ {syncBusy ? "Adding…" : "Add missing from meal plan"}
-              </SoftButton>
-              <SoftButton variant="ghost" size="md" onClick={() => setOrderSheetOpen(true)} className="w-full">
-                📤 Order from Instacart
-              </SoftButton>
-              <SoftButton variant="ghost" size="md" onClick={() => setCompareOpen(true)} className="w-full">
-                💰 Compare Prices
-              </SoftButton>
-              {syncNote && <p role="status" className="text-center text-xs font-semibold text-text-secondary">{syncNote}</p>}
+            {/* The sync action was a `w-full` primary `SoftButton`: a solid accent
+                bar ~600px wide on the 1920 wall, which made a *tertiary* "pull in
+                ingredients" affordance the loudest object on /grocery — louder than
+                the shopping list it serves. Same disease `ConsuelaWeekCard` had on
+                /calendar. The card now leads in with the sentence that says what the
+                button will do and every action is content-width, so the block reads as
+                an invitation rather than a billboard: ~8x less accent ink, and the
+                primary is still the primary because fill and order say so. */}
+            <div className="space-y-3 p-4">
+              <p className="max-w-xl text-sm text-text-secondary">
+                Pull in what your meal plan is missing, then hand the run to Instacart.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <SoftButton size="md" onClick={openMealSync} disabled={syncBusy}>
+                  🍽️ {syncBusy ? "Adding…" : "Add missing from meal plan"}
+                </SoftButton>
+                <SoftButton variant="ghost" size="md" onClick={() => setOrderSheetOpen(true)}>
+                  📤 Order from Instacart
+                </SoftButton>
+                <SoftButton variant="ghost" size="md" onClick={() => setCompareOpen(true)}>
+                  💰 Compare Prices
+                </SoftButton>
+              </div>
+              {syncNote && <p role="status" className="text-xs font-semibold text-text-secondary">{syncNote}</p>}
             </div>
           </WidgetCard>
 
@@ -414,38 +432,62 @@ export default function ShopTab({
               Wraps rather than scrolls. As a scroller it ran off the right
               edge of a 390px phone with "Meat & Se…" cut mid-word and no
               affordance that it moved at all; wrapping keeps every filter
-              visible and tappable, which is what a shopping list needs. */}
+              visible and tappable, which is what a shopping list needs.
+
+              These were hand-rolled `<button>`s at `px-3.5 py-1.5` — 30px tall,
+              so all nine aisle filters missed the 44px floor by 14px, and the
+              harness reported every one of them on /grocery in every theme and
+              viewport. `tap-target-contract.test.ts` cannot catch that class of
+              defect: a control sized purely by padding carries no `h-*` class,
+              so no sub-44 token ever appears for its scan to find. Converged on
+              `Chip`, the documented primitive, which carries `tap-sm hit-44`
+              itself — the visual size is unchanged, the hit box is now 44px,
+              and the selected state comes from `chip-selected` instead of a
+              hand-mixed fill. `aria-pressed` matches the house idiom for a
+              single-select filter chip (`tasks/page.tsx`, `suggestions/page.tsx`). */}
           <div className="flex flex-wrap gap-2">
-            <button
+            <Chip
+              size="md"
+              selected={activeCategory === "all"}
+              aria-pressed={activeCategory === "all"}
               onClick={() => setActiveCategory("all")}
-              className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold tap-sm ${
-                activeCategory === "all" ? "bg-[var(--color-accent-selected)] text-white" : "glass-subtle text-text-secondary hover:text-text-primary"
-              }`}
             >
-              🛒 All
-            </button>
+              <span aria-hidden>🛒</span> All
+            </Chip>
             {groceryCategories.map(cat => {
               const count = groceryItems.filter((i: any) => i.category === cat.id).length;
               return (
-                <button
+                <Chip
                   key={cat.id}
+                  size="md"
+                  selected={activeCategory === cat.id}
+                  aria-pressed={activeCategory === cat.id}
                   onClick={() => setActiveCategory(cat.id)}
-                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold tap-sm ${
-                    activeCategory === cat.id ? "bg-[var(--color-accent-selected)] text-white" : "glass-subtle text-text-secondary hover:text-text-primary"
-                  }`}
                 >
-                  {cat.emoji} {cat.name}{count > 0 ? ` · ${count}` : ""}
-                </button>
+                  <span aria-hidden>{cat.emoji}</span> {cat.name}{count > 0 ? ` · ${count}` : ""}
+                </Chip>
               );
             })}
           </div>
 
-          {/* ── Shopping list ── */}
-          {totalItems === 0 && (
+          {/* ── Shopping list ──
+              One state for every empty list, including the case that used to
+              render NOTHING: a category filter that hid every row. `totalItems`
+              was the only condition, so tapping an aisle you had nothing in left
+              a blank region under the filters with no explanation and no way
+              back. The shared `EmptyState` primitive carries the recovery
+              action, so the state is both explainable and escapable. */}
+          {filteredGrocery.length === 0 && (
             <EmptyState
-              icon="🛒"
-              title="Nothing on your list"
-              description="Add items above, or sync from your meals and pantry."
+              icon={activeCategoryMeta ? activeCategoryMeta.emoji : "🛒"}
+              title={activeCategoryMeta ? `No ${activeCategoryMeta.name.toLowerCase()} on your list` : "Nothing on your list"}
+              description={
+                activeCategoryMeta && totalItems > 0
+                  ? `${groceryItems.length} item${groceryItems.length === 1 ? "" : "s"} sit in the other aisles.`
+                  : "Add items above, or sync from your meals and pantry."
+              }
+              actionLabel={activeCategoryMeta && totalItems > 0 ? "Show all items" : undefined}
+              onAction={activeCategoryMeta && totalItems > 0 ? () => setActiveCategory("all") : undefined}
             />
           )}
 
@@ -660,9 +702,14 @@ export default function ShopTab({
         </div>
       </div>
 
-      {/* ── Mobile sticky bulk bar ── */}
+      {/* ── Mobile sticky bulk bar ──
+              `bottom-40`, not `bottom-28`. `ClemAssistant`'s Ask-Clem FAB is a
+              `fixed bottom-24` (`h-14`) trigger, so it occupies 96..152px up the
+              right edge — and at `z-40` it paints OVER this bar's `z-30`, straight
+              on top of "Re-check all". Same family as the dock-over-dialog defect:
+              a control that looks present and cannot be pressed. 160px clears it. */}
       {checkedCount > 0 && (
-        <div className="md:hidden sticky bottom-28 z-30">
+        <div className="md:hidden sticky bottom-40 z-30">
           <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/85 p-2 shadow-2xl backdrop-blur-xl">
             {bulkActions}
           </div>
