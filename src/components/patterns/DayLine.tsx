@@ -54,6 +54,18 @@ interface DayLineProps {
 
 const MIN_GAP = 2.2; // % of width — below this, markers merge into a blob
 
+/**
+ * The rail and its fill are painted INLINE, not via `.dayline-track` /
+ * `.dayline-fill`. Those two class names have no rule anywhere in the token
+ * layer, so the rail and the consumed fill rendered as transparent boxes: an
+ * empty day showed a lone floating NOW dot over nothing, which read as a
+ * rendering artifact rather than a clock. `globals.css` owns only the pulse
+ * (`@keyframes nowPulse` → `.dayline-now`), which is still class-driven
+ * because the keyframes cannot be inlined.
+ */
+const RAIL = "color-mix(in srgb, var(--color-text-primary) 14%, transparent)";
+const railFill = (tone: string) => `color-mix(in srgb, ${tone} 62%, transparent)`;
+
 /** Nudge markers right so no two sit closer than MIN_GAP; deterministic. */
 function spread(positions: { position: number; color?: string }[]): { position: number; color?: string }[] {
   const sorted = [...positions].sort((a, b) => a.position - b.position);
@@ -82,24 +94,24 @@ export default function DayLine({ markers = [], progress, tone = "var(--color-ac
 
   return (
     <div className={`relative h-4 ${className}`} aria-hidden="true" style={{ ["--dayline-tone" as string]: tone }}>
-      <div className="dayline-track absolute inset-x-0 top-1/2 h-px -translate-y-1/2 rounded-full" />
+      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 rounded-full" style={{ background: RAIL }} />
       {fraction !== null && (
         <div
-          className="dayline-fill absolute left-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full transition-[width] duration-1000"
-          style={{ width: `${fraction * 100}%` }}
+          className="absolute left-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full transition-[width] duration-1000"
+          style={{ width: `${fraction * 100}%`, background: railFill(tone) }}
         />
       )}
       {placed.map((marker, index) =>
         mode === "week" ? (
           <span
             key={index}
-            className="dayline-tick absolute top-1/2 h-[7px] w-px -translate-x-1/2 -translate-y-1/2"
+            className="absolute top-1/2 h-[7px] w-px -translate-x-1/2 -translate-y-1/2"
             style={{ left: `${marker.position}%`, background: marker.color ?? `color-mix(in srgb, ${tone} 55%, var(--color-text-primary))` }}
           />
         ) : (
           <span
             key={index}
-            className="dayline-marker absolute top-1/2 h-[5px] w-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+            className="absolute top-1/2 h-[5px] w-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full"
             style={{ left: `${marker.position}%`, background: marker.color ?? `color-mix(in srgb, ${tone} 75%, transparent)` }}
           />
         )
@@ -107,7 +119,7 @@ export default function DayLine({ markers = [], progress, tone = "var(--color-ac
       {fraction !== null && (
         <span
           className={`${motion ? "dayline-now " : ""}absolute top-1/2 h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full transition-[left] duration-1000`}
-          style={{ left: `${fraction * 100}%`, background: tone }}
+          style={{ left: `${fraction * 100}%`, background: tone, boxShadow: `0 0 0 3px color-mix(in srgb, ${tone} 18%, transparent)` }}
         />
       )}
     </div>

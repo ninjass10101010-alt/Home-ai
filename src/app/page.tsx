@@ -27,8 +27,8 @@ import PhotosWidget from "@/components/photos/PhotosWidget";
 import WallMemberRail from "@/components/wall/WallMemberRail";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
 import SoftButton from "@/components/ui/SoftButton";
-import Chip from "@/components/ui/Chip";
 import ListRow from "@/components/ui/ListRow";
+import FamilyStrip from "@/components/home/FamilyStrip";
 import EmptyState from "@/components/ui/EmptyState";
 import ErrorState from "@/components/ui/ErrorState";
 import ReadStatePill from "@/components/ui/ReadStatePill";
@@ -545,121 +545,157 @@ export default function HomePage() {
         <HomeShell wall={wall} mounted={mounted}>
           <EmergencyButton />
 
-          <div className="relative z-10 px-4 pt-10 pb-6">
-            {/* pr-16 clears the fixed top-right Emergency shield (right-4 + 40px) */}
-            <div className="flex items-start justify-between gap-3 pr-16">
-              <div className="min-w-0 flex-1">
-                <p className="text-eyebrow mb-1.5">{season.emoji} {season.name} · {dateInfo.dayOfWeek}, {dateInfo.dayMonth} — {timeStr}</p>
-                <h1 className="text-display text-[2rem] sm:text-[2.6rem] text-text-primary break-words">
-                  Good {timeOfDay},<br />
-                  <span className="text-[var(--color-accent-selected)]">{familyName}</span>
-                </h1>
-              </div>
-              {wall ? (
-                <WallMemberRail
-                  members={familyMembers}
-                  currentUser={dashboardCurrentUser}
-                  isLoggedIn={isLoggedIn}
-                  onPick={handleSignInPick}
-                  onSelfProfile={() => setProfileOpen(true)}
-                  onSignOut={logout}
-                />
-              ) : isLoggedIn && dashboardCurrentUser ? (
-                <div className="flex shrink-0 items-center gap-2">
-                  {showSessionPill && (
-                    <span
-                      className={`rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-2.5 py-1 text-xs font-semibold tabular-nums text-text-secondary backdrop-blur-xl ${
-                        sessionWarning ? "session-pill-warning border-[var(--color-accent-amber)]/30 bg-[var(--color-accent-amber)]/10 text-[var(--color-accent-amber)]" : ""
-                      }`}
-                      aria-label={`Auto sign-out in ${sessionPillMM}:${sessionPillSS}`}
-                      title="Time until auto sign-out"
-                    >
-                      ⏳ {sessionPillMM}:{sessionPillSS}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setConfirmingLogout(true)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-3 py-1.5 text-xs font-semibold text-text-secondary backdrop-blur-xl transition hover:bg-[var(--color-surface-0)]/55 hover:text-text-primary active:scale-95"
-                    aria-label="Sign out"
-                    title="Sign out"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-3.5 w-3.5">
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                      <polyline points="16 17 21 12 16 7" />
-                      <line x1="21" y1="12" x2="9" y2="12" />
-                    </svg>
-                    <span>Sign out</span>
-                  </button>
-                  <button type="button" onClick={() => setProfileOpen(true)} className="active:scale-90 transition-transform" aria-label="Open your profile">
-                    <Avatar name={dashboardCurrentUser.name} color={dashboardCurrentUser.color} emoji={dashboardCurrentUser.emoji} size={normalizeAvatarSize(dashboardCurrentUser.avatarSize)} variant="emoji" glow={dashboardCurrentUser.glow} />
-                  </button>
+          <div className="relative z-10 px-4 pt-7 pb-5 sm:pt-9">
+            {/* ── The header band ────────────────────────────────────────────
+                From `xl` the greeting (left) and the KPI row (right) share ONE
+                horizontal band. Stacked, a 1920 wall spent 430px of its 968px
+                canvas on a 175px header plus a three-across KPI row whose cards
+                were 619px wide each holding a single digit — and still only
+                showed 1.6 rows of the bento. Side by side the canvas carries
+                content and the grid gets ~200px of height back. */}
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between xl:gap-10">
+              <div className="min-w-0 xl:max-w-[46%]">
+                {/* Row 1 — the date, and the identity rail.
+                    The rail carries its OWN `pr-14/16` clearance for the fixed
+                    Emergency shield. That reservation used to sit on the whole
+                    row, so the greeting inherited it: measured 139px of
+                    measure at 390 and 69px at 320, which is how "AUTUMN · SAT,"
+                    / "OCT 3 — 11:48 PM" split mid-value and "Rebecca" broke
+                    to "Rebec / a". */}
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                  {/* One value, one run. `truncate` is the belt to the
+                      `whitespace` the flex row already gives it: the date may
+                      never wrap into two lines, and it never may squeeze the
+                      rail off the row. */}
+                  <p className="order-1 min-w-0 flex-1 truncate whitespace-nowrap text-eyebrow">
+                    {dateInfo.dayOfWeek} · {dateInfo.dayMonth}
+                  </p>
+                  <div className="order-2 ml-auto flex shrink-0 items-center gap-2 pr-14 sm:pr-16">
+                    {wall ? (
+                      <WallMemberRail
+                        members={familyMembers}
+                        currentUser={dashboardCurrentUser}
+                        isLoggedIn={isLoggedIn}
+                        onPick={handleSignInPick}
+                        onSelfProfile={() => setProfileOpen(true)}
+                        onSignOut={logout}
+                      />
+                    ) : isLoggedIn && dashboardCurrentUser ? (
+                      <>
+                        {showSessionPill && (
+                          <span
+                            className={`rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-2.5 py-1 text-xs font-semibold tabular-nums text-text-secondary backdrop-blur-xl ${
+                              sessionWarning ? "session-pill-warning border-[var(--color-accent-amber)]/30 bg-[var(--color-accent-amber)]/10 text-[var(--color-accent-amber)]" : ""
+                            }`}
+                            aria-label={`Auto sign-out in ${sessionPillMM}:${sessionPillSS}`}
+                            title="Time until auto sign-out"
+                          >
+                            ⏳ {sessionPillMM}:{sessionPillSS}
+                          </span>
+                        )}
+                        {/* Sign out is glyph-only and exactly 44×44. The
+                            labelled pill measured 95×30 — under the house floor
+                            on the axis that matters — and its 143px label was
+                            most of what squeezed the greeting at phone widths.
+                            It is a secondary action, not a headline. */}
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingLogout(true)}
+                          className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-white/15 bg-[var(--color-surface-0)]/55 text-text-secondary backdrop-blur-xl transition hover:bg-[var(--color-surface-0)]/75 hover:text-text-primary active:scale-95"
+                          aria-label="Sign out"
+                          title="Sign out"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-5 w-5">
+                            <path d="M9 21H5a2 2 0 0 1 -2-2V5a2 2 0 0 1 2-2h4" />
+                            <polyline points="16 17 21 12 16 7" />
+                            <line x1="21" y1="12" x2="9" y2="12" />
+                          </svg>
+                        </button>
+                        {/* 44×44 hit box around the 40px avatar — the button
+                            itself was the avatar, so it inherited a 40px
+                            target. */}
+                        <button
+                          type="button"
+                          onClick={() => setProfileOpen(true)}
+                          className="grid h-11 w-11 shrink-0 place-items-center transition-transform active:scale-90"
+                          aria-label="Open your profile"
+                        >
+                          <Avatar name={dashboardCurrentUser.name} color={dashboardCurrentUser.color} emoji={dashboardCurrentUser.emoji} size={normalizeAvatarSize(dashboardCurrentUser.avatarSize)} variant="emoji" glow={dashboardCurrentUser.glow} />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setPickerOpen(true)}
+                        className="min-h-11 inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-3 py-1.5 text-xs font-semibold text-text-secondary backdrop-blur-xl transition hover:bg-[var(--color-surface-0)]/55 hover:text-text-primary active:scale-95"
+                        aria-label="Sign in"
+                        title="Sign in"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-3.5 w-3.5">
+                          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-4" />
+                          <polyline points="10 17 15 12 10 7" />
+                          <line x1="15" y1="12" x2="3" y2="12" />
+                        </svg>
+                        <span>Sign in</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setPickerOpen(true)}
-                  className="min-h-11 inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-3 py-1.5 text-xs font-semibold text-text-secondary backdrop-blur-xl transition hover:bg-[var(--color-surface-0)]/55 hover:text-text-primary active:scale-95"
-                  aria-label="Sign in"
-                  title="Sign in"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-3.5 w-3.5">
-                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                    <polyline points="10 17 15 12 10 7" />
-                    <line x1="15" y1="12" x2="3" y2="12" />
-                  </svg>
-                  <span>Sign in</span>
-                </button>
-              )}
-            </div>
 
-            {!wall && (
-              <div className="mt-6 flex gap-3 overflow-x-auto pb-1">
-              {familyMembers.map((member) => (
-                <button
-                  key={member.name}
-                  type="button"
-                  aria-label={
-                    isLoggedIn && dashboardCurrentUser && memberMatchesName(member, dashboardCurrentUser.name)
-                      ? "Open your profile"
-                      : `Sign in as ${member.name}`
-                  }
-                  onClick={() => {
-                    if (isLoggedIn && dashboardCurrentUser && memberMatchesName(member, dashboardCurrentUser.name)) {
-                      setProfileOpen(true);
-                    } else {
-                      handleSignInPick(member);
-                    }
-                  }}
-                  className="min-h-11 min-w-11 flex items-center justify-center active:scale-90 transition-transform"
-                >
-                  <Avatar name={member.name} color={member.color} emoji={member.emoji} size={normalizeAvatarSize(member.avatarSize)} variant="emoji" glow={member.glow} />
-                </button>
-              ))}
-              {!isLoggedIn && (
-                <Chip
-                  tone="accent"
-                  className="h-12 w-12 min-w-12 shrink-0 !px-0 text-lg"
-                  aria-label="Add a family member"
-                  title="Add a family member"
-                  onClick={() => router.push("/settings")}
-                >
-                  ＋
-                </Chip>
-              )}
+                {/* Row 2 — the hero. Owns the full measure at every width. The
+                    clock stays adjacent to the name rather than pushed to the
+                    far edge: `justify-between` stranded it ~190px from
+                    "Rebecca" at 390 and ~400px at 768, so it read as a stray
+                    label rather than the time of that greeting. */}
+                <div className="mt-1 flex items-end gap-3">
+                  <h1 className="text-display min-w-0 text-[2rem] text-text-primary sm:text-[2.6rem] xl:text-[3.25rem]">
+                    Good {timeOfDay},<br />
+                    <span className="text-[var(--color-accent-selected)]">{familyName}</span>
+                  </h1>
+                  {/* The season + clock, right-anchored to the greeting's
+                      baseline. The clock used to live in the eyebrow, where a
+                      per-second value in tracked 12px caps was the least
+                      settled element on the page — and it is what pushed the
+                      date onto two lines. */}
+                  <p className="shrink-0 whitespace-nowrap pb-1 text-eyebrow tabular-nums">
+                    {season.emoji} {timeStr}
+                  </p>
+                </div>
+
+                {/* Row 3 — the family roster. */}
+                {!wall && (
+                  <FamilyStrip
+                    className="mt-5"
+                    members={familyMembers}
+                    isSelf={(name) => Boolean(isLoggedIn && dashboardCurrentUser && memberMatchesName(dashboardCurrentUser, name))}
+                    onSelect={(member) => handleSignInPick(member)}
+                    onSelfProfile={() => setProfileOpen(true)}
+                    onAddMember={!isLoggedIn ? () => router.push("/settings") : undefined}
+                  />
+                )}
               </div>
-            )}
+
+              {/* The KPI band. Three tiles, one baseline, calm tones — the
+                  greeting is the hero and the weather card is the loudest
+                  object on the page; the stat row must not out-shout either.
+                  The Events tile carries NO progress hairline: `dayFraction`
+                  rendered as "99%" directly under "Events · Today", which
+                  reads as a share of the day's events rather than a clock. */}
+              <div className="grid grid-cols-3 gap-3 sm:gap-4 xl:w-[52%] xl:max-w-[1180px] xl:shrink-0">
+                <StatTile label={todayEvents.length === 1 ? "Event" : "Events"} value={todayEvents.length} detail="Today" icon={<HomeWidgetIcon variant="events" size="sm" />} tone={todayEvents.length > 0 ? "warning" : "accent"} compact wide progress={null} />
+                <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon={<HomeWidgetIcon variant="tasks" size="sm" />} tone={pendingTasks.length > 0 ? "danger" : "success"} compact wide />
+                <StatTile label="Week" value={weekPlannedDays === null ? "—" : weekPlannedDays} detail="Days planned" icon={<HomeWidgetIcon variant="week" size="sm" />} tone="accent" compact wide progress={weekPlannedDays === null ? null : weekPlannedDays / 7} />
+              </div>
+            </div>
           </div>
 
           <div className="px-4 space-y-6 relative z-10">
-            {/* Editorial stat strip — generous gap, asymmetrical rhythm via varied tones */}
-            <div className="grid grid-cols-3 gap-3 sm:gap-4">
-              <StatTile label={todayEvents.length === 1 ? "Event" : "Events"} value={todayEvents.length} detail="Today" icon={<HomeWidgetIcon variant="events" size="sm" />} tone={todayEvents.length > 0 ? "warning" : "accent"} compact progress={dayFraction} />
-              <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon={<HomeWidgetIcon variant="tasks" size="sm" />} tone={pendingTasks.length > 0 ? "danger" : "success"} compact />
-              <StatTile label="Week" value={weekPlannedDays === null ? "—" : weekPlannedDays} detail="Days planned" icon={<HomeWidgetIcon variant="week" size="sm" />} tone="accent" compact progress={weekPlannedDays === null ? null : weekPlannedDays / 7} />
-            </div>
-
-            <div className={gridClass}>
+            {/* `EmptyState`'s inside-card reserve is `min-h-56` — 224px of held
+                air for one line of copy. On a phone that single card pushed the
+                whole first fold past the second widget. The wall profile
+                already overrides the reserve with a higher-specificity rule, so
+                this only relaxes the stacked layouts. */}
+            <div className={`${gridClass} [&_[data-empty-state]]:min-h-0`}>
 
             {/* Audit 4.5: stacked layouts render `renderedWidgets` — the ranked
                 first fold only; the rest wait behind the More… sheet. */}
