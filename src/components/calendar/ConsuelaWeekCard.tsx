@@ -205,9 +205,20 @@ export default function ConsuelaWeekCard() {
 
       <div className="mt-3">
         {status === "idle" && (
-          <SoftButton size="md" className="w-full min-h-[44px]" onClick={() => void reviewWeek()}>
-            Review the week
-          </SoftButton>
+          /* The idle action used to be a `w-full` primary `SoftButton`: a solid
+             accent bar 1300px wide on a wall, which made a *tertiary* action the
+             loudest object on /calendar — louder than the month grid it sits
+             under. Width is now content-driven and the sentence beside it says
+             what the button will do, so the row reads as an invitation rather
+             than a billboard. ~8x less accent ink on the fold. */
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+            <p className="min-w-[15rem] flex-1 text-sm text-text-secondary">
+              Ask Consuela to read the week and flag conflicts or open space.
+            </p>
+            <SoftButton size="md" onClick={() => void reviewWeek()} className="shrink-0">
+              Review the week
+            </SoftButton>
+          </div>
         )}
 
         {status === "loading" && (

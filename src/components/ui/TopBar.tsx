@@ -15,6 +15,15 @@ export default function TopBar({ title, subtitle, right, back, variant = "defaul
 
   const isEmergency = variant === "emergency";
 
+  // Rose is mixed toward the theme's own body ink for TEXT. Raw
+  // `--color-accent-rose` is #e11d48 in light, and the emergency title and
+  // subtitle sit at 16px/12px semibold on a near-white bar — 4.35:1, under the
+  // 4.5:1 body floor. The mix inverts with the theme (a deeper rose in light, a
+  // lifted one in dark), so the alarm bar keeps its temperature and clears AA in
+  // both. The glow, the border and the icon fill stay raw rose: those are
+  // surfaces, not type.
+  const emergencyInk = "color-mix(in srgb, var(--color-accent-rose) 55%, var(--color-text-primary))";
+
   const getAccentColorStyle = () => {
     return {
       background: isEmergency ? "rgba(244,63,94,0.18)" : `rgba(${accentRgb},0.10)`,
@@ -47,24 +56,30 @@ export default function TopBar({ title, subtitle, right, back, variant = "defaul
         }}
       >
         {back && (
+          // `aria-label` + `.hit-44`: the back control is an icon-only link, so
+          // it has no accessible name (a screen reader announced "link"), and at
+          // `w-9 h-9` its box was 36×36 — under the house 44px target. `.hit-44`
+          // keeps the 36px visual disc and widens the hit region, so nothing
+          // about the bar's layout moves.
           <Link
             href="/"
-            className="flex items-center justify-center w-9 h-9 rounded-2xl text-text-secondary hover:text-text-primary tap-sm"
+            aria-label="Back to Home"
+            className="hit-44 flex items-center justify-center w-9 h-9 rounded-2xl text-text-secondary hover:text-text-primary tap-sm"
             style={getAccentColorStyle()}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5" aria-hidden="true">
               <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </Link>
         )}
         <div className="flex-1 min-w-0">
           {title && (
-            <h1 className={`text-base font-semibold truncate leading-tight ${isEmergency ? "text-[var(--color-accent-rose)]" : "text-text-primary"}`}>
+            <h1 className={`text-base font-semibold truncate leading-tight ${isEmergency ? "" : "text-text-primary"}`} style={isEmergency ? { color: emergencyInk } : undefined}>
               {title}
             </h1>
           )}
           {subtitle && (
-            <p className={`text-xs truncate leading-tight ${isEmergency ? "text-[var(--color-accent-rose)]/70" : "text-text-secondary"}`}>{subtitle}</p>
+            <p className={`text-xs truncate leading-tight ${isEmergency ? "" : "text-text-secondary"}`} style={isEmergency ? { color: emergencyInk, opacity: 0.8 } : undefined}>{subtitle}</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">

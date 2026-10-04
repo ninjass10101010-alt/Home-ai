@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ArrowRight } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import PageShell from "@/components/ui/PageShell";
@@ -18,7 +19,7 @@ import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { HOLIDAY_PALETTE } from "@/lib/holiday";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useWallMode } from "@/hooks/useWallMode";
-import { WIDGET_SPANS, homeGridClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK, WALL_GRID_CLASS, PHONE_WIDGET_FOLD } from "@/lib/layout-config";
+import { WIDGET_SPANS, homeGridClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK, WALL_GRID_CLASS, computeWallBoard, visibleOnWallBoard, wallBoardSpanClass, PHONE_WIDGET_FOLD } from "@/lib/layout-config";
 import { AnimationBudgetProvider } from "@/components/providers/AnimationBudgetProvider";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
@@ -139,11 +140,16 @@ function MorningBriefingSlot({ span }: { span: string }) {
 }
 
 // HomeShell — the Home page's shell boundary. Resolves the active holiday at
-// the shell and injects the --holiday-* CSS vars Task 3's cards consume, plus a
-// data-holiday hook for holiday-scoped CSS. The attribute + a display:contents
-// wrapper carry them because PageShell forwards no unknown props; `contents`
-// adds no box, so the shell layout is unchanged.
-function HomeShell({ children, wall, mounted }: { children: ReactNode; wall: boolean; mounted: boolean }) {
+// the shell and injects the --holiday-* CSS vars Task 3's cards consume, plus
+// a data-holiday hook for holiday-scoped CSS. The attribute + a
+// display:contents wrapper carry them because PageShell forwards no unknown
+// props; `contents` adds no box, so the shell layout is unchanged.
+//
+// `board` is the landscape wall board (1920×1080). It gets the SAME
+// `wall-home-fit` shell as the portrait profile, because the requirement is the
+// same one — a glanceable canvas that does not scroll and never sits under the
+// dock — and the panel rotated into landscape never sets `data-wall`.
+function HomeShell({ children, wall, board, mounted }: { children: ReactNode; wall: boolean; board: boolean; mounted: boolean }) {
   const { holiday, accentColor, glowColor } = useAtmosphericTheme();
   // Mounted-gated like the rest of the date-derived Home chrome: detectAutoHoliday()
   // reads the wall clock, so SSR and client can straddle a window boundary (holiday
@@ -158,12 +164,35 @@ function HomeShell({ children, wall, mounted }: { children: ReactNode; wall: boo
           backgroundColor: "transparent",
           ...(pal ? ({ "--holiday-accent": accentColor, "--holiday-glow": glowColor, "--holiday-surface": pal.surfaceTint } as CSSProperties) : {}),
         }}
-        contentClassName={wall ? "wall-home-fit" : ""}
+        contentClassName={wall || board ? "wall-home-fit" : ""}
       >
         {children}
       </PageShell>
     </div>
   );
+}
+
+/**
+ * The landscape wall board — a wide, short canvas (≥1600 wide and ≤1300 tall).
+ *
+ * Measured at 1920×1080: Home rendered 2162px of content, so the fixed dock
+ * painted over the middle of the third row, and `wall-home-fit`'s flex column
+ * could not fix it because the grid's 220px row floor set the grid's own
+ * height — `flex: 1 1 auto` cannot shrink a floor, so `main` clipped 360px of
+ * its own board instead. Mounted-gated for the same reason `wall` is: the first
+ * client render must match the server's, and the server has no viewport.
+ */
+function useWallBoard(): { board: boolean; mounted: boolean } {
+  const [mounted, setMounted] = useState(false);
+  const [board, setBoard] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    const update = () => setBoard(computeWallBoard(window.innerWidth, window.innerHeight));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return { board, mounted };
 }
 
 export default function HomePage() {
@@ -212,14 +241,27 @@ export default function HomePage() {
   const { mode } = useDashboardMode();
   const { visibleWidgets, orientation, mounted: layoutMounted } = useHomeLayout();
   const { wall, mounted: wallMounted } = useWallMode();
+  const { board: wideBoard, mounted: boardMounted } = useWallBoard();
   const { upcomingImportant } = useHomeEvents();
-  const gridClass = wallMounted && wall
+  // `wall-composition.test.ts` pins this shape: the RESOLVED WALL PROFILE gates
+  // the swap to WALL_GRID_CLASS. Nothing else may take that branch.
+  const baseGridClass = wallMounted && wall
     ? WALL_GRID_CLASS
     : layoutMounted
       ? homeGridClass(orientation)
       : HOME_GRID_FALLBACK;
+  // The board appends to whichever class it inherited. `wall-widget-grid` is
+  // what the canvas-fit CSS hangs the "grid takes the leftover height" rule
+  // off, and `wall-board-grid` carries the 4-column / shorter-row scale.
+  const boardFit = boardMounted && wideBoard && layoutMounted;
+  const gridClass = boardFit ? `${baseGridClass} wall-widget-grid wall-board-grid` : baseGridClass;
   // The Ledger is parents-only — filtered out entirely (not a hollow cell).
-  const homeWidgets = isParent ? visibleWidgets : visibleWidgets.filter((w) => w.id !== "financeLedger");
+  const layoutWidgets = isParent ? visibleWidgets : visibleWidgets.filter((w) => w.id !== "financeLedger");
+  // The board shows twelve cells — three rows of four — which is what clears the
+  // dock at 1080. The four it drops are the same ambient tail the portrait wall
+  // drops, for the same documented reasons (see WALL_BOARD_HIDDEN_WIDGETS); they
+  // are hidden, not deleted, and stay switchable in Home settings.
+  const homeWidgets = boardFit ? visibleOnWallBoard(layoutWidgets) : layoutWidgets;
   // Audit 4.5: stacked layouts (phone / tablet portrait, never the wall) keep
   // only the ranked first fold rendered; the rest wait behind the More… sheet.
   const foldActive = !wall && layoutMounted && orientation !== "desktop" && homeWidgets.length > PHONE_WIDGET_FOLD;
@@ -542,10 +584,14 @@ export default function HomePage() {
       <AtmosphericProvider>
         <AnimationBudgetProvider>
         <FogBackground />
-        <HomeShell wall={wall} mounted={mounted}>
+        <HomeShell wall={wall} board={wideBoard} mounted={mounted}>
           <EmergencyButton />
 
-          <div className="relative z-10 px-4 pt-7 pb-5 sm:pt-9">
+          {/* The header band. `wall-board-header` tightens its vertical padding on the
+              board: that band's whole budget is "rows that clear the dock", and
+              36px of top padding plus 20px of bottom padding is 56px of it spent
+              on air (measured 271px of header against a 692px grid area). */}
+          <div className={`relative z-10 px-4 pb-5 pt-7 sm:pt-9${boardFit ? " wall-board-header" : ""}`}>
             {/* ── The header band ────────────────────────────────────────────
                 From `xl` the greeting (left) and the KPI row (right) share ONE
                 horizontal band. Stacked, a 1920 wall spent 430px of its 968px
@@ -648,8 +694,8 @@ export default function HomePage() {
                     "Rebecca" at 390 and ~400px at 768, so it read as a stray
                     label rather than the time of that greeting. */}
                 <div className="mt-1 flex items-end gap-3">
-                  <h1 className="text-display min-w-0 text-[2rem] text-text-primary sm:text-[2.6rem] xl:text-[3.25rem]">
-                    Good {timeOfDay},<br />
+                  <h1 className={`text-display min-w-0 text-[2rem] text-text-primary sm:text-[2.6rem] xl:text-[3.25rem]${boardFit ? " wall-board-greeting" : ""}`}>
+                    Good {timeOfDay},{boardFit ? " " : <br />}
                     <span className="text-[var(--color-accent-selected)]">{familyName}</span>
                   </h1>
                   {/* The season + clock, right-anchored to the greeting's
@@ -662,7 +708,11 @@ export default function HomePage() {
                   </p>
                 </div>
 
-                {/* Row 3 — the family roster. */}
+                {/* Row 3 — the family roster. The wall profile withdraws it in
+                    favour of its own rail; the board keeps it, because the rail's
+                    self-label is sized for the wall's 14px type floor and truncates
+                    to "✓ Rebe…" at the board's phone-size type, and a roster with a
+                    truncated name on it is worse than a roster that costs 76px. */}
                 {!wall && (
                   <FamilyStrip
                     className="mt-5"
@@ -684,12 +734,28 @@ export default function HomePage() {
               <div className="grid grid-cols-3 gap-3 sm:gap-4 xl:w-[52%] xl:max-w-[1180px] xl:shrink-0">
                 <StatTile label={todayEvents.length === 1 ? "Event" : "Events"} value={todayEvents.length} detail="Today" icon={<HomeWidgetIcon variant="events" size="sm" />} tone={todayEvents.length > 0 ? "warning" : "accent"} compact wide progress={null} />
                 <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon={<HomeWidgetIcon variant="tasks" size="sm" />} tone={pendingTasks.length > 0 ? "danger" : "success"} compact wide />
-                <StatTile label="Week" value={weekPlannedDays === null ? "—" : weekPlannedDays} detail="Days planned" icon={<HomeWidgetIcon variant="week" size="sm" />} tone="accent" compact wide progress={weekPlannedDays === null ? null : weekPlannedDays / 7} />
+                {/* No progress hairline, same reasoning as the Events tile above:
+                    `progress` draws a percentage numeral under the label, and
+                    "Week · Days planned · 0%" made this the only tile with a
+                    THREE-line right column — so it grew past the two tiles it
+                    shares a baseline with and the band stopped reading as three
+                    equal tiles. The count already IS the fraction. */}
+                <StatTile label="Week" value={weekPlannedDays === null ? "—" : weekPlannedDays} detail="Days planned" icon={<HomeWidgetIcon variant="week" size="sm" />} tone="accent" compact wide progress={null} />
               </div>
             </div>
           </div>
 
-          <div className="px-4 space-y-6 relative z-10">
+          {/* The bento gets its OWN wrapper, and the week strip + action row
+              live in a sibling after it. Under `wall-home-fit` the grid area is
+              the flex child that grows, so keeping the tail inside it meant the
+              grid could never claim the space the tail was holding: measured at
+              1920×1080 the grid area was 692px and the grid itself 337px — and
+              the 220px row floor, which `flex` cannot shrink, then clipped 360px
+              of the board. Out here the tail keeps its own space and the grid
+              gets everything the dock leaves.
+              Everywhere else these are plain blocks, so `mt-6` + `space-y-6`
+              reproduce exactly the spacing the single wrapper used to give. */}
+          <div className="wall-home-grid-area px-4 relative z-10">
             {/* `EmptyState`'s inside-card reserve is `min-h-56` — 224px of held
                 air for one line of copy. On a phone that single card pushed the
                 whole first fold past the second widget. The wall profile
@@ -701,11 +767,13 @@ export default function HomePage() {
                 first fold only; the rest wait behind the More… sheet. */}
             {renderedWidgets.map((w, index) => {
               const id = w.id;
-              const span = layoutMounted
-                ? orientation === "tablet"
-                  ? tabletSpanFor(id, index, renderedWidgets)
-                  : widgetSpanClass(id, orientation)
-                : (WIDGET_SPANS[id] ?? "lg:col-span-1");
+              const span = boardFit
+                ? wallBoardSpanClass(id)
+                : layoutMounted
+                  ? orientation === "tablet"
+                    ? tabletSpanFor(id, index, renderedWidgets)
+                    : widgetSpanClass(id, orientation)
+                  : (WIDGET_SPANS[id] ?? "lg:col-span-1");
               switch (id) {
                 case "morningBriefing":
                   return <MorningBriefingSlot key="morningBriefing" span={span} />;
@@ -909,17 +977,38 @@ export default function HomePage() {
                   return <div key="homeLights" className={span}><HomeLightsWidget className="h-full" /></div>;
 
                 case "aiQuickAsk":
+                  // Was a bare `WidgetCard`, the only tile in the bento with no
+                  // header band: the badge hung off the corner with nothing beside
+                  // it and the body floated in the middle of an empty box. It is
+                  // a `SectionCard centeredHeader` now, so it carries the same
+                  // ruled title band as Consuela suggests / This Week's
+                  // Leaderboard / Daily Schedule and the grid reads as one row.
                   return (
                     <div key="aiQuickAsk" className={span}>
-                      <WidgetCard tone="#8b5cf6" icon={<HomeWidgetIcon variant="ask" size="lg" />} className="h-full">
-                        <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
-                          <Link href="/chat" className="flex items-center gap-2 tap-sm hit-44">
-                            <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
-                            <span className="widget-accent-text">→</span>
+                      <SectionCard
+                        title="Quick ask"
+                        description="Send a question to Consuela"
+                        icon={<HomeWidgetIcon variant="ask" size="lg" />}
+                        tone="#8b5cf6"
+                        compact
+                        centeredHeader
+                        headingLevel="h2"
+                        className="h-full"
+                      >
+                        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-center">
+                          <Link
+                            href="/chat"
+                            className="tap-sm hit-44 inline-flex items-center gap-1.5 text-sm font-semibold widget-accent-text"
+                          >
+                            &ldquo;Add soccer practice for Thursday.&rdquo;
+                            <ArrowRight className="h-4 w-4" aria-hidden="true" />
                           </Link>
-                          <p className="text-sm text-text-secondary">&ldquo;Add soccer practice for Thursday.&rdquo;</p>
-                          <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5">
-                            {QUICK_PROMPTS.map((prompt) => (
+                          <div className="flex flex-wrap items-center justify-center gap-1.5">
+                            {/* The board's rows are 184px and the three chips wrap to a
+                                third line at 463px wide, which pushed the last chip 19px
+                                out of the card. Two chips is one line; Ask is one tap away
+                                either way, so nothing is lost. */}
+                            {(boardFit ? QUICK_PROMPTS.slice(0, 2) : QUICK_PROMPTS).map((prompt) => (
                               <Link
                                 key={prompt}
                                 href={`/chat?q=${encodeURIComponent(prompt)}`}
@@ -930,7 +1019,7 @@ export default function HomePage() {
                             ))}
                           </div>
                         </div>
-                      </WidgetCard>
+                      </SectionCard>
                     </div>
                   );
 
@@ -953,24 +1042,46 @@ export default function HomePage() {
               }
             })}
             </div>
+          </div>
 
-            <div className="mt-6">
-              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon={<HomeWidgetIcon variant="week" size="lg" />} tone="#10b981" compact headingLevel="h2">
-                <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
-                <DayLine className="mt-3" mode="week" tone="#10b981" progress={weekFraction} markers={weekDayBoundaries} />
-              </SectionCard>
-            </div>
+{/* The tail: the week's rhythm and the three board actions. Neither survives
+              the board, and the reason is the same for both — they are the two
+              sparsest objects on Home.
+              - The action row's three destinations (Meals, Tasks, More…) are the
+                dock's, 94px below, permanently.
+              - The week strip answered a question the header band's "Week · Days
+                planned" tile already answers with a number, and at 1888px wide
+                its seven day circles occupied 400px of it. It also cost a whole
+                grid row: withdrawing it took the bento from three rows of 184px
+                to three rows of 249px — the same row height the portrait wall
+                uses — which is what stopped "Home Security" printing its footer
+                over its own sensor chips.
+              Both are one tap from Home's More… sheet and their own routes, so
+              nothing becomes unreachable. */}
+          {!boardFit && (
+          <div className="wall-home-tail px-4 mt-6 space-y-6 relative z-10">
+            <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon={<HomeWidgetIcon variant="week" size="lg" />} tone="#10b981" compact headingLevel="h2">
+              <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
+              <DayLine className="mt-3" mode="week" tone="#10b981" progress={weekFraction} markers={weekDayBoundaries} />
+            </SectionCard>
 
+            {/* `whitespace-nowrap` on all three labels. `SoftButton` is a flex
+                row with `gap-2` and no width constraint of its own, so a label
+                with a space in it is the first thing to break when the row
+                tightens: "Plan Meals" and "Open Tasks" wrapped to two lines
+                while the single-token "More…" could not, and the row ended up
+                with two double-height buttons and one short one. */}
             <div className="flex gap-3">
-              <Link href="/meals" className="flex-1">
-                <SoftButton variant="secondary" className="w-full">Plan Meals</SoftButton>
-              </Link>
-              <Link href="/tasks" className="flex-1">
-                <SoftButton className="w-full">Open Tasks</SoftButton>
-              </Link>
-              <MoreButton className="flex-1" onClick={() => setMoreOpen(true)} />
+                <Link href="/meals" className="min-w-0 flex-1">
+                  <SoftButton variant="secondary" className="w-full whitespace-nowrap">Plan Meals</SoftButton>
+                </Link>
+                <Link href="/tasks" className="min-w-0 flex-1">
+                  <SoftButton className="w-full whitespace-nowrap">Open Tasks</SoftButton>
+                </Link>
+              <MoreButton className="min-w-0 flex-1 whitespace-nowrap" onClick={() => setMoreOpen(true)} />
             </div>
           </div>
+          )}
 
           {/* Home More… sheet — keeps /grocery, /skill-tree, /time-capsule,
               /analytics, /money-mountain and /memory reachable (audit P1-5). */}

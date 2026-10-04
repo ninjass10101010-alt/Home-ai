@@ -2,12 +2,25 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { ChevronRight, Settings } from "lucide-react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Surface from "@/components/ui/Surface";
 import Skeleton from "@/components/ui/Skeleton";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/db";
+
+/**
+ * Rose TEXT is mixed toward the theme's own body ink instead of used raw.
+ * `--color-accent-rose` is #e11d48 in light, and at 16px semibold on this
+ * page's near-white surfaces that measures 4.35:1 — under the 4.5:1 body floor,
+ * on the page title, the 911 heading and the 911 link. The 55/45 mix inverts per
+ * theme because `--color-text-primary` inverts with it: light gets a deeper rose
+ * (7.4:1), dark gets a lifted one (7.7:1). Written inline rather than as a token
+ * because `--color-accent-ink-rose` is only declared in the dark block.
+ */
+const ROSE_INK = "color-mix(in srgb, var(--color-accent-rose) 55%, var(--color-text-primary))";
+
 interface EmergencyContact {
   id: number;
   name: string;
@@ -204,10 +217,16 @@ export default function EmergencyPage() {
         {/* Common Situations */}
         <section>
           <h2 className="text-text-primary font-semibold text-base mb-3">Common Situations</h2>
-          <div className="space-y-2">
+          {/* Two columns once there is room. Stretched to the shell's full
+              1300px measure on a wall, each row was a 1300×64 sliver with its
+              label inside the first 250px and its "Mom or Dad" inside the last
+              100px — 950px of nothing between two words. Pairing them halves the
+              measure, fills the width, and gives the page a second row rhythm
+              under the contacts card. */}
+          <div className="grid gap-2 sm:grid-cols-2">
             {emergencyTypes.map((type) => (
               <Surface key={type.id} className="flex items-center gap-3">
-                <span className="text-2xl">{type.icon}</span>
+                <span className="text-2xl" aria-hidden="true">{type.icon}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-text-primary text-sm font-medium truncate">{type.label}</p>
                   <p className="text-text-secondary text-xs truncate">{type.desc}</p>
@@ -218,12 +237,17 @@ export default function EmergencyPage() {
           </div>
         </section>
 
-        {/* Settings quick-link */}
-        <Link href="/settings/safety" className="block">
-          <Surface className="bg-[var(--color-surface-2)] border-dashed text-center cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors" interactive>
-            <div className="flex items-center justify-center gap-2">
-              <span className="text-lg">⚙️</span>
-              <p className="text-text-secondary text-sm">{safetyQuickLinkLabel}</p>
+        {/* Settings quick-link — left-aligned with a chevron. It was a
+            1300px dashed bar with a centred ⚙️ emoji, which reads as a disabled
+            field rather than a destination; a lucide mark plus a trailing
+            chevron states the row is a link, and it stops the page carrying two
+            different icon languages in one header. */}
+        <Link href="/settings/safety" className="block tap">
+          <Surface className="bg-[var(--color-surface-2)] border-dashed cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors" interactive>
+            <div className="flex items-center gap-3">
+              <Settings className="h-5 w-5 shrink-0 text-text-secondary" aria-hidden="true" />
+              <p className="flex-1 text-text-secondary text-sm">{safetyQuickLinkLabel}</p>
+              <ChevronRight className="h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />
             </div>
           </Surface>
         </Link>
@@ -231,13 +255,14 @@ export default function EmergencyPage() {
         {/* 911 */}
         <Surface className="bg-[var(--color-accent-rose)]/10" style={alarmGlow}>
           <div className="text-center">
-            <span className="text-3xl">🚨</span>
-            <h3 className="text-[var(--color-accent-rose)] font-semibold mt-2">Life-Threatening Emergency</h3>
+            <span className="text-3xl" aria-hidden="true">🚨</span>
+            <h3 className="font-semibold mt-2" style={{ color: ROSE_INK }}>Life-Threatening Emergency</h3>
             <p className="text-text-secondary text-xs mt-1">Call 911 immediately</p>
             <a
               href="tel:911"
               aria-label="Call 911"
-              className="inline-flex min-h-[48px] items-center justify-center transition-all duration-150 bg-[var(--color-accent-rose)]/15 text-[var(--color-accent-rose)] hover:bg-[var(--color-accent-rose)]/25 border border-[var(--color-accent-rose)]/20 px-6 py-3.5 text-base rounded-2xl gap-2.5 mt-3 w-full cursor-pointer font-semibold no-underline"
+              className="inline-flex min-h-[48px] items-center justify-center transition-all duration-150 bg-[var(--color-accent-rose)]/15 hover:bg-[var(--color-accent-rose)]/25 border border-[var(--color-accent-rose)]/20 px-6 py-3.5 text-base rounded-2xl gap-2.5 mt-3 w-full cursor-pointer font-semibold no-underline"
+              style={{ color: ROSE_INK }}
             >
               Call 911
             </a>

@@ -118,9 +118,18 @@ export default function SegmentedControl({ options, value, onChange, className =
           className={`relative z-10 flex min-h-[44px] flex-1 items-center justify-center ${densityClass} font-semibold tap-sm ${
             compact ? "min-w-0" : "min-w-max sm:min-w-0"
           } ${
+            // The inactive label is `--color-text-secondary`, not
+            // `--color-text-muted`. Muted is #6f6f6f on the #f0f2f7 track in
+            // light, which measures 4.49:1 — a hair under the 4.5:1 body floor,
+            // and the audit flagged it on every segmented control in the app
+            // (Home's five tabs, Meals' Plan/Shop/Stock, Calendar's two). The
+            // two tokens are aliases in dark, so this changes light only:
+            // 4.49:1 → 6.16:1. It also separates the states properly — the
+            // active segment was the *only* thing carrying weight, and at
+            // 4.49:1 the inactive labels were doing almost none.
             option.id === value
               ? emphasize ? "text-white" : "text-text-primary"
-              : "text-text-muted hover:text-text-secondary"
+              : "text-text-secondary hover:text-text-primary"
           }`}
         >
           {option.icon}

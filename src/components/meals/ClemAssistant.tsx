@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { MessagesSquare } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 import TextField from "@/components/ui/TextField";
 import SoftButton from "@/components/ui/SoftButton";
@@ -149,16 +150,34 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
         }
       `}</style>
 
+      {/* The `fixed` box is an OUTER wrapper and the glass sits on the button
+          inside it, which is the only arrangement that works here.
+          `.glass-strong` (aliased with `.material-thick` in globals.css) is an
+          UNLAYERED rule that declares `position: relative` so it can host its
+          own ::before/::after highlight layers — and unlayered beats
+          `@layer utilities`, so `fixed` on the SAME element silently degraded
+          to `relative`. The trigger was therefore laid out in flow: it landed
+          320px from the left at the very bottom of the Shop column, overlapping
+          the "Nothing on your list" card and half off the viewport. (This is
+          the same trap `CapsuleNav` already avoids by keeping `fixed` on a
+          bare wrapper and `relative` on the glassy child.) */}
       {mounted && !open && (
-        <button
-          type="button"
-          aria-label="Ask Clem"
-          onClick={() => setOpen(true)}
-          className="clem-fab glass-strong tap fixed bottom-24 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full text-2xl"
-          style={{ animation: "clem-pulse 3s ease-in-out infinite" }}
-        >
-          🛒
-        </button>
+        <div className="pointer-events-none fixed bottom-24 right-4 z-40 sm:right-6">
+          <button
+            type="button"
+            aria-label="Ask Clem"
+            onClick={() => setOpen(true)}
+            className="clem-fab glass-strong tap pointer-events-auto relative flex h-14 w-14 items-center justify-center rounded-full text-[var(--color-accent-selected)]"
+            style={{ animation: "clem-pulse 3s ease-in-out infinite" }}
+          >
+            {/* Not 🛒. The cart glyph was the page badge, the "All" filter chip
+                and every card corner badge on this tab, so the one control that
+                opens a conversation advertised itself as the thing the page
+                already is. A lucide mark puts the FAB in the same icon system as
+                the nav and the buttons instead of beside them. */}
+            <MessagesSquare className="h-6 w-6" strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
       )}
 
       <Modal open={open} onClose={() => setOpen(false)} title="Clem, grocery assistant">

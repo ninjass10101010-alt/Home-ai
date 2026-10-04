@@ -90,8 +90,6 @@ const ALLOWLIST: Record<string, string> = {
     "REPORTED 2026-10-03, not repaired (meals owner). Two distinct sub-44 controls: the `grid-cols-8 gap-1` emoji picker at line 408 (32px cells, 4px gap — a 44px box extends 6px per side against a 2px half-gap, so cells would overlap; needs a wider grid, a design change, not a class) and a `p-1.5` glyph button at line 491.",
   "components/meals/RecipeModal.tsx":
     "REPORTED 2026-10-03, not repaired (meals owner). Two distinct sub-44 controls: the `grid-cols-8 gap-1` emoji picker at line 104 (32px cells, 4px gap, same overlap problem) and a `p-1.5` glyph button at line 265.",
-  "components/ui/TopBar.tsx":
-    "REPORTED 2026-10-03, not repaired (chrome owner). `<Link href=\"/\">` back affordance is `w-9 h-9` (36px) at TopBar.tsx:50 — a navigation control, not decoration. Needs `.hit-44`.",
   "components/meals/PlanTab.tsx":
     "REPORTED 2026-10-03, not repaired (meals owner). A 20×20 \"Copy day meals\" button at PlanTab.tsx:340 (`h-5 w-5`) plus three `p-1.5` glyph buttons at 420-422 (duplicate / edit / delete). All are absolutely or tightly positioned over dense meal rows, so they need a per-control decision, not one blanket `.hit-44`.",
   "components/integrations/HomeAssistantWidget.tsx":
