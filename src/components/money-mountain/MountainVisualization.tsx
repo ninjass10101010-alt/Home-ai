@@ -3,17 +3,30 @@
 import { motion } from 'framer-motion';
 import type { MoneyMountain } from '@/db/features/money-mountain';
 import { formatCurrency, MOUNTAIN_THEMES } from '@/db/features/money-mountain';
+import { readOnlyReason } from './viewer';
 
 interface MountainVisualizationProps {
   mountain: MoneyMountain;
   onDeposit?: () => void;
   onWithdraw?: () => void;
+  /**
+   * Why the money controls are absent, for a viewer who cannot move money.
+   * A child and a pet reach this page read-only (every write is parent-gated),
+   * so the row that held "Add Funds" / "Withdraw" would otherwise be a gap
+   * that looks broken. See `@/components/money-mountain/viewer`.
+   *
+   * The default is deliberately NOT empty: a caller that omits it has, by
+   * definition, omitted both callbacks, so the honest state IS "you can't move
+   * money here". An empty string would reintroduce the silent gap.
+   */
+  readOnlyNote?: string;
 }
 
 export function MountainVisualization({
   mountain,
   onDeposit,
   onWithdraw,
+  readOnlyNote = readOnlyReason(null),
 }: MountainVisualizationProps) {
   const theme = MOUNTAIN_THEMES[mountain.mountainTheme || 'snow'];
   const progress = mountain.percentageComplete;
@@ -168,22 +181,37 @@ export function MountainVisualization({
         </div>
       </div>
       
-      {/* Action buttons */}
-      <div className="flex gap-3 p-4">
-        <button
-          onClick={onDeposit}
-          className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-        >
-          💰 Add Funds
-        </button>
-        <button
-          onClick={onWithdraw}
-          disabled={mountain.currentAmount <= 0}
-          className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          💸 Withdraw
-        </button>
-      </div>
+      {/* Action buttons.
+          A control is painted if and only if its callback exists. These used to
+          be two unconditional <button>s wired to OPTIONAL props, so a
+          read-only viewer (a child or a pet — every write here is parent-gated)
+          got two live-looking controls that called `undefined`. That is the one
+          shape that must never ship: visible, tappable, and unable to act. */}
+      {(onDeposit || onWithdraw) ? (
+        <div className="flex gap-3 p-4">
+          {onDeposit && (
+            <button
+              onClick={onDeposit}
+              className="tap flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              💰 Add Funds
+            </button>
+          )}
+          {onWithdraw && (
+            <button
+              onClick={onWithdraw}
+              disabled={mountain.currentAmount <= 0}
+              className="tap flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              💸 Withdraw
+            </button>
+          )}
+        </div>
+      ) : readOnlyNote ? (
+        <p className="border-t border-border px-4 py-3 text-center text-xs leading-5 text-muted-foreground">
+          {readOnlyNote}
+        </p>
+      ) : null}
       
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 border-t border-border p-4">

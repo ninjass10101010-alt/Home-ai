@@ -8,14 +8,21 @@ import { formatCurrency } from '@/db/features/money-mountain';
 interface TransactionHistoryProps {
   transactions: MountainTransaction[];
   currency: string;
+  /**
+   * The line under "No transactions yet". The default invites a first
+   * deposit, which is a thing only a parent can do here — so a read-only
+   * viewer passes their own copy instead. See
+   * `@/components/money-mountain/viewer`.
+   */
+  emptyHint?: string;
 }
 
-export function TransactionHistory({ transactions, currency }: TransactionHistoryProps) {
+export function TransactionHistory({ transactions, currency, emptyHint = 'Add your first deposit to get started!' }: TransactionHistoryProps) {
   if (transactions.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-muted/30 p-6 text-center">
         <p className="text-sm text-muted-foreground">No transactions yet</p>
-        <p className="text-xs text-muted-foreground mt-1">Add your first deposit to get started!</p>
+        <p className="text-xs text-muted-foreground mt-1">{emptyHint}</p>
       </div>
     );
   }

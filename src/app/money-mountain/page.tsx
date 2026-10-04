@@ -7,18 +7,31 @@ import { Plus, Mountain } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
 import SoftButton from '@/components/ui/SoftButton';
 import Surface from '@/components/ui/Surface';
+import Chip from '@/components/ui/Chip';
 import PageHeader from '@/components/patterns/PageHeader';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import EmergencyButton from '@/components/ui/EmergencyButton';
 import Toast from '@/components/ui/Toast';
 import { AtmosphericProvider } from '@/hooks/useAtmosphericTheme';
+import { useAuth } from '@/hooks/useAuth';
 import { MountainVisualization } from '@/components/money-mountain/MountainVisualization';
 import { MountainCard } from '@/components/money-mountain/MountainCard';
 import { CreateMountainForm } from '@/components/money-mountain/CreateMountainForm';
 import { TransactionLogger } from '@/components/money-mountain/TransactionLogger';
 import { MilestoneBadge } from '@/components/money-mountain/MilestoneBadge';
 import { TransactionHistory } from '@/components/money-mountain/TransactionHistory';
+import {
+  canManageMountains,
+  detailError,
+  emptyHistoryHint,
+  emptyState,
+  headerSubtitle,
+  loadError,
+  readOnlyReason,
+  writeDenialNotice,
+  type MountainDetailFailure,
+} from '@/components/money-mountain/viewer';
 import { formatCurrency } from '@/db/features/money-mountain';
 import type { MoneyMountain, MountainTransaction } from '@/db/features/money-mountain';
 
@@ -36,8 +49,32 @@ export default function MoneyMountainPage() {
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showTransactionLogger, setShowTransactionLogger] = useState<'deposit' | 'withdrawal' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [listFailed, setListFailed] = useState(false);
+  const [detailFailure, setDetailFailure] = useState<{ id: string; failure: MountainDetailFailure } | null>(null);
+  /**
+   * Set when a write comes back refused for IDENTITY reasons (`adult_only` /
+   * `unauthorized`). The page's role claim came from the signed cookie, and the
+   * server re-reads the LIVE PocketBase role — so a stale claim is possible and
+   * the server is the only authority on it. Once it has answered, the UI stops
+   * offering the control instead of inviting the viewer to press it again.
+   */
+  const [writeReadOnly, setWriteReadOnly] = useState<string | null>(null);
   const [toast, setToast] = useState<{ open: boolean; message: string; tone: 'success' | 'neutral' }>({ open: false, message: '', tone: 'neutral' });
+
+  const { currentUser, hydrated } = useAuth();
+  const role = currentUser?.role ?? null;
+
+  /**
+   * The write gate on this page. `hydrated` is in the conjunction on purpose:
+   * `role` is `null` until `useAuth` resolves, and `canManageMountains(null)` is
+   * false, so nothing parent-shaped can paint during that window — the same
+   * reason `CapsuleNav` waits for `hydrated` before drawing a parent's caps.
+   */
+  const canManage = hydrated && canManageMountains(role) && writeReadOnly === null;
+  // `readOnlyReason` is never empty, so this can never hand the visualization a
+  // blank note: a silent gap is the one outcome this page is not allowed to
+  // produce, not even in the transient pre-hydration window.
+  const readOnlyNote = canManage ? undefined : (writeReadOnly ?? readOnlyReason(role));
 
   useEffect(() => {
     loadMountains();
@@ -52,23 +89,24 @@ export default function MoneyMountainPage() {
 
   const loadMountains = async () => {
     setLoading(true);
-    setError(null);
+    setListFailed(false);
     try {
       const response = await fetch('/api/money-mountain');
 
       if (response.ok) {
         const data = await response.json();
         setMountains(data.mountains || []);
+        setDetailFailure(null);
 
         // Auto-select first mountain
         if (data.mountains?.length > 0 && !selectedMountain) {
           selectMountain(data.mountains[0].id);
         }
       } else {
-        setError('Failed to load mountains');
+        setListFailed(true);
       }
     } catch (err) {
-      setError('Failed to load mountains');
+      setListFailed(true);
       console.error(err);
     } finally {
       setLoading(false);
@@ -82,10 +120,36 @@ export default function MoneyMountainPage() {
       if (response.ok) {
         const data = await response.json();
         setSelectedMountain(data);
+        setDetailFailure(null);
+        return;
       }
+      // A refusal is a real answer and gets named. This used to be swallowed,
+      // which left the pane reading "Select a mountain to view details"
+      // forever — indistinguishable from a broken page.
+      setSelectedMountain(null);
+      setDetailFailure({ id, failure: response.status === 403 ? 'forbidden' : 'unavailable' });
     } catch (err) {
+      setSelectedMountain(null);
+      setDetailFailure({ id, failure: 'unavailable' });
       console.error('Failed to load mountain:', err);
     }
+  };
+
+  /**
+   * Resolve a refused write to a read-only explanation, or `null` when the
+   * refusal is not about who the viewer is (a 400 is the form's own business
+   * and must stay the form's error).
+   */
+  const readRefusal = async (response: Response): Promise<string | null> => {
+    if (response.status !== 401 && response.status !== 403) return null;
+    let code: string | null = null;
+    try {
+      const body = await response.json();
+      code = typeof body?.error === 'string' ? body.error : null;
+    } catch {
+      code = null;
+    }
+    return writeDenialNotice(code);
   };
 
   const handleCreateMountain = async (data: any) => {
@@ -100,9 +164,20 @@ export default function MoneyMountainPage() {
     if (response.ok) {
       await loadMountains();
       setShowCreateForm(false);
-    } else {
-      throw new Error('Failed to create mountain');
+      return;
     }
+
+    // The gate said no: go read-only and let the form close cleanly, rather
+    // than showing "Failed to create mountain" for a permission that will
+    // never be granted to this session.
+    const notice = await readRefusal(response);
+    if (notice) {
+      setWriteReadOnly(notice);
+      setShowCreateForm(false);
+      return;
+    }
+
+    throw new Error('Failed to create mountain');
   };
 
   const handleTransaction = async (type: 'deposit' | 'withdrawal', data: any) => {
@@ -127,9 +202,17 @@ export default function MoneyMountainPage() {
       } else if (result.matchAmount) {
         setToast({ open: true, message: `🎉 Parent match! +${formatCurrency(result.matchAmount)} added to your mountain!`, tone: 'success' });
       }
-    } else {
-      throw new Error('Failed to add transaction');
+      return;
     }
+
+    const notice = await readRefusal(response);
+    if (notice) {
+      setWriteReadOnly(notice);
+      setShowTransactionLogger(null);
+      return;
+    }
+
+    throw new Error('Failed to add transaction');
   };
 
   if (loading) {
@@ -166,6 +249,9 @@ export default function MoneyMountainPage() {
     );
   }
 
+  const listErrorCopy = loadError(role);
+  const emptyCopy = emptyState(role);
+
   return (
     <MotionConfig reducedMotion="user">
     <AtmosphericProvider>
@@ -177,10 +263,12 @@ export default function MoneyMountainPage() {
               used by meals / tasks / suggestions / settings). This was the third
               system: bold sans `text-2xl sm:text-3xl`, and its `truncate`d
               subtitle cut "Set goals, save money, climb mountai…" mid-word on a
-              390px phone. `subtitleTone="lede"` wraps instead. */}
+              390px phone. `subtitleTone="lede"` wraps instead. The subtitle
+              ITSELF is role-aware: "Set goals…" is a task, and a child sets no
+              goal here — they watch one climb. */}
           <PageHeader
             title="Money Mountain"
-            subtitle="Set goals, save money, climb mountains!"
+            subtitle={headerSubtitle(role)}
             subtitleTone="lede"
             icon={<Mountain className="h-6 w-6 text-[var(--color-accent-mint)]" />}
             className="pb-4"
@@ -188,18 +276,39 @@ export default function MoneyMountainPage() {
           {/* The CTA sits BELOW the header, not in `PageHeader`'s action slot:
               `EmergencyButton` is `fixed top-4 right-4` on every route that
               carries it (these three), so an action in the header's top-right
-              sits directly underneath it and the two overlap. */}
-          <div className="px-4 pb-1">
-            <SoftButton onClick={() => setShowCreateForm(true)}>
-              <Plus className="h-4 w-4" />
-              New Goal
-            </SoftButton>
+              sits directly underneath it and the two overlap.
+
+              A read-only viewer gets a `Chip as="span"` marker instead — a
+              passive label with no button semantics and no hit area, so it cannot
+              read as something to tap. This is the whole fix in one line: every
+              write on this domain is parent-only, so for a child or a pet this
+              page is a designed, permanent read-only view — and it now says so
+              at the top rather than hiding a control that would 403. */}
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-1">
+            {canManage ? (
+              <SoftButton onClick={() => setShowCreateForm(true)}>
+                <Plus className="h-4 w-4" />
+                New Goal
+              </SoftButton>
+            ) : (
+              <Chip as="span" tone="neutral" size="sm">
+                🔒 View only
+              </Chip>
+            )}
           </div>
 
-          {error ? (
+          {writeReadOnly && (
+            <div className="px-4 pb-3">
+              <p className="rounded-2xl border border-border bg-[var(--color-surface-0)]/30 px-4 py-3 text-xs leading-5 text-text-secondary backdrop-blur-xl">
+                {writeReadOnly}
+              </p>
+            </div>
+          )}
+
+          {listFailed ? (
             <EmptyState
-              title="Unable to Load Mountains"
-              description={error}
+              title={listErrorCopy.title}
+              description={listErrorCopy.description}
               icon="🏔️"
               actionLabel="Retry"
               onAction={loadMountains}
@@ -209,12 +318,16 @@ export default function MoneyMountainPage() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
             >
+              {/* `actionLabel` is `null` for a read-only viewer, so `EmptyState`
+                  renders NO button at all — the old "Create Your First Mountain"
+                  was a 403 with a friendly coat on. */}
               <EmptyState
-                title="No Savings Goals Yet"
-                description="Create your first savings goal and start climbing! Parents can match your deposits to help you reach the summit faster."
+                title={emptyCopy.title}
+                description={emptyCopy.description}
                 icon="🏔️"
-                actionLabel="Create Your First Mountain"
-                onAction={() => setShowCreateForm(true)}
+                {...(emptyCopy.actionLabel
+                  ? { actionLabel: emptyCopy.actionLabel, onAction: () => setShowCreateForm(true) }
+                  : {})}
               />
             </motion.div>
           ) : (
@@ -237,13 +350,28 @@ export default function MoneyMountainPage() {
 
               {/* Selected Mountain Detail */}
               <div className="lg:col-span-2 space-y-6">
-                {selectedMountain ? (
+                {detailFailure ? (
+                  <EmptyState
+                    {...detailError(role, detailFailure.failure)}
+                    icon="🏔️"
+                    actionLabel="Try Again"
+                    onAction={() => selectMountain(detailFailure.id)}
+                  />
+                ) : selectedMountain ? (
                   <>
-                    {/* Mountain Visualization */}
+                    {/* Mountain Visualization. The callbacks are only handed
+                        over to a viewer who can actually make them, and the
+                        component drops any control it has no callback for, so
+                        there is no path by which a button appears that would
+                        come back 403. */}
                     <MountainVisualization
                       mountain={selectedMountain.mountain}
-                      onDeposit={() => setShowTransactionLogger('deposit')}
-                      onWithdraw={() => setShowTransactionLogger('withdrawal')}
+                      {...(canManage
+                        ? {
+                            onDeposit: () => setShowTransactionLogger('deposit'),
+                            onWithdraw: () => setShowTransactionLogger('withdrawal'),
+                          }
+                        : { readOnlyNote })}
                     />
 
                     {/* Milestones */}
@@ -264,6 +392,7 @@ export default function MoneyMountainPage() {
                     <TransactionHistory
                       transactions={selectedMountain.transactions}
                       currency={selectedMountain.mountain.currency}
+                      emptyHint={emptyHistoryHint(role)}
                     />
                   </>
                 ) : (
@@ -275,16 +404,18 @@ export default function MoneyMountainPage() {
             </div>
           )}
 
-          {/* Create Form Modal */}
-          {showCreateForm && (
+          {/* Create Form Modal — parent-only, and re-checked here rather than
+              trusted from the trigger, so no state can open a write surface a
+              read-only viewer is not entitled to. */}
+          {canManage && showCreateForm && (
             <CreateMountainForm
               onClose={() => setShowCreateForm(false)}
               onSubmit={handleCreateMountain}
             />
           )}
 
-          {/* Transaction Logger Modal */}
-          {showTransactionLogger && selectedMountain && (
+          {/* Transaction Logger Modal — same parent-only re-check. */}
+          {canManage && showTransactionLogger && selectedMountain && (
             <TransactionLogger
               type={showTransactionLogger}
               currency={selectedMountain.mountain.currency as any}
