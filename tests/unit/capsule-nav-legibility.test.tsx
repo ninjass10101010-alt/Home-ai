@@ -323,15 +323,18 @@ const round = (n: number) => Math.round(n * 100) / 100;
 function dockPaint(theme: "dark" | "light", accent: string, substrate: Rgb) {
   const t = tokens(theme);
   const bar = mixPct(t["--color-surface-0"], BAR_ALPHA * 100, substrate);
-  // --color-nav-active-wash: the active pill's own tint over the bar.
-  const wash = mixPct(accent, WASH_PCT, bar);
+  // --color-nav-active-sheen: the active pill's own flat tint over the bar. It
+  // used to be a 20%→6% `linear-gradient(sheen, wash)` ramp, but the 6% end fell
+  // under the perceptual floor about three quarters across — the pill's right half
+  // read as a 1px outline around nothing — so the pill is one flat sheen now.
+  const pill = mixPct(accent, SHEEN_PCT, bar);
   // --color-nav-active-fill: the accent deepened against black, then opaque.
   const fill = mixTwo(hexToRgb(accent), FILL_PCT, [0, 0, 0]);
   return {
     bar,
     idleCircle: mixPct(t["--color-surface-2"], IDLE_CIRCLE_PCT, bar),
     idleGlyph: hexToRgb(t["--color-text-secondary"]),
-    activePill: wash,
+    activePill: pill,
     activeLabel: hexToRgb(t["--color-text-primary"]),
     activeCircle: fill,
     activeGlyph: [255, 255, 255] as Rgb,
@@ -339,9 +342,9 @@ function dockPaint(theme: "dark" | "light", accent: string, substrate: Rgb) {
 }
 
 const pct = (src: string, re: RegExp) => Number(re.exec(src)?.[1] ?? NaN);
-const WASH_PCT = pct(
+const SHEEN_PCT = pct(
   GLOBALS,
-  /--color-nav-active-wash:\s*color-mix\(in srgb, var\(--color-nav-active\)\s*(\d+)%/,
+  /--color-nav-active-sheen:\s*color-mix\(in srgb, var\(--color-nav-active\)\s*(\d+)%/,
 );
 const FILL_PCT = pct(
   GLOBALS,
@@ -372,7 +375,18 @@ describe("CapsuleNav D1: the dock's colours are token-driven, not per-theme cons
   it("drives the bar, the ink and the active fill from design tokens", () => {
     const bar = render(<CapsuleNav />).querySelector(".capsule-nav") as HTMLElement;
     expect(bar.style.background).toContain("var(--color-surface-0)");
-    expect(bar.style.border).toContain("var(--border-frost-2)");
+    // `--border-frost-2` is `1px solid rgba(255,255,255,0.14)` — a BORDER
+    // SHORTHAND, not a colour — so the old `border: 1px solid
+    // var(--border-frost-2)` was an invalid declaration the browser dropped and
+    // the dock shipped with no edge at all (measured `border-top-width: 0px`).
+    // The dock now draws its hairline from a colour-only custom property, which
+    // is what the assertion below pins; see the `.capsule-nav` block in
+    // globals.css for the same note and for the idle-ring counterpart.
+    expect(bar.style.border).toContain("var(--capsule-edge-ink)");
+    expect(bar.style.border).toMatch(/^1px solid /);
+    expect(GLOBALS).toMatch(
+      /--capsule-edge-ink:\s*color-mix\(in srgb, var\(--color-text-primary\)/,
+    );
     expect(bar.style.boxShadow).toContain("var(--neu-dark)");
 
     const caps = Array.from(render(<CapsuleNav />).querySelectorAll<HTMLElement>("nav button"));
@@ -385,6 +399,14 @@ describe("CapsuleNav D1: the dock's colours are token-driven, not per-theme cons
     // the ONLY active ink is --color-nav-active* (AGENTS.md)
     expect(circleOf(active).style.background).toContain("var(--color-nav-active-fill)");
     expect(circleOf(idle).style.background).toContain("var(--color-surface-2)");
+    // …and the idle ring is a real hairline, NOT `border-[var(--border-frost-1)]`.
+    // That class set `border-color` to that same shorthand — equally invalid — so
+    // every idle cap fell back to `currentColor` and rendered a 1px ring at 100%
+    // `--color-text-primary` (near-white on Night, near-black on Day): seven hard
+    // outlines louder than the active state they were meant to sit behind.
+    expect(circleOf(idle).className).toContain("var(--capsule-ring)");
+    expect(circleOf(idle).className).not.toContain("var(--border-frost-1)");
+    expect(GLOBALS).toMatch(/--capsule-ring:\s*color-mix\(in srgb, var\(--color-text-primary\)/);
     expect(glyphOf(idle).className).toContain("var(--color-text-secondary)");
     expect(glyphOf(active).className).toContain("text-white");
     expect(labelOf(active).className).toContain("var(--color-text-primary)");
@@ -425,7 +447,7 @@ describe("CapsuleNav D1: WCAG AA over the real composited dock, every accent", (
       expect(Number.isNaN(BAR_ALPHA), "component must declare --capsule-bar-alpha").toBe(false);
       expect(Number.isNaN(IDLE_CIRCLE_PCT)).toBe(false);
       expect(Number.isNaN(FILL_PCT), "globals.css --color-nav-active-fill pct").toBe(false);
-      expect(Number.isNaN(WASH_PCT), "globals.css --color-nav-active-wash pct").toBe(false);
+      expect(Number.isNaN(SHEEN_PCT), "globals.css --color-nav-active-sheen pct").toBe(false);
     }
   });
 
