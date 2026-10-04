@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import useDialogA11y from "@/components/ui/useDialogA11y";
 
 interface AlarmPinModalProps {
@@ -43,11 +44,15 @@ export default function AlarmPinModal({ action, onSubmit, onClose }: AlarmPinMod
     inputRef.current?.focus();
   };
 
-  return (
+  // Portaled to <body>: rendered inline this overlay inherited PageShell's
+  // `relative z-10` <main> stacking context, so the portaled z-50 CapsuleNav
+  // painted straight over it — on the wall and on phones the dock swallowed
+  // the sheet's own footer. A z index only means anything at body level.
+  return createPortal(
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm outline-none" role="dialog" aria-modal="true" aria-label="Alarm PIN entry"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-md outline-none" role="dialog" aria-modal="true" aria-label="Alarm PIN entry"
       onClick={loading ? undefined : onClose}
     >
       <div
@@ -91,7 +96,7 @@ export default function AlarmPinModal({ action, onSubmit, onClose }: AlarmPinMod
             type="button"
             onClick={onClose}
             disabled={loading}
-            className="flex-1 rounded-2xl border border-white/10 py-2.5 text-sm font-semibold text-text-secondary transition-colors hover:bg-white/5 disabled:opacity-40"
+            className="tap min-h-11 flex-1 rounded-xl border border-white/10 text-sm font-semibold text-text-secondary transition-colors hover:bg-white/5 disabled:opacity-40"
           >
             Cancel
           </button>
@@ -99,7 +104,7 @@ export default function AlarmPinModal({ action, onSubmit, onClose }: AlarmPinMod
             type="button"
             onClick={() => void handleSubmit()}
             disabled={pin.length < 4 || loading}
-            className={`flex-1 rounded-2xl py-2.5 text-sm font-semibold text-white transition-colors disabled:opacity-40 ${
+            className={`tap min-h-11 flex-1 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-40 ${
               action === "disarm" ? "bg-[var(--color-accent-rose)] hover:bg-[var(--color-accent-rose)]" : "bg-nori-500 hover:bg-nori-400"
             }`}
           >
@@ -108,5 +113,7 @@ export default function AlarmPinModal({ action, onSubmit, onClose }: AlarmPinMod
         </div>
       </div>
     </div>
+    ,
+    document.body
   );
 }

@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import useDialogA11y from "@/components/ui/useDialogA11y";
 import { useWeatherConfig } from "@/hooks/useWeather";
 import { HolidayOverride } from "@/lib/weather-config";
@@ -418,10 +419,10 @@ function DayStrip({ hours, conv, skin, accent, textAccent, selectedTextAccent, p
 function LeaderRow({ label, value, hidden, children }: { label: string; value: string; hidden?: boolean; children?: React.ReactNode }) {
   if (hidden) return null;
   return (
-    <div className="flex items-baseline gap-2.5">
-      <span className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">{label}</span>
-      <span className="flex-1 border-b border-dotted border-white/25" aria-hidden="true" />
-      <span className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[13px] font-bold tabular-nums text-white">
+    <div className="flex min-h-9 items-center gap-3">
+      <span className="shrink-0 text-xs font-bold uppercase tracking-[0.14em] text-white/60">{label}</span>
+      <span className="min-w-4 flex-1 border-b border-dotted border-white/15" aria-hidden="true" />
+      <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[13px] font-bold tabular-nums text-white">
         {children}
         {value}
       </span>
@@ -1430,10 +1431,13 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const weekMax = forecastRows.length ? Math.max(...forecastRows.map((d) => d.displayHigh)) : 1;
   const weekSpan = Math.max(weekMax - weekMin, 1);
 
-  return (
+  // Portaled to <body>: rendered inline this sheet inherited PageShell's
+  // `relative z-10` <main> stacking context, so its z-[80] was scoped there and
+  // the portaled z-50 CapsuleNav painted straight over it.
+  return createPortal(
     <div
       id="weather-details-dialog"
-      className="fixed inset-0 z-[80] flex items-end justify-center bg-[#0a0f1c]/55 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-[#0a0f1c]/62 p-0 backdrop-blur-md sm:items-center sm:p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -1444,7 +1448,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
         tabIndex={-1}
         className="weather-details-modal relative outline-none flex w-full max-w-[440px] max-h-[92dvh] flex-col overflow-hidden rounded-t-2xl rounded-b-none sm:rounded-2xl sm:max-h-[84vh]"
         style={{
-          background: "linear-gradient(170deg, rgba(16,20,34,0.92) 0%, rgba(10,13,24,0.94) 100%)",
+          background: "linear-gradient(170deg, #101424 0%, #0a0d18 100%)",
           border: "1px solid rgba(255,255,255,0.12)",
           boxShadow: `0 0 80px ${mSkin.glow}, 0 24px 64px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.09)`,
           animation: motionOk ? "modalEnter 0.38s var(--ease-spring) both" : undefined,
@@ -1456,7 +1460,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
         <div className="flex justify-center pt-2.5 sm:hidden" aria-hidden="true">
           <div className="h-1 w-10 rounded-full bg-white/25" />
         </div>
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[rgba(8,12,24,0.42)] px-5 py-3 backdrop-blur-md">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[#101424] px-5 py-3">
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">Weather</p>
             <p className="truncate text-sm font-semibold text-white">{location}</p>
@@ -1504,8 +1508,12 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                 </div>
                 <div
                   data-testid="wx-modal-hero-ink"
-                  className="flex flex-col items-center rounded-2xl px-4 py-2"
-                  style={{ backgroundColor: mScene === "night" ? "rgba(255, 255, 255, 0.45)" : undefined }}
+                  className="flex flex-col items-center rounded-2xl px-8 py-4"
+                  style={{
+                    background: mScene === "night"
+                      ? "radial-gradient(closest-side, rgba(255,255,255,0.62), rgba(255,255,255,0.28) 62%, rgba(255,255,255,0) 100%)"
+                      : undefined,
+                  }}
                 >
                   <div className="flex items-start leading-none">
                     {scrubTempTarget == null ? (
@@ -1520,7 +1528,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                         >
                           {scrubTemp}
                         </span>
-                        <span className="mt-1 ml-0.5 text-2xl font-light leading-none" style={{ color: mSkin.inkSoft }} aria-hidden="true">°</span>
+                        <span className="mt-2 ml-1 text-3xl font-light leading-none" style={{ color: mSkin.inkSoft }} aria-hidden="true">°</span>
                       </>
                     )}
                   </div>
@@ -1538,7 +1546,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
               </div>
             )}
 
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               <LeaderRow
                 label="Humidity"
                 value={mHumidity == null ? "—" : `${Math.round(mHumidity)}%`}
@@ -1704,7 +1712,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
           </div>
         </div>
 
-        <div className="sticky bottom-0 border-t border-white/[0.06] bg-[rgba(0,0,0,0.18)] p-4 backdrop-blur-md">
+        <div className="sticky bottom-0 border-t border-white/[0.06] bg-[#0a0d18] p-4">
           <button
             type="button"
             onClick={onClose}
@@ -1716,5 +1724,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
         </div>
       </div>
     </div>
+    ,
+    document.body
   );
 }

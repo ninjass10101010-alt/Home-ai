@@ -1,4 +1,5 @@
 'use client';
+import { createPortal } from "react-dom";
 
 import { motion } from 'framer-motion';
 import { X, Star, Clock, CheckCircle, PlayCircle } from 'lucide-react';
@@ -32,7 +33,11 @@ export function QuestDetail({
     hard: 'text-[var(--color-accent-rose)] bg-[var(--color-accent-rose)]/10',
   };
   
-  return (
+  // Portaled to <body>: rendered inline this overlay inherited PageShell's
+  // `relative z-10` <main> stacking context, so the portaled z-50 CapsuleNav
+  // painted straight over it — on the wall and on phones the dock swallowed
+  // the sheet's own footer. A z index only means anything at body level.
+  return createPortal(
     <motion.div
       ref={panelRef}
       tabIndex={-1}
@@ -52,7 +57,7 @@ export function QuestDetail({
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted"
+          className="absolute right-3 top-3 grid h-11 w-11 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted"
           aria-label="Close"
         >
           <X className="h-5 w-5" />
@@ -169,5 +174,7 @@ export function QuestDetail({
         </div>
       </motion.div>
     </motion.div>
+    ,
+    document.body
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { createPortal } from "react-dom";
 import { motion } from 'framer-motion';
 import { X, Target } from 'lucide-react';
 import type { Currency } from '@/db/features/money-mountain';
@@ -93,14 +94,18 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
     cloud: '#a78bfa',
   };
   
-  return (
+  // Portaled to <body>: rendered inline this overlay inherited PageShell's
+  // `relative z-10` <main> stacking context, so the portaled z-50 CapsuleNav
+  // painted straight over it — on the wall and on phones the dock swallowed
+  // the sheet's own footer. A z index only means anything at body level.
+  return createPortal(
     <motion.div
       ref={panelRef}
       tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Create mountain"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-md outline-none" role="dialog" aria-modal="true" aria-label="Create mountain"
       onClick={onClose}
     >
       <motion.div
@@ -122,7 +127,7 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-2 text-muted-foreground hover:bg-muted"
+            className="-mr-2 -mt-2 grid h-11 w-11 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted"
           >
             <X className="h-5 w-5" />
           </button>
@@ -224,7 +229,7 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
                   key={t.id}
                   type="button"
                   onClick={() => setMountainTheme(t.id)}
-                  className={`flex flex-col items-center gap-1 rounded-lg border-2 p-2 transition-all ${
+                  className={`tap flex min-h-11 flex-col items-center gap-1 rounded-lg border-2 p-2 transition-all ${
                     mountainTheme === t.id
                       ? 'border-primary bg-primary/10'
                       : 'border-border hover:border-primary/50'
@@ -257,7 +262,7 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
                 type="checkbox"
                 checked={matchEnabled}
                 onChange={(e) => setMatchEnabled(e.target.checked)}
-                className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                className="h-5 w-5 shrink-0 accent-[var(--color-accent-selected)]"
               />
               <div>
                 <div className="text-sm font-medium text-foreground">Parent Match Program</div>
@@ -300,14 +305,14 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted"
+              className="tap min-h-11 flex-1 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className="tap min-h-11 flex-1 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {loading ? 'Creating...' : 'Create Mountain'}
             </button>
@@ -315,5 +320,7 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
         </form>
       </motion.div>
     </motion.div>
+    ,
+    document.body
   );
 }

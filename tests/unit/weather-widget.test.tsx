@@ -1009,7 +1009,10 @@ describe("WeatherWidget — Not Boring redesign", () => {
       const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
       const panel = dialog.querySelector(".weather-details-modal") as HTMLElement;
       expect(panel).toBeTruthy();
-      expect(panel.style.background).toContain("linear-gradient(170deg, rgba(16, 20, 34, 0.92) 0%, rgba(10, 13, 24, 0.94) 100%)");
+      // Opaque: at 92-94% the page behind (its own 64px condition glyph, the
+      // "Today" copy, and the whole z-50 CapsuleNav pill) printed through the
+      // sheet and collided with the type. A sheet has to actually be on top.
+      expect(panel.style.background).toContain("linear-gradient(170deg, rgb(16, 20, 36) 0%, rgb(10, 13, 24) 100%)");
       const cells = Array.from(dialog.querySelectorAll<HTMLButtonElement>('[role="list"] [role="listitem"] button'));
       expect(cells.length).toBeGreaterThan(1);
       const selected = cells[0];
@@ -1431,13 +1434,16 @@ describe("WeatherWidget — Not Boring redesign", () => {
       expect(degree).toBeTruthy();
       expect(degree!.style.color).toBe("rgba(30, 41, 59, 0.78)");
       expect(heroInk).toBeTruthy();
-      expect(heroInk!.style.backgroundColor).toBe("rgba(255, 255, 255, 0.45)");
+      // A soft radial bloom rather than a hard rgba rectangle pasted over the
+      // illustration. 0.62 is the gradient's centre stop — what sits directly
+      // behind the glyphs — and is the value the contrast maths below uses.
+      expect(heroInk!.style.background).toContain("radial-gradient(closest-side, rgba(255, 255, 255, 0.62)");
       const nightStops = ["#8b90c6", "#8e93c9", "#9196cd"];
       const minimumHeroContrast = Math.min(...nightStops.map((background) =>
-        effectiveContrast("#1E293B", 1, compositeHex("#FFFFFF", background, 0.45))
+        effectiveContrast("#1E293B", 1, compositeHex("#FFFFFF", background, 0.62))
       ));
       const minimumSoftContrast = Math.min(...nightStops.map((background) =>
-        effectiveContrast("#1E293B", 0.78, compositeHex("#FFFFFF", background, 0.45))
+        effectiveContrast("#1E293B", 0.78, compositeHex("#FFFFFF", background, 0.62))
       ));
       expect(minimumHeroContrast).toBeGreaterThanOrEqual(4.5);
       expect(minimumSoftContrast).toBeGreaterThanOrEqual(4.5);

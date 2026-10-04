@@ -124,7 +124,11 @@ describe("PinModal — shared dialog a11y", () => {
     const onClose = vi.fn();
     const trigger = renderPage(pinUi(onClose));
     await openVia(trigger);
-    expect(document.querySelector("main")!.hasAttribute("inert")).toBe(true);
+    // `closest` rather than `hasAttribute`: the pad is portaled to <body>, so
+    // the hook marks the page's mount subtree inert and <main> is *inside* it.
+    // What matters is that nothing behind the pad is reachable or announced.
+    expect(document.querySelector("main")!.closest("[inert]")).not.toBeNull();
+    expect(document.querySelector("main")!.closest("[aria-hidden='true']")).not.toBeNull();
     expect(trigger.closest("[inert]")).not.toBeNull();
     expect(dialog()!.closest("[inert]")).toBeNull();
   });

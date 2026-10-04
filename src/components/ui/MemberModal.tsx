@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { createPortal } from "react-dom";
 import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import useDialogA11y from "@/components/ui/useDialogA11y";
@@ -108,8 +109,12 @@ export default function MemberModal({ isOpen, onClose, member, onSave, onDelete 
 
   if (!isOpen) return null;
 
-  return (
-    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Member dialog" onClick={onClose}>
+  // Portaled to <body>: rendered inline this overlay inherited PageShell's
+  // `relative z-10` <main> stacking context, so the portaled z-50 CapsuleNav
+  // painted straight over it — on the wall and on phones the dock swallowed
+  // the sheet's own footer. A z index only means anything at body level.
+  return createPortal(
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-md outline-none" role="dialog" aria-modal="true" aria-label="Member dialog" onClick={onClose}>
       <div className="w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <Surface className="border-0 shadow-none bg-transparent">
           <div className="p-6">
@@ -261,5 +266,7 @@ export default function MemberModal({ isOpen, onClose, member, onSave, onDelete 
         </Surface>
       </div>
     </div>
+    ,
+    document.body
   );
 }

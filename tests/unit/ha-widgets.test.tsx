@@ -52,11 +52,13 @@ function stubFetch(states = SYNC_STATES) {
   return { calls, fetchMock };
 }
 
+// `document.body`, not the mount node: AlarmPinModal is portaled to <body>
+// so the z-50 CapsuleNav cannot paint over the arm/disarm confirmation.
 function render(ui: ReactElement): HTMLElement {
   const el = document.createElement("div");
   document.body.appendChild(el);
   act(() => createRoot(el).render(ui));
-  return el;
+  return document.body;
 }
 
 function expectWidgetIcon(root: HTMLElement, variant: string, oldEmoji: string) {

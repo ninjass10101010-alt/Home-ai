@@ -1,4 +1,5 @@
 "use client";
+import { createPortal } from "react-dom";
 
 import SoftButton from "@/components/ui/SoftButton";
 import { LEVELS } from "@/types/tasks";
@@ -21,8 +22,12 @@ export default function LevelUpModal({ open, memberName, memberEmoji, oldLevel, 
   const levelInfo = LEVELS[newLevel - 1] || LEVELS[LEVELS.length - 1];
   const firstName = memberName.split(" ")[0];
 
-  return (
-    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm outline-none" role="dialog" aria-modal="true" aria-label="Level up" onClick={onClose}>
+  // Portaled to <body>: rendered inline this overlay inherited PageShell's
+  // `relative z-10` <main> stacking context, so the portaled z-50 CapsuleNav
+  // painted straight over it — on the wall and on phones the dock swallowed
+  // the sheet's own footer. A z index only means anything at body level.
+  return createPortal(
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[90] flex items-center justify-center bg-black/62 backdrop-blur-md outline-none" role="dialog" aria-modal="true" aria-label="Level up" onClick={onClose}>
       <div
         className="relative mx-4 max-w-sm w-full rounded-2xl border border-[var(--color-accent-amber)]/30 bg-[var(--color-surface-2)] p-8 text-center animate-level-up-pop"
         onClick={(e) => e.stopPropagation()}
@@ -51,5 +56,7 @@ export default function LevelUpModal({ open, memberName, memberEmoji, oldLevel, 
         </div>
       </div>
     </div>
+    ,
+    document.body
   );
 }

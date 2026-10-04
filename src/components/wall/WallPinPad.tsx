@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "@/hooks/useAuth";
 import Avatar from "@/components/ui/Avatar";
 import useDialogA11y from "@/components/ui/useDialogA11y";
@@ -91,8 +92,12 @@ export default function WallPinPad({
     press(k);
   };
 
-  return (
-    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/40 p-6" onClick={onClose}>
+  // Portaled to <body>: rendered inline this overlay inherited PageShell's
+  // `relative z-10` <main> stacking context, so the portaled z-50 CapsuleNav
+  // painted straight over it — on the wall and on phones the dock swallowed
+  // the sheet's own footer. A z index only means anything at body level.
+  return createPortal(
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-6 backdrop-blur-md" onClick={onClose}>
       <div
         ref={panelRef}
         tabIndex={-1}
@@ -100,41 +105,65 @@ export default function WallPinPad({
         aria-modal="true"
         aria-label={`Sign in as ${member.name}`}
         onClick={(e) => e.stopPropagation()}
-        className="material-thick w-full max-w-xl rounded-2xl border border-white/12 p-8 shadow-2xl outline-none"
+        className="material-thick w-full max-w-xl rounded-2xl border border-white/12 p-6 shadow-2xl outline-none lg:max-w-3xl lg:p-8"
+        style={{ background: "color-mix(in srgb, var(--color-surface-1) 94%, transparent)" }}
       >
-        <div className="flex flex-col items-center gap-3">
-          <Avatar name={member.name} color={member.color || "green"} emoji={member.emoji} size="lg" variant="emoji" />
-          <p className="text-2xl font-bold tracking-tight text-text-primary">Hi {member.name.split(" ")[0]} 👋</p>
-          <p className="text-base text-text-secondary">Enter your 4-digit PIN</p>
-          <div className="flex gap-3 py-2 text-3xl tracking-[0.5em] text-text-primary" aria-label={`${pin.length} of 4 digits entered`}>
-            {pin.padEnd(4, " ").split("").map((c, i) => (
-              <span key={i}>{c.trim() ? "●" : "·"}</span>
-            ))}
+        {/* On the wall (>=lg) the pad goes side-by-side: the 72px keys are
+            pinned by the wall control floor, so a single 576px column left them
+            2.2:1 wide in a card that read as a postage stamp on a 1920 screen.
+            Beside the identity block the keys land near 1.3:1 and the panel
+            claims the width it is entitled to. Phones keep the stacked column. */}
+        <div className="flex flex-col lg:grid lg:grid-cols-[auto_auto] lg:justify-center lg:items-center lg:gap-14">
+          <div className="flex flex-col items-center gap-3 lg:items-start lg:gap-4">
+            <Avatar name={member.name} color={member.color || "green"} emoji={member.emoji} size="lg" variant="emoji" />
+            <p className="text-2xl font-bold tracking-tight text-text-primary lg:text-4xl">Hi {member.name.split(" ")[0]} 👋</p>
+            <p className="text-base text-text-secondary lg:text-xl">Enter your 4-digit PIN</p>
+            <div className="flex gap-3 py-1 lg:gap-4 lg:py-2" aria-label={`${pin.length} of 4 digits entered`}>
+              {[0, 1, 2, 3].map((i) => (
+                <span
+                  key={i}
+                  aria-hidden="true"
+                  className={`grid h-11 w-11 place-items-center rounded-xl border text-xl transition-colors lg:h-14 lg:w-14 lg:text-3xl ${
+                    i < pin.length
+                      ? "border-[var(--color-accent-selected)] bg-[color-mix(in_srgb,var(--color-accent-selected)_18%,transparent)] text-[var(--color-accent-selected)]"
+                      : "border-[color-mix(in_srgb,var(--color-text-primary)_16%,transparent)]"
+                  }`}
+                >
+                  {i < pin.length ? "●" : null}
+                </span>
+              ))}
+            </div>
+            {error && <p className="text-center text-base font-semibold text-[var(--color-accent-rose)] lg:text-left" role="alert">{error}</p>}
           </div>
-          {error && <p className="text-center text-base font-semibold text-[var(--color-accent-rose)]" role="alert">{error}</p>}
-        </div>
-        <div className="mt-6 grid grid-cols-3 gap-4">
-          {keys.map((k) => (
+          <div className="mt-6 w-full lg:mt-0 lg:w-auto">
+            <div className="grid grid-cols-3 gap-3 lg:gap-4">
+              {keys.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  aria-label={k === "⌫" ? "Backspace" : k}
+                  onClick={() => onKey(k)}
+                  disabled={busy}
+                  className={`tap grid h-[72px] place-items-center rounded-2xl border border-[color-mix(in_srgb,var(--color-text-primary)_14%,transparent)] bg-[color-mix(in_srgb,var(--color-text-primary)_7%,transparent)] font-bold text-text-primary hover:bg-[color-mix(in_srgb,var(--color-text-primary)_13%,transparent)] disabled:opacity-50 ${
+                k === "Clear" ? "text-xl lg:text-2xl" : "text-2xl lg:text-4xl"
+              }`}
+                >
+                  {k === "⌫" ? "⌫" : k}
+                </button>
+              ))}
+            </div>
             <button
-              key={k}
               type="button"
-              aria-label={k === "⌫" ? "Backspace" : k}
-              onClick={() => onKey(k)}
-              disabled={busy}
-              className="tap grid h-[72px] place-items-center rounded-2xl border border-white/10 bg-white/[0.06] text-2xl font-bold text-text-primary hover:bg-white/[0.12] disabled:opacity-50"
+              onClick={onClose}
+              className="tap mt-4 h-16 w-full rounded-2xl border border-[color-mix(in_srgb,var(--color-text-primary)_14%,transparent)] bg-[color-mix(in_srgb,var(--color-text-primary)_7%,transparent)] text-lg font-semibold text-text-secondary hover:bg-[color-mix(in_srgb,var(--color-text-primary)_13%,transparent)] hover:text-text-primary lg:mt-6 lg:text-2xl"
             >
-              {k === "⌫" ? "⌫" : k}
+              Cancel
             </button>
-          ))}
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="tap mt-6 h-16 w-full rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/35 text-lg font-semibold text-text-secondary hover:text-text-primary"
-        >
-          Cancel
-        </button>
       </div>
     </div>
+    ,
+    document.body
   );
 }

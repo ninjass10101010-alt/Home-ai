@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { createPortal } from "react-dom";
 import { motion } from 'framer-motion';
 import { Upload, Image, FileText, Mic, Video, X } from 'lucide-react';
 import type { ContentType } from '@/db/features/time-capsule';
@@ -75,14 +76,18 @@ export function ContentUploader({ onUpload, onClose }: ContentUploaderProps) {
     },
   ];
   
-  return (
+  // Portaled to <body>: rendered inline this overlay inherited PageShell's
+  // `relative z-10` <main> stacking context, so the portaled z-50 CapsuleNav
+  // painted straight over it — on the wall and on phones the dock swallowed
+  // the sheet's own footer. A z index only means anything at body level.
+  return createPortal(
     <motion.div
       ref={panelRef}
       tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Content uploader"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-md outline-none" role="dialog" aria-modal="true" aria-label="Content uploader"
       onClick={onClose}
     >
       <motion.div
@@ -107,7 +112,7 @@ export function ContentUploader({ onUpload, onClose }: ContentUploaderProps) {
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted"
+            className="-mr-2 -mt-2 grid h-11 w-11 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -204,14 +209,14 @@ export function ContentUploader({ onUpload, onClose }: ContentUploaderProps) {
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              className="tap min-h-11 flex-1 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="tap min-h-11 flex-1 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Uploading...' : 'Add Content'}
             </button>
@@ -219,5 +224,7 @@ export function ContentUploader({ onUpload, onClose }: ContentUploaderProps) {
         </form>
       </motion.div>
     </motion.div>
+    ,
+    document.body
   );
 }

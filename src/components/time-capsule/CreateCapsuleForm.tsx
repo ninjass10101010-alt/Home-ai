@@ -1,10 +1,53 @@
 'use client';
 
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { X, Calendar, Users, Tag, Sparkles } from 'lucide-react';
+import { X, Calendar, Users, Tag, Sparkles, Pencil, AlignLeft, MessageSquare, Check } from 'lucide-react';
 import type { CreateCapsuleRequest } from '@/db/features/time-capsule';
 import useDialogA11y from "@/components/ui/useDialogA11y";
+
+/** The row IS the control: a native unchecked checkbox paints a solid white
+ *  square whatever `accent-color` / `color-scheme` say (verified in Chromium),
+ *  so it was a hard white chip in a dark card at a 16px target. */
+function CapsuleCheck({
+  checked,
+  onChange,
+  title,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  title: string;
+  hint?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`tap flex min-h-11 w-full items-center gap-3 rounded-lg px-2 text-left transition-colors ${
+        checked ? 'bg-primary/10' : 'hover:bg-muted/60'
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`grid h-5 w-5 shrink-0 place-items-center rounded border-2 transition-colors ${
+          checked
+            ? 'border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)] text-white'
+            : 'border-[var(--color-border)] bg-[var(--color-surface-1)]'
+        }`}
+      >
+        {checked && <Check className="h-3.5 w-3.5" strokeWidth={3.5} />}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-foreground">{title}</span>
+        {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
+      </span>
+    </button>
+  );
+}
 
 interface CreateCapsuleFormProps {
   onClose: () => void;
@@ -99,14 +142,19 @@ export function CreateCapsuleForm({
   tomorrow.setDate(tomorrow.getDate() + 1);
   const minDate = tomorrow.toISOString().split('T')[0];
   
-  return (
+  // Portaled to <body> at z-[80]: rendered inline this sheet inherited
+  // PageShell's `relative z-10` <main> stacking context, so the portaled
+  // z-50 CapsuleNav painted straight over the footer and Cancel / Create
+  // Capsule were physically untappable. The max-h + sticky header/actions
+  // keeps a form taller than the viewport fully reachable.
+  return createPortal(
     <motion.div
       ref={panelRef}
       tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Create time capsule"
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/55 p-4 backdrop-blur-md outline-none sm:items-center" role="dialog" aria-modal="true" aria-label="Create time capsule"
       onClick={onClose}
     >
       <motion.div
@@ -114,36 +162,39 @@ export function CreateCapsuleForm({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl"
+        className="material-thick flex max-h-[88dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/12 p-5 shadow-2xl sm:p-6"
+        style={{ background: "color-mix(in srgb, var(--color-surface-1) 94%, transparent)" }}
       >
         {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+        <div className="mb-5 flex shrink-0 items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
               <Sparkles className="h-5 w-5 text-primary" />
             </div>
-            <div>
-              <h2 className="text-xl font-semibold text-foreground">Create Time Capsule</h2>
-              <p className="text-sm text-muted-foreground">
-                Lock away memories for the future
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-foreground">Create Time Capsule</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Memories sealed until their date
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted"
+            className="-mr-2 -mt-2 grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-        
+
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pr-1">
           {/* Title */}
           <div>
-            <label htmlFor="title" className="mb-2 block text-sm font-medium text-foreground">
-              Title <span className="text-[var(--color-accent-rose)]">*</span>
+            <label htmlFor="title" className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
+              <Pencil className="h-4 w-4" />
+              Title <span className="text-[var(--color-text-muted)]" aria-hidden="true">*</span>
             </label>
             <input
               id="title"
@@ -159,7 +210,8 @@ export function CreateCapsuleForm({
           
           {/* Description */}
           <div>
-            <label htmlFor="description" className="mb-2 block text-sm font-medium text-foreground">
+            <label htmlFor="description" className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
+              <AlignLeft className="h-4 w-4" />
               Description
             </label>
             <textarea
@@ -177,7 +229,7 @@ export function CreateCapsuleForm({
           <div>
             <label htmlFor="unlockDate" className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
               <Calendar className="h-4 w-4" />
-              Unlock Date <span className="text-[var(--color-accent-rose)]">*</span>
+              Unlock Date <span className="text-[var(--color-text-muted)]" aria-hidden="true">*</span>
             </label>
             <input
               id="unlockDate"
@@ -185,10 +237,10 @@ export function CreateCapsuleForm({
               value={unlockDate}
               onChange={(e) => setUnlockDate(e.target.value)}
               min={minDate}
-              className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-foreground [color-scheme:dark] focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary [&::-webkit-calendar-picker-indicator]:opacity-60"
               required
             />
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1.5 text-xs text-muted-foreground">
               Choose when this capsule should be unlocked
             </p>
           </div>
@@ -200,53 +252,39 @@ export function CreateCapsuleForm({
               Who can view this capsule?
             </label>
             
-            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
+            <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-2">
               {/* Family-wide option */}
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isFamilyWide}
-                  onChange={(e) => {
-                    setIsFamilyWide(e.target.checked);
-                    if (e.target.checked) {
-                      setRecipients([]);
-                    }
-                  }}
-                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                />
-                <div>
-                  <div className="text-sm font-medium text-foreground">Entire family</div>
-                  <div className="text-xs text-muted-foreground">
-                    All family members can view and contribute
-                  </div>
-                </div>
-              </label>
+              <CapsuleCheck
+                checked={isFamilyWide}
+                onChange={(next) => {
+                  setIsFamilyWide(next);
+                  if (next) {
+                    setRecipients([]);
+                  }
+                }}
+                title="Entire family"
+                hint="All family members can view and contribute"
+              />
               
               {/* Individual recipients */}
               {!isFamilyWide && familyMembers.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-xs text-muted-foreground">
+                <div className="space-y-1 border-t border-border pt-2">
+                  <div className="px-2 text-xs text-muted-foreground">
                     Or select specific members:
                   </div>
                   {familyMembers.map((member) => (
-                    <label
+                    <CapsuleCheck
                       key={member.id}
-                      className="flex items-center gap-3 cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={recipients.includes(member.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setRecipients([...recipients, member.id]);
-                          } else {
-                            setRecipients(recipients.filter((id) => id !== member.id));
-                          }
-                        }}
-                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                      />
-                      <span className="text-sm text-foreground">{member.name}</span>
-                    </label>
+                      checked={recipients.includes(member.id)}
+                      onChange={(next) => {
+                        if (next) {
+                          setRecipients([...recipients, member.id]);
+                        } else {
+                          setRecipients(recipients.filter((id) => id !== member.id));
+                        }
+                      }}
+                      title={member.name}
+                    />
                   ))}
                 </div>
               )}
@@ -255,7 +293,8 @@ export function CreateCapsuleForm({
           
           {/* Unlock Message */}
           <div>
-            <label htmlFor="unlockMessage" className="mb-2 block text-sm font-medium text-foreground">
+            <label htmlFor="unlockMessage" className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
+              <MessageSquare className="h-4 w-4" />
               Unlock Message
             </label>
             <textarea
@@ -289,7 +328,7 @@ export function CreateCapsuleForm({
                 <button
                   type="button"
                   onClick={handleAddTag}
-                  className="rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  className="tap min-h-11 shrink-0 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   Add
                 </button>
@@ -299,13 +338,13 @@ export function CreateCapsuleForm({
                   {tags.map((tag) => (
                     <span
                       key={tag}
-                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 py-0.5 pl-2.5 pr-1 text-xs font-medium text-primary"
                     >
                       {tag}
                       <button
                         type="button"
                         onClick={() => handleRemoveTag(tag)}
-                        className="ml-1 hover:text-primary/70"
+                        className="hit-44 -mr-1 grid h-6 w-6 place-items-center rounded-full hover:bg-primary/20"
                         aria-label={`Remove ${tag}`}
                       >
                         ×
@@ -319,30 +358,33 @@ export function CreateCapsuleForm({
           
           {/* Error */}
           {error && (
-            <div className="rounded-lg bg-[var(--color-accent-rose)]/10 border border-[var(--color-accent-rose)]/20 p-3 text-sm text-[var(--color-accent-rose)]">
+            <div className="rounded-lg border border-[var(--color-accent-rose)]/20 bg-[var(--color-accent-rose)]/10 p-3 text-sm text-[var(--color-accent-rose)]">
               {error}
             </div>
           )}
-          
-          {/* Actions */}
-          <div className="flex gap-3 pt-4 border-t border-border">
+          </div>
+
+          {/* Actions — pinned outside the scroll area so the primary action is
+              never below the fold on a short phone. */}
+          <div className="mt-4 flex shrink-0 gap-3 border-t border-border pt-4">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              className="tap min-h-11 flex-1 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="tap min-h-11 flex-1 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? 'Creating...' : 'Create Capsule'}
             </button>
           </div>
         </form>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }

@@ -29,7 +29,11 @@ function render(ui: ReactElement): HTMLElement {
   act(() => {
     root!.render(ui);
   });
-  return el;
+  // The pad is portaled to <body> so the z-50 CapsuleNav cannot paint over it
+  // at the wall (an inline overlay is trapped in PageShell's z-10 <main>
+  // stacking context and the dock wins). Every assertion below is scoped to
+  // this root, which is <body> for a portaled dialog.
+  return document.body;
 }
 
 function buttonByLabel(el: HTMLElement, name: string): HTMLButtonElement {

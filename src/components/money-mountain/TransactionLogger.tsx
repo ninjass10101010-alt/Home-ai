@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { createPortal } from "react-dom";
 import { motion } from 'framer-motion';
 import { X, Plus, Minus } from 'lucide-react';
 import type { Currency } from '@/db/features/money-mountain';
@@ -84,14 +85,18 @@ export function TransactionLogger({
     }
   };
   
-  return (
+  // Portaled to <body>: rendered inline this overlay inherited PageShell's
+  // `relative z-10` <main> stacking context, so the portaled z-50 CapsuleNav
+  // painted straight over it — on the wall and on phones the dock swallowed
+  // the sheet's own footer. A z index only means anything at body level.
+  return createPortal(
     <motion.div
       ref={panelRef}
       tabIndex={-1}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 outline-none" role="dialog" aria-modal="true" aria-label="Transaction log"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-md outline-none" role="dialog" aria-modal="true" aria-label="Transaction log"
       onClick={onClose}
     >
       <motion.div
@@ -122,7 +127,7 @@ export function TransactionLogger({
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-2 text-muted-foreground hover:bg-muted"
+            className="-mr-2 -mt-2 grid h-11 w-11 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted"
           >
             <X className="h-5 w-5" />
           </button>
@@ -226,14 +231,14 @@ export function TransactionLogger({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted"
+              className="tap min-h-11 flex-1 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
+              className={`tap min-h-11 flex-1 rounded-lg px-4 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
                 isDeposit
                   ? 'bg-[var(--color-accent-mint)] hover:bg-[var(--color-accent-mint)]'
                   : 'bg-[var(--color-accent-rose)] hover:bg-[var(--color-accent-rose)]'
@@ -245,5 +250,7 @@ export function TransactionLogger({
         </form>
       </motion.div>
     </motion.div>
+    ,
+    document.body
   );
 }
