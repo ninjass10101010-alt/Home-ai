@@ -34,7 +34,7 @@ export default function AnalyticsPage() {
   return (
     <AtmosphericProvider>
       <FogBackground />
-      <PageShell style={{ backgroundColor: 'transparent' }}>
+      <PageShell style={{ backgroundColor: 'transparent' }} measure="board">
         <EmergencyButton />
         <div className="relative z-10">
           {/* Title convergence: this was a hand-rolled `text-3xl font-bold`
@@ -79,12 +79,16 @@ export default function AnalyticsPage() {
                   <Calendar className="h-5 w-5 text-text-secondary" />
                   Date Range:
                 </label>
+                {/* A date field is ~160px of content, and `flex-1`
+                    alone stretched each one to 780px on the board — the same
+                    stretched-single-control tell as the 1960px segmented control
+                    the read-column cap was added to stop. */}
                 <input
                   id="analytics-start"
                   type="date"
                   value={dateRange?.startDate ?? ''}
                   onChange={(e) => setDateRange((prev) => ({ startDate: e.target.value, endDate: prev?.endDate ?? '' }))}
-                  className="min-w-0 flex-1 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-text-primary border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)]"
+                  className="min-w-0 flex-1 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-text-primary border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)] xl:max-w-xs"
                 />
                 <span className="text-text-secondary">to</span>
                 <input
@@ -93,7 +97,7 @@ export default function AnalyticsPage() {
                   aria-label="End date"
                   value={dateRange?.endDate ?? ''}
                   onChange={(e) => setDateRange((prev) => ({ startDate: prev?.startDate ?? '', endDate: e.target.value }))}
-                  className="min-w-0 flex-1 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-text-primary border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)]"
+                  className="min-w-0 flex-1 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-text-primary border border-white/10 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)] xl:max-w-xs"
                 />
               </div>
             </Surface>

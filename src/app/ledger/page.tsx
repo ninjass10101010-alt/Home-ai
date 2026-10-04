@@ -44,7 +44,10 @@ export default function LedgerPage() {
   }, [mounted, isParent]);
 
   return (
-    <PageShell>
+    // Board measure: the thing on this page is an iframe of Alex's finance app,
+    // and it wants every pixel it can get. It already sizes itself to the fold
+    // (`h-[calc(100dvh-264px)]`), so the width was the only half of the problem.
+    <PageShell measure="board">
       <PageHeader
         title="The Ledger"
         subtitle="Alex's finance tracker — parents only"

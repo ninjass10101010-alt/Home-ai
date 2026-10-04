@@ -1895,7 +1895,10 @@ export default function TasksPage() {
   }
 
   return (
-    <PageShell>
+    // Board measure: the tab panel is a list of chore cards that goes two-up, and
+    // the leaderboard is a ranking table. Neither is a reading column, so neither
+    // should be held to one.
+    <PageShell measure="board">
       <ConfettiBurst active={confettiActive} />
       {/* Weekly prize ceremony — raceName is the roster-resolved FULL name
           (hall entries are keyed by full name); null for guests = no render. */}
@@ -1930,21 +1933,59 @@ export default function TasksPage() {
       {/* Phone keeps the stacked column (space-y); md+ uses Home's two-column
           grid idiom — stats span both columns, then the view switch sits left
           of the active panel (task board / leaderboard). */}
-      <div className="px-4 pb-8 space-y-6 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0">
-        <TasksStats
-          pendingCount={pending.length}
-          completedCount={scopedCompletedCount}
-          earnedThisWeek={scopedEarned}
-          allTimePoints={scopedAllTimeEarned}
-          allTimeRead={allTimeRead}
-          activeTab={activeTab}
-          onChange={setActiveTab}
-        />
+      {/* Phone keeps the stacked column (space-y); md+ uses Home's two-column
+          grid idiom — stats span both columns, then the view switch and the
+          roster rail sit left of the active panel. At 1536px+ the left column
+          stops being an even half and becomes a real 26rem rail, because a panel
+          of chore rows wants the width and the filters want the height. */}
+      <div className="px-4 pb-8 space-y-6 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0 2xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] 2xl:grid-rows-[auto_1fr]">
+        {/* ── The rail ────────────────────────────────────────────────────
+            Stats, view switch and the roster filter are ONE grid cell, not
+            three. Auto-placement is row-major, so as separate cells the view
+            switch landed in row 2 column 1 and the filter was pushed into the
+            panel's column — and as a separate row the filter fell below the
+            panel's 390px row, opening a 300px hole between the switch and the
+            filter it belongs with. One cell is the only arrangement where they
+            cannot drift apart.
+            Below 1536px this div is `md:col-span-2`, so the stat band still
+            spans the page and the switch + filter still sit side by side under
+            it — the phone and tablet composition is unchanged. */}
+        <div className="wall-board-rail space-y-4 md:col-span-2 2xl:col-span-1">
+          <TasksStats
+            pendingCount={pending.length}
+            completedCount={scopedCompletedCount}
+            earnedThisWeek={scopedEarned}
+            allTimePoints={scopedAllTimeEarned}
+            allTimeRead={allTimeRead}
+            activeTab={activeTab}
+            onChange={setActiveTab}
+          />
+
+          {/* The roster filter, reflowed from a sideways snap-scroller into a
+              two-column rail grid by `.wall-board-member-strip`. */}
+          {activeTab === "tasks" && (
+            <div className="member-strip member-strip-tiles wall-board-member-strip snap-x snap-mandatory overscroll-contain pb-2">
+              {allMembers.map((member) => (
+                <button
+                  key={member}
+                  type="button"
+                  aria-pressed={filterMember === member}
+                  onClick={() => setFilterMember(member)}
+                  className={`member-tile shrink-0 snap-start tap-sm ${filterMember === member ? "is-active" : ""}`}
+                  style={{ "--chip-color": memberChipColor(memberColors[member]) } as CSSProperties}
+                >
+                  <Avatar name={member} color={memberColors[member] || "green"} emoji={memberEmojis[member]} size="sm" variant="emoji" />
+                  <span className="member-tile-name">{["All", "My Tasks", "Open"].includes(member) ? member : member.split(" ")[0]}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {outboxCounts.pending > 0 && (
           <div
             data-testid="task-command-queue"
-            className="rounded-xl px-3 py-2"
+            className="rounded-xl px-3 py-2 2xl:col-start-2"
             style={{
               background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)",
               border: "1px solid color-mix(in srgb, var(--color-accent-amber) 25%, transparent)",
@@ -1987,23 +2028,8 @@ export default function TasksPage() {
         )}
 
         {activeTab === "tasks" && (
-          <div key="tasks" className="panel-swap space-y-6">
+          <div key="tasks" className="panel-swap space-y-6 2xl:col-start-2">
           <>
-              <div className="member-strip member-strip-tiles snap-x snap-mandatory overscroll-contain pb-2">
-                {allMembers.map((member) => (
-                  <button
-                    key={member}
-                    type="button"
-                    aria-pressed={filterMember === member}
-                    onClick={() => setFilterMember(member)}
-                    className={`member-tile shrink-0 snap-start tap-sm ${filterMember === member ? "is-active" : ""}`}
-                    style={{ "--chip-color": memberChipColor(memberColors[member]) } as CSSProperties}
-                  >
-                    <Avatar name={member} color={memberColors[member] || "green"} emoji={memberEmojis[member]} size="sm" variant="emoji" />
-                    <span className="member-tile-name">{["All", "My Tasks", "Open"].includes(member) ? member : member.split(" ")[0]}</span>
-                  </button>
-                ))}
-              </div>
 
             {(isAdding || editingId !== null) && (
               <Modal
@@ -2591,7 +2617,7 @@ export default function TasksPage() {
           dynamicLeaderboard.length === 0 ? (
             <EmptyState title="No champions yet" description="Add family members in Settings, then complete tasks to fill the board." icon="🏆" />
           ) : (
-          <div key="leaderboard" className="panel-swap space-y-6">
+          <div key="leaderboard" className="panel-swap space-y-6 2xl:col-start-2">
           <>
             <Surface variant="warm" radius="2xl" padding="lg" glow>
               {familyTotal === 0 ? (

@@ -180,7 +180,9 @@ export default function SuggestionsPage() {
   }
 
   return (
-    <PageShell>
+    // Board measure: the body is a list of peer cards, so on the wall it is laid
+    // out two-up rather than stranded as one 1280px-wide ribbon per row.
+    <PageShell measure="board">
       <PageHeader
         title="Consuela's Suggestions"
         subtitle={items.length > 0 ? `${items.length} waiting for your attention` : "Proactive alerts from Consuela"}
@@ -208,23 +210,33 @@ export default function SuggestionsPage() {
         </div>
 
         {loading && filtered.length === 0 ? (
-          <div className="space-y-2">
-            {[1, 2, 3].map((i) => (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[1, 2, 3, 4].map((i) => (
               <Skeleton key={i} className="h-16 rounded-2xl" />
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <EmptyState
-            icon="🧘"
-            title={filter === "all" ? "All clear" : "Nothing here"}
-            description={
-              filter === "all"
-                ? "No proactive suggestions right now. Consuela will surface pantry, task, calendar, and meal alerts here as she spots them."
-                : "No suggestions in this category right now."
-            }
-          />
+          /* An "All clear" card is one message, so it keeps a message's measure
+             and centres itself. At the board measure it was a 1664×220 slab with
+             a sentence in the middle of it — the emptiest object on the wall
+             reading as a rendering failure. */
+          <div className="mx-auto w-full max-w-2xl">
+            <EmptyState
+              icon="🧘"
+              title={filter === "all" ? "All clear" : "Nothing here"}
+              description={
+                filter === "all"
+                  ? "No proactive suggestions right now. Consuela will surface pantry, task, calendar, and meal alerts here as she spots them."
+                  : "No suggestions in this category right now."
+              }
+            />
+          </div>
         ) : (
-          <div className="space-y-2">
+          /* `2xl` (1536px) rather than an arbitrary min-width variant: those are
+             emitted BEFORE the named breakpoints, so one would lose to a plain
+             `sm:grid-cols-*` in this same string and do nothing at all. Named
+             breakpoints sort ascending and the last one wins. */
+          <div className="grid gap-3 2xl:grid-cols-2">
             {filtered.map((suggestion) => (
               <SuggestionCard
                 key={suggestion.id}

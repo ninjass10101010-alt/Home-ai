@@ -4,6 +4,10 @@ import type { CSSProperties, ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import CapsuleNav from "./CapsuleNav";
 import SyncStatusBanner from "./SyncStatusBanner";
+import { BOARD_MEASURE_CLASS, READ_MEASURE_CLASS } from "@/lib/layout-config";
+
+/** How wide this route's `<main>` is allowed to get. See `layout-config.ts`. */
+export type PageMeasure = "read" | "board";
 
 interface PageShellProps {
   children: ReactNode;
@@ -15,15 +19,28 @@ interface PageShellProps {
   bannerClassName?: string;
   /**
    * Extra classes for the `<main>` content column — per-page width caps or
-   * layout. Chat keeps `max-w-lg mx-auto` on every breakpoint (a thread must
-   * not stretch to full width on desktop) plus its own flex-column shell.
+   * layout. Chat keeps its own centred thread plus a flex-column shell.
+   *
+   * Passing this means "this page owns its column": the shell's own measure is
+   * skipped entirely, so a page can never end up with two competing widths.
    */
   contentClassName?: string;
   /**
-   * Reserve dock clearance (`pb-32`) under the content. Pages that already
-   * pad for the fixed dock themselves (chat's composer uses
-   * `env(safe-area-inset-bottom) + 5.5rem`) pass `false` so the extra inset
-   * doesn't create dead scroll space.
+   * Which measure to apply when the page does NOT bring its own column.
+   *
+   * `board` is the default because it is the one that cannot narrow anything:
+   * it keeps the pre-existing `lg`/`xl` steps and only opens out on the wall
+   * board, so a route that never heard of this prop renders exactly as it did.
+   * A route that renders prose passes `read` — /rewards' grown-up explainer is
+   * one card, and a 1664px measure turns one honest card into a stranded slab.
+   */
+  measure?: PageMeasure;
+  /**
+   * Reserve dock clearance (`pb-32` = 128px) under the content — the dock's own
+   * measured height is 94px on a 1920 canvas and 110px under the wall profile,
+   * so 128 clears both. Pages that already pad for the fixed dock themselves
+   * (chat's composer) pass `false` so the extra inset doesn't create dead
+   * scroll space.
    */
   bottomInset?: boolean;
   /**
@@ -50,11 +67,10 @@ interface PageShellProps {
  * the rail and its `md:pl-60` reservation are gone and the dock is the one
  * navigation surface on every device and every role.
  *
- * The content column (banner + `<main>`) keeps the pre-Phase-4 tiers
- * (`max-w-lg` → `md:max-w-3xl` → `lg:max-w-none`) and centres itself, and
- * every non-Home, non-Chat route additionally gets the `readColumn` read cap
- * below so a wall/landscape viewport is not one full-bleed column of
- * edge-to-edge cards.
+ * The content column (banner + `<main>`) centres itself and takes its width
+ * from the route's declared `measure` — `read` for prose, `board` for anything
+ * that lays itself out in columns. Home and Chat bring their own width and
+ * declare neither.
  */
 export default function PageShell({
   children,
@@ -63,29 +79,29 @@ export default function PageShell({
   bannerMessage,
   bannerClassName,
   contentClassName = "",
+  measure = "board",
   bottomInset = true,
   clip = true,
 }: PageShellProps) {
   const pathname = usePathname();
 
   /**
-   * Read column — the wall/landscape fix (audit: "a wall dashboard at 1920
-   * with a single centred column and vast empty space is a real failure
-   * mode"). The outer wrapper has been full-bleed since `lg`, so every data
-   * route stretched edge to edge on a 1920 panel: one 1960px-wide card per
-   * row, stat tiles 640px wide around 80px of content, a two-option
-   * segmented control 1960px long, and the page's action button ~1900px from
-   * its own title. The cap goes on `<main>` itself rather than on a wrapper
+   * Measure — the wall/landscape fix. The outer wrapper has been full-bleed
+   * since `lg`, so every data route stretched edge to edge on a 1920 panel:
+   * one 1960px-wide card per row, stat tiles 640px wide around 80px of
+   * content, a two-option segmented control 1960px long, and the page's action
+   * button ~1900px from its own title. A single later cap fixed the bleed but
+   * left every route at one measure, so the dense routes stayed stranded at a
+   * prose width. The classes go on `<main>` itself rather than on a wrapper
    * element, so the page's own first child stays a direct child of `main`
    * (`main > section` is a structural contract, and chat's flex-column shell
    * needs its composer to be one).
    *
-   * Two routes opt out because they are not reading columns: Home paints its
-   * own full-bleed bento / 3-column wall grid, and Chat passes its own centred
-   * `max-w-lg` thread — opting out by "the caller brought its own width" also
-   * means the cap can never collide with a caller's `max-w-*`.
+   * Two routes bring their own width and are skipped by that rule: Home paints
+   * its own full-bleed bento, and Chat passes its own centred thread.
    */
-  const readColumn = pathname !== "/" && contentClassName.trim() === "";
+  const ownColumn = contentClassName.trim() !== "";
+  const measureClass = ownColumn ? "" : measure === "board" ? BOARD_MEASURE_CLASS : READ_MEASURE_CLASS;
 
   return (
     <div
@@ -96,7 +112,7 @@ export default function PageShell({
         <SyncStatusBanner message={bannerMessage} className={bannerClassName} />
         <main
           key={pathname}
-          className={`page-settle relative z-10 ${readColumn ? "mx-auto w-full max-w-lg md:max-w-3xl lg:max-w-5xl xl:max-w-7xl" : ""} ${bottomInset ? "pb-32" : ""} ${contentClassName}`}
+          className={`page-settle relative z-10 ${measureClass} ${bottomInset ? "pb-32" : ""} ${contentClassName}`}
         >
           {children}
         </main>

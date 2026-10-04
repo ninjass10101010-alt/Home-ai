@@ -4,6 +4,7 @@ import { useState } from "react";
 import PageShell from "@/components/ui/PageShell";
 import SegmentedControl from "@/components/ui/SegmentedControl";
 import Chip from "@/components/ui/Chip";
+import Surface from "@/components/ui/Surface";
 import EmptyState from "@/components/ui/EmptyState";
 import ListRow from "@/components/ui/ListRow";
 import Skeleton from "@/components/ui/Skeleton";
@@ -55,7 +56,11 @@ export default function HomeControlsPage() {
   const automations = entitiesByDomain(states, "automation");
 
   return (
-    <PageShell>
+    // Board measure: every domain here renders a grid of peer cards (rooms,
+    // entities, lights, automations). At the read measure the page capped out at
+    // ~650px wide and left 1250px of a 1920 wall unused — the grid, not the
+    // shell, is what decides how wide a grid route should be.
+    <PageShell measure="board">
       <div className="px-4 pt-10">
         <div className="flex items-center gap-3">
           <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[var(--color-accent-selected)]/15 text-2xl">🏠</div>
@@ -78,8 +83,20 @@ export default function HomeControlsPage() {
           )}
         </div>
 
+        {/* An unreachable Home Assistant is the single most important thing this page
+            has to say, and on a wall read from across a room it was saying it in
+            a 300px chip in the corner. It gets the full measure of the page: the
+            house system being down is a status board, not a badge. */}
         {!loading && error && (
-          <Chip tone="warning" className="w-fit">Home Assistant offline — showing last known state</Chip>
+          <Surface variant="warm" radius="2xl" padding="lg" className="flex flex-wrap items-center gap-4">
+            <span aria-hidden className="text-3xl leading-none">📡</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-base font-semibold text-text-primary">Home Assistant is offline</p>
+              <p className="mt-1 text-sm text-text-secondary">
+                Showing the last known state. Lights, climate, locks and the alarm will not change until it is back.
+              </p>
+            </div>
+          </Surface>
         )}
 
         {loading && states.length === 0 ? (
@@ -90,7 +107,7 @@ export default function HomeControlsPage() {
               <Skeleton className="h-7 w-20 rounded-full" />
               <Skeleton className="h-7 w-28 rounded-full" />
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
               {[1, 2, 3, 4].map((i) => (
                 <Skeleton key={i} variant="block" />
               ))}
@@ -111,7 +128,11 @@ export default function HomeControlsPage() {
                     );
                   })}
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
+                {/* `2xl` (1536px) is the board width AND a named breakpoint, so it
+                    is emitted after `sm:` and actually wins the cascade. An
+                    arbitrary min-width variant would be emitted BEFORE it and
+                    lose — see the board notes in layout-config. */}
+                <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                   <EnergyCard />
                   <VacuumCard />
                   {rooms.map(({ room, states: roomStates }) => (

@@ -75,6 +75,108 @@ export function computeWallMode(input: {
  *  56px, so the panel scrolls slightly instead of crushing its cards. */
 export const WALL_GRID_CLASS = "wall-widget-grid grid grid-cols-3 gap-4 grid-flow-dense auto-rows-[minmax(220px,1fr)]";
 
+/* ─── The landscape wall board (1920×1080) ──────────────────────────────────
+   The profile above was written for the portrait 1080×1920 mount. A panel
+   rotated to 1920×1080 is the same physical object with a different shape, and
+   it failed two ways on that canvas:
+
+   - **Columns.** Three columns of 618px wasted the extra width and forced five
+     rows of 220px into a 1080px-tall fold, so the visible board was one and a
+     half rows and `main` scrolled 360px internally (measured: the "Today" and
+     "Home Security" cards were cut mid-row). Four columns puts the cell at
+     454px — still a comfortable portrait-ish read from across a room — and cuts
+     the row count by a third.
+   - **Rows.** With `minmax(220px,1fr)` the row floor, not the leftover height,
+     decided the grid's size: `flex: 1 1 auto` on the grid cannot shrink a
+     `220px` floor, so the container clipped instead of compressing. The board
+     drops the floor to 150px so `1fr` gets to do its job and three rows land
+     exactly in the space the dock leaves.
+
+   `min-[1600px]:` is the gate, not `data-wall`: the rotated panel does not
+   always report portrait, so the profile attribute cannot be relied on for the
+   landscape shape. Below 1600 the portrait board is untouched. */
+export const WALL_BOARD_MIN_WIDTH = 1600;
+/** Above this the canvas is tall enough for the portrait profile's 220px rows
+ *  at any width, so a wide screen is a desktop, not a wall. */
+export const WALL_BOARD_MAX_HEIGHT = 1300;
+
+/** Pure board resolution — unit-tested like `computeWallMode`. */
+export function computeWallBoard(width: number, height: number): boolean {
+  return width >= WALL_BOARD_MIN_WIDTH && height <= WALL_BOARD_MAX_HEIGHT;
+}
+
+/**
+ * What the board leaves off by default — the same four the portrait wall
+ * hides, for the same reasons (`TABLET_HIDDEN_WIDGETS`):
+ *  - schedule: overlaps Today's Events; both answer "what's happening today".
+ *  - financeLedger: parents-only, and /money-mountain covers it.
+ *  - consuelaSuggestions: ambient; /suggestions and the Ask tab act on them.
+ *  - music: three dead buttons on a glanceable board with no queue.
+ * Twelve cells — eleven 1×1 widgets plus the 2-cell photo hero — is exactly
+ * three rows of four, which is what fits above the dock. Hidden, not dropped:
+ * each stays switchable in Home settings.
+ */
+export const WALL_BOARD_HIDDEN_WIDGETS: WidgetId[] = [
+  "schedule",
+  "consuelaSuggestions",
+  "music",
+  "financeLedger",
+];
+
+/** The board's default off-switch, for one saved layout's order list. */
+export function visibleOnWallBoard(widgets: WidgetDef[]): WidgetDef[] {
+  const off = new Set(WALL_BOARD_HIDDEN_WIDGETS);
+  return widgets.filter((w) => !off.has(w.id));
+}
+
+/**
+ * Per-widget spans on the board, and the two that differ from the flat
+ * 1×1 the board's twelve-cell budget assumes.
+ *
+ * **Weather takes the portrait cell.** The poster is drawn for a cell taller
+ * than it is wide (the portrait wall gives it 333×249); at the board's flat
+ * 463×170 it spilled 169px — the hour strip and the metric row fell out of the
+ * card entirely. `row-span-2` gives it 463×354, the same 1.3:1 it was drawn
+ * for.
+ *
+ * **Photos gives the cell back.** The hero's 2-cell portrait crop was a portrait
+ * requirement of the 3-column portrait wall, not a property of a photograph; at
+ * the board it becomes one wide tile, and `object-fit: cover` keeps the crop
+ * safe whatever the aspect ratio. That swap is what keeps the board at exactly
+ * twelve cells — three rows of four, no hole.
+ */
+export const WALL_BOARD_TIERS: Partial<Record<WidgetId, string>> = {
+  weather: "row-span-2",
+  photos: "col-span-1",
+};
+
+export function wallBoardSpanClass(id: WidgetId): string {
+  return WALL_BOARD_TIERS[id] ?? "col-span-1";
+}
+
+/* ─── Measure tiers ─────────────────────────────────────────────────────────
+   The read-column cap that stopped the 1920 full-bleed failure set ONE measure
+   for every data route (1024px at `lg`, 1280px at `xl`). That is why a ribbon of
+   suggestion cards and a pair of 1280px-wide date inputs was still the picture
+   at 1920: the routes that render lists and tables were held to a prose
+   measure, and the routes that render prose were given a measure too wide to
+   read.
+
+   A measure is a property of the CONTENT, not of the shell:
+   - **board** (the default) — lists, tables, grids, threads and embedded apps.
+     It keeps the old `lg`/`xl` steps so no existing route narrows, and opens
+     out to 104rem on the wall board.
+   - **read** — prose read top to bottom. Centred, held to ~56rem, and the page
+     is simply allowed to be short rather than stretched.
+
+   The board step is a real stylesheet rule (`.wall-board-measure`), not a
+   Tailwind arbitrary variant: `min-[1600px]:` utilities do NOT out-rank a named
+   breakpoint — `xl:max-w-7xl` won over `min-[1600px]:max-w-[104rem]` in the
+   generated sheet — and an unlayered class always out-ranks `@layer utilities`,
+   so this is the one form that cannot silently lose the cascade. */
+export const READ_MEASURE_CLASS = "mx-auto w-full max-w-lg md:max-w-3xl xl:max-w-4xl";
+export const BOARD_MEASURE_CLASS = "mx-auto w-full max-w-lg md:max-w-3xl lg:max-w-5xl xl:max-w-7xl wall-board-measure";
+
 export interface WidgetDef {
   id: WidgetId;
   label: string;

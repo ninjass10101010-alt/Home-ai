@@ -490,7 +490,15 @@ function ChatContent() {
     <PageShell
       clip={false}
       style={{ backgroundColor: "var(--color-surface-0)" }}
-      contentClassName="max-w-lg mx-auto flex flex-col min-h-screen"
+      /* A thread is a reading column, but `max-w-lg` (512px) is a PHONE's thread
+         measure. At 1920 that left a 500px ribbon with 704px of dead canvas on
+         each side — the wall's version of a stranded card. `xl` widens it to
+         768px (a 640px laptop still gets the phone measure) and the board step
+         to 896px, which is where the bubbles stop growing and the SURROUNDINGS
+         start doing the work instead: the hero lays its brief and its open-loop
+         chips out side by side below, so the wider measure is used rather than
+         just being a longer line of text. */
+      contentClassName="mx-auto flex min-h-screen max-w-lg flex-col xl:max-w-3xl wall-board-chat"
       bottomInset={false}
       bannerMessage="🔐 Signed out — this conversation stays on this device. Sign in with your PIN to join the family thread."
       bannerClassName="mx-3 sm:mx-4 mt-3"
@@ -616,10 +624,15 @@ function ChatContent() {
             )}
           </div>
         )}
-        {/* Hero: the family's day + a companion orb — the brief IS the opening */}
+        {/* Hero: the family's day + a companion orb — the brief IS the opening.
+            On the board it is TWO columns rather than one centred ribbon: the
+            greeting names the whole first row, then the brief and the open-loop
+            chips sit side by side. `2xl` (1536px) rather than an arbitrary
+            min-width variant, because named breakpoints are emitted last and
+            win the cascade. */}
         {showHero && (
-          <div className="flex flex-col items-center pt-6 pb-6 gap-5">
-            <div className="flex items-center gap-4 w-full px-1 chat-hero-enter">
+          <div className="flex flex-col items-center gap-5 pb-6 pt-6 2xl:grid 2xl:grid-cols-[22rem_minmax(0,1fr)] 2xl:items-stretch 2xl:gap-x-8">
+            <div className="chat-hero-enter flex w-full items-center gap-4 px-1 2xl:col-span-2">
               <div
                 className="w-[72px] h-[72px] rounded-full shrink-0 chat-hero-orb"
                 style={{
@@ -748,7 +761,13 @@ function ChatContent() {
       <div
         className="sticky bottom-0 z-50"
         style={{
-          paddingBottom: "calc(env(safe-area-inset-bottom) + 5.5rem)",
+          /* Dock clearance. `5.5rem` is 88px, and the dock's own measured height
+             is 94px on a 1920 canvas (110px under the wall profile) — so the
+             composer's tip line sat 6px BEHIND the dock, and the harness read
+             it as the composer painting under the nav. 7rem = 112px clears the
+             taller of the two with room to spare, which is the same figure
+             `wall-home-fit` uses for Home's bottom padding. */
+          paddingBottom: "calc(env(safe-area-inset-bottom) + 7rem)",
         }}
       >
         <UnifiedInput
