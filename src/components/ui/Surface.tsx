@@ -29,6 +29,14 @@ interface SurfaceProps extends Omit<HTMLAttributes<HTMLDivElement>, "children"> 
   "aria-label"?: string;
 }
 
+/**
+ * A native `<input type="date">` needs ~150px for `MM/DD/YYYY` plus Chrome's
+ * picker indicator. In a `flex-wrap` row that lets it shrink (`min-w-0
+ * flex-1`) it silently clipped its own year and rendered "09/0" — a shipped
+ * date range the family could not read. The primitive that owns the row floors
+ * the control at its intrinsic measure so it wraps instead of truncating.
+ */
+
 const paddingMap: Record<SurfacePadding, string> = {
   none: "",
   sm: "p-3",
@@ -82,7 +90,7 @@ export default function Surface({
       aria-label={ariaLabel}
       className={`overflow-hidden ${paddingMap[padding]} ${radiusMap[radius]} ${variantMap[variant]} ${
         interactive ? "cursor-pointer tap" : ""
-      } ${className}`}
+      } [&_input[type="date"]]:min-w-[9.5rem] ${className}`}
       style={combinedStyle}
       {...rest}
     >

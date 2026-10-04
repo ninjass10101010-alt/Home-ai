@@ -38,7 +38,7 @@ export default function PageHeader({ title, subtitle, action, icon, className = 
       <Link
         href={backHref}
         aria-label={backLabel}
-        className="mb-4 inline-flex min-h-16 min-w-16 items-center gap-2 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/35 px-4 text-sm font-semibold text-text-secondary backdrop-blur-xl tap hover:text-text-primary"
+        className="mb-4 inline-flex min-h-16 min-w-16 items-center gap-2 rounded-2xl border border-border bg-[var(--color-surface-0)]/35 px-4 text-sm font-semibold text-text-secondary backdrop-blur-xl tap hover:text-text-primary"
       >
         <span aria-hidden="true">←</span>
         <span>{backLabel}</span>

@@ -19,7 +19,7 @@ interface ChipProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const toneMap: Record<ChipTone, string> = {
-  neutral: "text-text-secondary border-white/10",
+  neutral: "text-text-secondary border-border",
   accent: "widget-accent-text border-[var(--color-accent-selected)]/25",
   success: "chip-tone-success text-[var(--color-accent-mint)] border-[var(--color-accent-mint)]/25",
   danger: "chip-tone-danger text-[var(--color-accent-rose)] border-[var(--color-accent-rose)]/25",

@@ -30,7 +30,7 @@ export default function SettingsSectionView({ section, children }: SettingsSecti
         <div data-settings-surface="true" data-settings-content="true" data-settings-hydrated="false" aria-busy="true">
           <PageHeader title="Settings" backHref="/settings" backLabel="Back to Settings" icon="⚙️" />
           <section className="px-4 pb-8" aria-labelledby="settings-hydration-heading">
-            <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
+            <div className="rounded-2xl border border-border bg-[var(--color-surface-0)]/35 p-6">
               <h2 id="settings-hydration-heading" className="text-lg font-bold text-text-primary">
                 Checking your settings
               </h2>
@@ -48,7 +48,7 @@ export default function SettingsSectionView({ section, children }: SettingsSecti
         <div data-settings-surface="true" data-settings-content="true" data-settings-hydrated="true" data-settings-role={role}>
           <PageHeader title="Settings" backHref="/settings" backLabel="Back to Settings" icon="⚙️" />
           <section className="px-4 pb-8" aria-labelledby="settings-unavailable-heading">
-            <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
+            <div className="rounded-2xl border border-border bg-[var(--color-surface-0)]/35 p-6">
               <h2 id="settings-unavailable-heading" className="text-lg font-bold text-text-primary">
                 This section is not available
               </h2>
@@ -62,7 +62,12 @@ export default function SettingsSectionView({ section, children }: SettingsSecti
 
   return (
     <PageShell>
-      <div data-settings-surface="true" data-settings-content="true" data-settings-hydrated="true" data-settings-role={role} data-section={definition.id}>
+      {/* A settings section is a form, and a form has a measure. Inside the
+          shell's 1280px read column every card ran the full width, so a toggle
+          sat ~1200px from its own label and a range slider offered 1250px of
+          travel for a 0-1 value. 768px keeps the label/control pairing legible
+          and the header aligned with the first card. */}
+      <div className="mx-auto w-full max-w-3xl" data-settings-surface="true" data-settings-content="true" data-settings-hydrated="true" data-settings-role={role} data-section={definition.id}>
         <PageHeader
           title={definition.title}
           subtitle={definition.description}
@@ -72,7 +77,7 @@ export default function SettingsSectionView({ section, children }: SettingsSecti
         />
         <div className="space-y-6 px-4 pb-8">
           {children}
-          <nav aria-label="Settings sections" className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/25 p-4">
+          <nav aria-label="Settings sections" className="rounded-2xl border border-border bg-[var(--color-surface-0)]/25 p-4">
             <h2 className="px-2 text-sm font-bold text-text-primary">All available sections</h2>
             <ul className="mt-2 grid gap-2 sm:grid-cols-2">
               {availableSections.map((item) => (
@@ -84,11 +89,15 @@ export default function SettingsSectionView({ section, children }: SettingsSecti
                     className={`tap flex min-h-[44px] items-center justify-between rounded-2xl border px-4 text-sm font-semibold ${
                       item.id === definition.id
                         ? "border-[var(--color-accent-selected)]/30 bg-[var(--color-accent-selected)]/10 text-text-primary"
-                        : "border-white/10 text-text-secondary hover:text-text-primary"
+                        : "border-border text-text-secondary hover:text-text-primary"
                     }`}
                   >
                     <span>{item.title}</span>
-                    <span aria-hidden="true">{item.id === definition.id ? "•" : "›"}</span>
+                    {/* A check, not a bullet: the current row already reads as
+                        current from its tint + aria-current, and a middot is a
+                        glyph with no meaning beside a chevron that means
+                        "go there". */}
+                    <span aria-hidden="true">{item.id === definition.id ? "✓" : "›"}</span>
                   </Link>
                 </li>
               ))}

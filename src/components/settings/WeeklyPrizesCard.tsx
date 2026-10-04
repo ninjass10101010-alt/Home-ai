@@ -180,7 +180,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
           return (
             <div
               key={p.id}
-              className="flex items-center gap-2 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-3"
+              className="flex items-center gap-2 rounded-2xl border border-border bg-[var(--color-surface-0)]/30 p-3"
             >
               <span className="shrink-0 text-xl" aria-hidden>{MEDALS[i]}</span>
               <input
@@ -188,7 +188,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
                 value={p.emoji}
                 disabled={saving}
                 onChange={(e) => updateRow(p.id, { emoji: e.target.value })}
-                className="w-11 shrink-0 rounded-xl border border-white/10 bg-[var(--color-surface-2)] px-2 py-2 text-center text-lg text-text-primary outline-none"
+                className="w-11 shrink-0 rounded-xl border border-border bg-[var(--color-surface-2)] px-2 py-2 text-center text-lg text-text-primary outline-none"
               />
               <input
                 aria-label={`Prize ${rank} text`}
@@ -196,12 +196,13 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
                 disabled={saving}
                 placeholder={`What does #${rank} win?`}
                 onChange={(e) => updateRow(p.id, { text: e.target.value })}
-                className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[var(--color-surface-2)] px-3 py-2 text-sm text-text-primary outline-none"
+                className="min-w-0 flex-1 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-2 text-sm text-text-primary outline-none"
               />
               <IconButton
                 size="sm"
-                variant="danger"
+                variant="ghost"
                 aria-label={`Remove prize ${rank}`}
+                className="hover:!text-[var(--color-accent-rose)] hover:!bg-[var(--color-accent-rose)]/10"
                 disabled={saving}
                 onClick={() => removeRow(p.id)}
               >

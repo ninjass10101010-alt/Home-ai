@@ -17,7 +17,7 @@ export default function TextField({ label, helperText, errorText, className = ""
       {label && <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">{label}</span>}
       <input
         id={id}
-        className={`w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none transition-all duration-150 placeholder:text-text-secondary focus:border-[var(--color-accent-selected)]/50 focus:shadow-[0_0_0_4px_rgba(59,130,246,0.12)] ${errorText ? "border-[var(--color-accent-rose)]/50" : ""} ${className}`}
+        className={`w-full rounded-2xl border border-border bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none transition-all duration-150 placeholder:text-text-secondary focus:border-[var(--color-accent-selected)]/50 focus:shadow-[0_0_0_4px_rgba(59,130,246,0.12)] ${errorText ? "border-[var(--color-accent-rose)]/50" : ""} ${className}`}
         {...props}
       />
       {(helperText || errorText) && (

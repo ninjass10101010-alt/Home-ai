@@ -357,7 +357,7 @@ export default function FamilySettingsSection() {
             <ListRow
               key={member.pbId || `fallback:${member.name}`}
               title={member.name}
-              subtitle={`${member.role} · ${member.joined}`}
+              subtitle={member.joined ? `${member.role} · ${member.joined}` : member.role}
               leftRailColor="var(--color-accent-apricot)"
               leading={(
                 <Avatar
@@ -379,12 +379,17 @@ export default function FamilySettingsSection() {
                   >
                     ✎
                   </IconButton>
+                  {/* Ghost, not `danger`. A filled rose disc on every row made
+                      "remove" the highest-contrast object on the page — eight
+                      of them, stacked — for an action that needs a deliberate
+                      tap and a confirm dialog behind it. It now reads as a
+                      control and turns rose on hover/focus. */}
                   <IconButton
                     size="sm"
-                    variant="danger"
+                    variant="ghost"
                     aria-label={`Remove ${member.name}`}
                     disabled={savingMember || !member.pbId}
-                    className="relative before:absolute before:-inset-1 before:content-['']"
+                    className="relative before:absolute before:-inset-1 before:content-[''] hover:!text-[var(--color-accent-rose)] hover:!bg-[var(--color-accent-rose)]/10"
                     onClick={() => { if (member.pbId) setMemberPendingDelete(member); }}
                   >
                     ×

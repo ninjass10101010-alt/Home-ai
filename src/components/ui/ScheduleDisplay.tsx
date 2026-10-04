@@ -61,7 +61,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
   if (schedule.length === 0) {
     return (
       <WidgetCard tone="#22d3ee" icon={<HomeWidgetIcon variant="schedule" size="lg" />} className={className}>
-        <div className="relative shrink-0 border-b border-white/10 p-4 pb-3 text-center">
+        <div className="relative shrink-0 border-b border-border p-4 pb-3 text-center">
           <h3 className="mt-1 text-sm font-bold text-text-primary">{title}</h3>
           <span className="mt-0.5 text-xs font-medium text-text-muted">0 upcoming</span>
         </div>
@@ -113,7 +113,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
 
   return (
     <WidgetCard tone="#22d3ee" icon={<HomeWidgetIcon variant="schedule" size="lg" />} className={className}>
-      <div className="flex flex-col items-center border-b border-white/10 p-4 text-center">
+      <div className="flex flex-col items-center border-b border-border p-4 text-center">
         <h2 className="mt-1 text-sm font-bold text-text-primary">{title}</h2>
         <span className="mt-0.5 text-xs font-medium text-text-muted">{upcomingCount} upcoming</span>
       </div>
@@ -173,7 +173,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
           </div>
         )}
         {sortedSchedule.length > 3 && (
-          <div className="mt-3 border-t border-white/10 pt-3">
+          <div className="mt-3 border-t border-border pt-3">
             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">
               +{sortedSchedule.length - 3} more · See all →
             </Link>

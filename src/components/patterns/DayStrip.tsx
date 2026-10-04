@@ -24,7 +24,7 @@ export default function DayStrip({ days, onChange, value, className = "", compac
             } ${
               isActive
                 ? "border-[var(--color-accent-button)] bg-[var(--color-accent-button)] text-white shadow-lg shadow-[var(--color-accent-button)]/20"
-                : "border-white/10 bg-[var(--color-surface-0)]/30 text-text-primary hover:bg-[var(--color-surface-0)]/45"
+                : "border-border bg-[var(--color-surface-0)]/30 text-text-primary hover:bg-[var(--color-surface-0)]/45"
             }`}
           >
             <span className="block text-xs font-semibold uppercase tracking-[0.12em]">{day.label}</span>

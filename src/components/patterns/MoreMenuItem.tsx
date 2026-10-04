@@ -17,7 +17,7 @@ interface MoreMenuItemProps {
 
 export default function MoreMenuItem({ icon, title, description, href, onSelect, badge }: MoreMenuItemProps) {
   const className =
-    "group flex items-center gap-4 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-4 backdrop-blur-xl transition hover:bg-[var(--color-surface-0)]/45";
+    "group flex items-center gap-4 rounded-2xl border border-border bg-[var(--color-surface-0)]/30 p-4 backdrop-blur-xl transition hover:bg-[var(--color-surface-0)]/45";
   const body = (
     <>
       <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)]">

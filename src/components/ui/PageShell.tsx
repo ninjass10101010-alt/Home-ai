@@ -51,7 +51,10 @@ interface PageShellProps {
  * navigation surface on every device and every role.
  *
  * The content column (banner + `<main>`) keeps the pre-Phase-4 tiers
- * (`max-w-lg` → `md:max-w-3xl` → `lg:max-w-none`) and centres itself.
+ * (`max-w-lg` → `md:max-w-3xl` → `lg:max-w-none`) and centres itself, and
+ * every non-Home, non-Chat route additionally gets the `readColumn` read cap
+ * below so a wall/landscape viewport is not one full-bleed column of
+ * edge-to-edge cards.
  */
 export default function PageShell({
   children,
@@ -65,6 +68,25 @@ export default function PageShell({
 }: PageShellProps) {
   const pathname = usePathname();
 
+  /**
+   * Read column — the wall/landscape fix (audit: "a wall dashboard at 1920
+   * with a single centred column and vast empty space is a real failure
+   * mode"). The outer wrapper has been full-bleed since `lg`, so every data
+   * route stretched edge to edge on a 1920 panel: one 1960px-wide card per
+   * row, stat tiles 640px wide around 80px of content, a two-option
+   * segmented control 1960px long, and the page's action button ~1900px from
+   * its own title. The cap goes on `<main>` itself rather than on a wrapper
+   * element, so the page's own first child stays a direct child of `main`
+   * (`main > section` is a structural contract, and chat's flex-column shell
+   * needs its composer to be one).
+   *
+   * Two routes opt out because they are not reading columns: Home paints its
+   * own full-bleed bento / 3-column wall grid, and Chat passes its own centred
+   * `max-w-lg` thread — opting out by "the caller brought its own width" also
+   * means the cap can never collide with a caller's `max-w-*`.
+   */
+  const readColumn = pathname !== "/" && contentClassName.trim() === "";
+
   return (
     <div
       className={`min-h-screen bg-[var(--color-canvas)] relative ${clip ? "overflow-hidden" : ""} ${className}`}
@@ -74,7 +96,7 @@ export default function PageShell({
         <SyncStatusBanner message={bannerMessage} className={bannerClassName} />
         <main
           key={pathname}
-          className={`page-settle relative z-10 ${bottomInset ? "pb-32" : ""} ${contentClassName}`}
+          className={`page-settle relative z-10 ${readColumn ? "mx-auto w-full max-w-lg md:max-w-3xl lg:max-w-5xl xl:max-w-7xl" : ""} ${bottomInset ? "pb-32" : ""} ${contentClassName}`}
         >
           {children}
         </main>

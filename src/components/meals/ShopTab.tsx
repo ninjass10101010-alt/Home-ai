@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import Chip from "@/components/ui/Chip";
+import EmptyState from "@/components/ui/EmptyState";
 import TextField from "@/components/ui/TextField";
 import ListRow from "@/components/ui/ListRow";
 import SectionCard from "@/components/patterns/SectionCard";
@@ -409,8 +410,12 @@ export default function ShopTab({
             </div>
           )}
 
-          {/* ── Category filter ── */}
-          <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
+          {/* ── Category filter ──
+              Wraps rather than scrolls. As a scroller it ran off the right
+              edge of a 390px phone with "Meat & Se…" cut mid-word and no
+              affordance that it moved at all; wrapping keeps every filter
+              visible and tappable, which is what a shopping list needs. */}
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setActiveCategory("all")}
               className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold tap-sm ${
@@ -437,11 +442,11 @@ export default function ShopTab({
 
           {/* ── Shopping list ── */}
           {totalItems === 0 && (
-            <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center">
-              <p className="text-3xl">🛒</p>
-              <p className="mt-2 text-sm font-bold text-text-primary">Nothing on your list</p>
-              <p className="mt-1 text-xs text-text-muted">Add items above, or sync from your meals and pantry.</p>
-            </div>
+            <EmptyState
+              icon="🛒"
+              title="Nothing on your list"
+              description="Add items above, or sync from your meals and pantry."
+            />
           )}
 
           {groceryCategories.map(cat => {

@@ -29,7 +29,7 @@ export default function Toggle({ checked, onCheckedChange, label, description, d
       />
       <span
         className={`relative h-7 w-12 shrink-0 rounded-full border transition-all duration-200 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-accent-selected)] peer-focus-visible:ring-offset-2 ${
-          checked ? "bg-[var(--color-accent-selected)] border-[var(--color-accent-selected)]" : "bg-[var(--color-surface-3)] border-white/10"
+          checked ? "bg-[var(--color-accent-selected)] border-[var(--color-accent-selected)]" : "bg-[var(--color-surface-3)] border-border"
         } ${disabled ? "opacity-50" : ""}`}
       >
         <span
