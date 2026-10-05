@@ -441,7 +441,7 @@ describe("POST /api/cron/consuela/google-sync auth errors", () => {
 
   it("returns no_grant as 409", async () => {
     mocks.isGoogleConnected.mockRejectedValueOnce(
-      new GoogleAuthError("no_grant", "Google account is not connected"),
+      new ConnectionGoogleAuthError("no_grant", "Google account is not connected"),
     );
 
     const response = await postCronSync(request("/api/cron/consuela/google-sync"));
@@ -456,7 +456,7 @@ describe("POST /api/cron/consuela/google-sync auth errors", () => {
 
   it("returns unavailable as 503", async () => {
     mocks.syncCalendar.mockRejectedValueOnce(
-      new GoogleAuthError("unavailable", "PB unavailable"),
+      new ConnectionGoogleAuthError("unavailable", "PB unavailable"),
     );
 
     const response = await postCronSync(request("/api/cron/consuela/google-sync"));

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncCalendar } from "@/lib/google/calendar";
 import { checkQuota } from "@/lib/google/quota-guard";
-import { isGoogleConnected, mapGoogleAuthError } from "@/lib/google/oauth-client";
+import { isGoogleConnected, mapGoogleAuthError } from "@/lib/google/connection-state";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
 import { isCronAuthorized } from "@/lib/cron-auth";
 

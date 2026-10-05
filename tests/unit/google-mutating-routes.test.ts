@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => {
     fetchAccountEmail: vi.fn(),
     saveTokens: vi.fn(),
     isGoogleConnected: vi.fn(),
+    readConnectionSnapshot: vi.fn(),
     GoogleAuthError,
     mapGoogleAuthError,
     syncCalendar: vi.fn(),
@@ -59,6 +60,12 @@ vi.mock("@/lib/google/oauth-client", () => ({
     GoogleAuthError: mocks.GoogleAuthError,
     mapGoogleAuthError: mocks.mapGoogleAuthError,
   }));
+vi.mock("@/lib/google/connection-state", () => ({
+  isGoogleConnected: mocks.isGoogleConnected,
+  GoogleAuthError: mocks.GoogleAuthError,
+  mapGoogleAuthError: mocks.mapGoogleAuthError,
+  readConnectionSnapshot: mocks.readConnectionSnapshot,
+}));
 vi.mock("@/lib/google/calendar", () => ({ syncCalendar: mocks.syncCalendar, listCalendars: mocks.listCalendars }));
 vi.mock("@/lib/google/tasks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/google/tasks")>()),
@@ -89,6 +96,13 @@ beforeEach(() => {
   mocks.fetchAccountEmail.mockResolvedValue("family@example.com");
   mocks.saveTokens.mockResolvedValue(undefined);
   mocks.isGoogleConnected.mockResolvedValue(true);
+  mocks.readConnectionSnapshot.mockResolvedValue({
+    connectedAccountId: "composio-account-1",
+    status: "ACTIVE",
+    accountEmail: "family@example.com",
+    connectedAt: null,
+    lastVerifiedAt: null,
+  });
   mocks.syncCalendar.mockResolvedValue({ events: 2, deleted: 0, perCalendar: [] });
   mocks.listCalendars.mockResolvedValue([]);
   mocks.ensureGoogleCollections.mockResolvedValue(undefined);
@@ -179,11 +193,9 @@ describe("Google mutating route authorization", () => {
 
   it.each([
     ["skipped calendar", { syncCalendar: { skipped: true, reason: "already_in_progress" }, status: 409, error: "calendar_sync_skipped", skipped: true }],
-    ["missing Tasks scope", { scope: "calendar", status: 409, error: "tasks_scope_missing", skipped: true }],
-    ["Tasks sync error", { scope: "googleapis.com/auth/tasks", tasksError: true, status: 502, error: "tasks_sync_failed", partial: true }],
+    ["Tasks sync error", { tasksError: true, status: 502, error: "tasks_sync_failed", partial: true }],
   ])("returns a top-level failure for %s", async (_label, options: {
     syncCalendar?: { skipped: boolean; reason: string };
-    scope?: string;
     tasksError?: boolean;
     status: number;
     error: string;
@@ -191,7 +203,6 @@ describe("Google mutating route authorization", () => {
     partial?: boolean;
   }) => {
     if (options.syncCalendar) mocks.syncCalendar.mockResolvedValueOnce(options.syncCalendar);
-    mocks.getStoredTokensStrict.mockResolvedValueOnce({ scope: options.scope || "calendar" });
     if (options.tasksError) mocks.syncTasks.mockRejectedValueOnce(new Error("tasks failed"));
 
     const result = await sync(request("/api/google/sync", { resource: "all" }));
@@ -199,6 +210,20 @@ describe("Google mutating route authorization", () => {
 
     expect(result.status).toBe(options.status);
     expect(body).toMatchObject({ ok: false, error: options.error, ...(options.skipped ? { skipped: true } : {}), ...(options.partial ? { partial: true } : {}) });
+  });
+
+  it("reports a disconnected Tasks account as a skip, not a failure", async () => {
+    mocks.syncTasks.mockResolvedValueOnce({ skipped: true, reason: "tasks_not_connected" });
+
+    const result = await sync(request("/api/google/sync", { resource: "all" }));
+    const body = await result.json();
+
+    expect(result.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      tasks: { skipped: true, reason: "tasks_not_connected" },
+    });
+    expect(body.error).toBeUndefined();
   });
 
   it("allows a parent session to sync the requested resource", async () => {
@@ -231,9 +256,9 @@ describe("Google mutating route authorization", () => {
     expect(body).toMatchObject({ ok: false, code: "no_grant" });
   });
 
-  it("returns unavailable when a post-connect token read fails", async () => {
+  it("returns unavailable when a post-connect connection-state read fails", async () => {
     mocks.isGoogleConnected.mockResolvedValueOnce(true);
-    mocks.getStoredTokensStrict.mockRejectedValueOnce(new Error("PB unavailable"));
+    mocks.readConnectionSnapshot.mockRejectedValueOnce(new Error("PB unavailable"));
 
     const result = await sync(request("/api/google/sync", { resource: "calendar" }));
     const body = await result.json();
