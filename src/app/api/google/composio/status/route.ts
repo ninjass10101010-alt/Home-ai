@@ -12,6 +12,7 @@ import {
   writeConnectionSnapshot,
 } from "@/lib/google/connection-state";
 import { syncCalendar } from "@/lib/google/calendar";
+import { pruneCachedEvents } from "@/lib/google/token-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -123,6 +124,21 @@ export async function GET(req: NextRequest) {
   }
 
   const accountStatus = account?.status || "NOT_FOUND";
+  // A calendar account that was ACTIVE and is no longer (FAILED/REVOKED/
+  // NOT_FOUND) invalidates every cached event row — without this, the next
+  // reconnect serves the previous account's ghost events. Tasks has no
+  // calendar-event cache, so only the calendar snapshot prunes.
+  if (
+    toolkit === COMPOSIO_TOOLKITS.CALENDAR &&
+    snapshot.status === "ACTIVE" &&
+    accountStatus !== "ACTIVE"
+  ) {
+    try {
+      await pruneCachedEvents();
+    } catch (error) {
+      console.warn("[google/composio/status] cache prune failed:", errorMessage(error));
+    }
+  }
   if (snapshot.status !== accountStatus) {
     try {
       await writeConnectionSnapshot({ status: accountStatus, lastVerifiedAt: now }, key);

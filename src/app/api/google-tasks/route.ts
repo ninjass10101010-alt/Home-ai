@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { ComposioError } from "@/lib/google/composio";
 import {
   isGoogleConnected,
   GoogleAuthError,
@@ -36,6 +37,23 @@ function disconnectedResponse() {
     tasks: [],
     reminders: [],
   });
+}
+
+const TASKS_NOT_CONNECTED_NOTICE =
+  "Google Tasks is not connected. Connect Google Tasks in Settings → Connections to enable task and reminder sync.";
+
+function tasksNotConnectedResponse(status = 200) {
+  return NextResponse.json(
+    {
+      ok: true,
+      connected: true,
+      tasks: [],
+      reminders: [],
+      tasks_scope_granted: false,
+      notice: TASKS_NOT_CONNECTED_NOTICE,
+    },
+    { status },
+  );
 }
 
 async function readTasksConnectionState(): Promise<boolean> {
@@ -90,15 +108,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (!tasksConnected) {
-    return NextResponse.json({
-      ok: true,
-      connected: true,
-      tasks: [],
-      reminders: [],
-      tasks_scope_granted: false,
-      notice:
-        "Google Tasks is not connected. Connect Google Tasks in Settings → Connections to enable task and reminder sync.",
-    });
+    return tasksNotConnectedResponse();
   }
 
   if (sync === "now") {
@@ -236,6 +246,12 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   } catch (error) {
+    // An action for the optional Tasks connection whose account is missing or
+    // not ACTIVE is an honest 409 with the same shape the GET returns — never
+    // a generic 500.
+    if (error instanceof ComposioError && error.code === "not_connected") {
+      return tasksNotConnectedResponse(409);
+    }
     return authErrorResponse(error);
   }
 }

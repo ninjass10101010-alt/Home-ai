@@ -71,6 +71,7 @@ vi.mock("@/lib/admin-auth", () => ({
 vi.mock("@/lib/server-auth", () => ({ authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest }));
 
 import { GoogleAuthError } from "@/lib/google/connection-state";
+import { ComposioError } from "@/lib/google/composio";
 import { GET as getCalendar } from "@/app/api/google-calendar/route";
 import { GET as getCalendars } from "@/app/api/google/calendars/route";
 import { GET as getTasks, POST as postTasks } from "@/app/api/google-tasks/route";
@@ -214,11 +215,47 @@ describe("GET /api/google-calendar auth errors", () => {
       connected: true,
       source: "google",
       provider: "composio",
+      stale: true,
       account_email: "family@example.com",
       last_sync_at: "2026-09-25T10:00:00.000Z",
       calendar_colors: { primary: "#111111" },
     });
     expect(body.source).not.toBe("composio");
+  });
+
+  it("marks connected-but-fresh rows as not stale", async () => {
+    const fresh = new Date().toISOString();
+    mocks.readCalendarSyncRows.mockResolvedValueOnce([
+      {
+        id: "r1",
+        calendar_id: "primary",
+        summary: "Primary",
+        color_rgb: null,
+        selected: true,
+        sync_token: null,
+        last_sync_at: fresh,
+        last_status: "ok",
+        last_error: null,
+      },
+    ]);
+
+    const response = await getCalendar(request("/api/google-calendar"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.stale).toBe(false);
+    expect(body.last_sync_at).toBe(fresh);
+  });
+
+  it("marks connected rows with no sync timestamp as stale", async () => {
+    mocks.readCalendarSyncRows.mockResolvedValueOnce([]);
+
+    const response = await getCalendar(request("/api/google-calendar"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.stale).toBe(true);
+    expect(body.last_sync_at).toBeNull();
   });
 
   it.each([
@@ -406,6 +443,27 @@ describe("POST /api/google-tasks auth errors", () => {
       error: "Reconnect required",
     });
   });
+
+  it("returns the honest tasks-not-connected shape as 409 for a Tasks action", async () => {
+    mocks.createTask.mockRejectedValueOnce(
+      new ComposioError("not_connected", "Google Tasks account is not connected"),
+    );
+
+    const response = await postTasks(
+      request("/api/google-tasks", { action: "create", title: "Test" }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({
+      ok: true,
+      connected: true,
+      tasks: [],
+      reminders: [],
+      tasks_scope_granted: false,
+      notice: expect.any(String),
+    });
+  });
 });
 
 describe("POST /api/cron/consuela/google-sync auth errors", () => {
@@ -464,5 +522,29 @@ describe("POST /api/cron/consuela/google-sync auth errors", () => {
       code: "unknown",
       error: "Sync exploded",
     });
+  });
+
+  it("keeps the calendar result when the best-effort tasks sync throws", async () => {
+    mocks.syncTasks.mockRejectedValueOnce(new Error("tasks exploded"));
+
+    const response = await postCronSync(request("/api/cron/consuela/google-sync"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.result).toMatchObject({
+      events: 1,
+      tasks: { skipped: true, reason: "tasks exploded" },
+    });
+  });
+
+  it("reports the tasks outcome alongside the calendar result", async () => {
+    mocks.syncTasks.mockResolvedValueOnce({ tasks: 3, tasklists: 1, deleted: 0 });
+
+    const response = await postCronSync(request("/api/cron/consuela/google-sync"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.result.tasks).toEqual({ tasks: 3, tasklists: 1, deleted: 0 });
   });
 });

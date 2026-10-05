@@ -184,10 +184,14 @@ describe("google connection snapshot store", () => {
 });
 
 describe("mapGoogleAuthError", () => {
-  it("maps unavailable to 503, no_grant to 409, and other auth codes to 401", () => {
+  it("maps unavailable and not_configured to 503, no_grant to 409, and other auth codes to 401", () => {
     expect(mapGoogleAuthError(new GoogleAuthError("unavailable", "state down"))).toEqual({
       status: 503,
       body: { ok: false, code: "unavailable", error: "state down" },
+    });
+    expect(mapGoogleAuthError(new GoogleAuthError("not_configured", "no broker key"))).toEqual({
+      status: 503,
+      body: { ok: false, code: "not_configured", error: "no broker key" },
     });
     expect(mapGoogleAuthError(new GoogleAuthError("no_grant", "not connected"))).toEqual({
       status: 409,

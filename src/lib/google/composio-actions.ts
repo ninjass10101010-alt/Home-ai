@@ -45,7 +45,7 @@ export const COMPOSIO_ACTIONS = {
 // Arg-name notes (confirm live in Task 1):
 // - GOOGLECALENDAR_EVENTS_LIST REQUIRES time_min/time_max (no default window).
 //   Calendar id arg is `calendar_id` (primary is the literal "primary").
-// - GOOGLETASKS_LIST_TASKS response key is `tasks`; pass show_completed when
+// - GOOGLETASKS_LIST_TASKS response key is `tasks`; pass showCompleted when
 //   filtering by completed date.
 // - Composio execute response shape is `{ data, successful, error }`.
 export const COMPOSIO_CONNECT_FLOW_NOTES = {

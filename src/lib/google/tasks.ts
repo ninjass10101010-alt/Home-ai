@@ -119,7 +119,7 @@ function firstTask(payload: unknown): GoogleTask {
 
 async function readTasksAccountId(): Promise<string> {
   const snapshot = await readConnectionSnapshot(TASKS_SNAPSHOT_KEY);
-  if (!snapshot.connectedAccountId) {
+  if (!snapshot.connectedAccountId || snapshot.status !== "ACTIVE") {
     throw new ComposioError("not_connected", "Google Tasks account is not connected");
   }
   return snapshot.connectedAccountId;
@@ -273,7 +273,9 @@ async function saveSyncState(token: string | null, error?: string): Promise<void
 export async function syncTasks(): Promise<TaskSyncOutcome> {
   const snapshot = await readConnectionSnapshot(TASKS_SNAPSHOT_KEY);
   const accountId = snapshot.connectedAccountId;
-  if (!accountId) return { skipped: true, reason: "tasks_not_connected" };
+  if (!accountId || snapshot.status !== "ACTIVE") {
+    return { skipped: true, reason: "tasks_not_connected" };
+  }
 
   const consuelaListId = await getOrCreateConsuelaListId(accountId);
   const allLists = await getTasklists(accountId);

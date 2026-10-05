@@ -7,6 +7,21 @@ import { withAdmin } from "../pb-auth.ts";
 // selection/events so a reconnect starts from a clean slate.
 const CACHE_LOCK = "google-calendar-cache";
 
+// Purge ONLY the cached event rows. The calendar selection + per-calendar sync
+// state (consuela_google_calendar_sync) and the legacy sync-state rows are kept:
+// a failed/disconnected account must not serve ghost events, but reconnecting
+// should still know which calendars the family selected.
+export async function pruneCachedEvents(): Promise<number> {
+  return withKeyedLock(CACHE_LOCK, () => withAdmin(async (pb) => {
+    const eventRows = (await pb.collection("consuela_google_calendar_events").getFullList({ requestKey: null })) as any[];
+    const count = eventRows.length;
+    for (const row of [...eventRows]) {
+      await pb.collection("consuela_google_calendar_events").delete(row.id, { requestKey: null });
+    }
+    return count;
+  }));
+}
+
 export async function clearCalendarCache(): Promise<boolean> {
   return withKeyedLock(CACHE_LOCK, () => withAdmin(async (pb) => {
     const eventRows = await pb.collection("consuela_google_calendar_events").getFullList({ requestKey: null });

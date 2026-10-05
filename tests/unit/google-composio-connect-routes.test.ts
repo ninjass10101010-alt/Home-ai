@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
     disconnectGoogle: vi.fn(),
     syncCalendar: vi.fn(),
     clearCalendarCache: vi.fn(),
+    pruneCachedEvents: vi.fn(),
     invalidateGoogleIntegrationOperation: vi.fn(),
   };
 });
@@ -46,7 +47,10 @@ vi.mock("@/lib/google/connection-state", () => ({
   disconnectGoogle: mocks.disconnectGoogle,
 }));
 vi.mock("@/lib/google/calendar", () => ({ syncCalendar: mocks.syncCalendar }));
-vi.mock("@/lib/google/token-store", () => ({ clearCalendarCache: mocks.clearCalendarCache }));
+vi.mock("@/lib/google/token-store", () => ({
+  clearCalendarCache: mocks.clearCalendarCache,
+  pruneCachedEvents: mocks.pruneCachedEvents,
+}));
 vi.mock("@/lib/google/integration-operation", () => ({
   invalidateGoogleIntegrationOperation: mocks.invalidateGoogleIntegrationOperation,
 }));
@@ -87,6 +91,7 @@ const spies = [
   mocks.disconnectGoogle,
   mocks.syncCalendar,
   mocks.clearCalendarCache,
+  mocks.pruneCachedEvents,
   mocks.invalidateGoogleIntegrationOperation,
 ];
 
@@ -113,6 +118,7 @@ beforeEach(() => {
   mocks.disconnectGoogle.mockResolvedValue(undefined);
   mocks.syncCalendar.mockResolvedValue({ events: 0, deleted: 0, perCalendar: [] });
   mocks.clearCalendarCache.mockResolvedValue(true);
+  mocks.pruneCachedEvents.mockResolvedValue(0);
   mocks.deleteConnectedAccount.mockResolvedValue(true);
   mocks.getConnectedAccount.mockResolvedValue(null);
 });
@@ -329,6 +335,65 @@ describe("GET /api/google/composio/status", () => {
       undefined,
     );
     expect(mocks.syncCalendar).not.toHaveBeenCalled();
+  });
+
+  it("prunes cached events when an ACTIVE calendar account goes FAILED, keeping the selection rows", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValueOnce({
+      connectedAccountId: "ca_1",
+      status: "ACTIVE",
+      accountEmail: "family@example.com",
+      connectedAt: "2030-01-01T00:00:00.000Z",
+      lastVerifiedAt: "2030-01-02T00:00:00.000Z",
+    });
+    mocks.getConnectedAccount.mockResolvedValueOnce({
+      id: "ca_1",
+      status: "FAILED",
+      toolkitSlug: "googlecalendar",
+      email: null,
+    });
+
+    const response = await status(get("/api/google/composio/status"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      connected: false,
+      status: "FAILED",
+    });
+    expect(mocks.pruneCachedEvents).toHaveBeenCalledTimes(1);
+    expect(mocks.clearCalendarCache).not.toHaveBeenCalled();
+    expect(mocks.writeConnectionSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "FAILED" }),
+      undefined,
+    );
+    expect(mocks.pruneCachedEvents.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.writeConnectionSnapshot.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not prune cached events when an ACTIVE tasks account goes FAILED", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValueOnce({
+      connectedAccountId: "ca_tasks",
+      status: "ACTIVE",
+      accountEmail: "family@example.com",
+      connectedAt: "2030-01-01T00:00:00.000Z",
+      lastVerifiedAt: "2030-01-02T00:00:00.000Z",
+    });
+    mocks.getConnectedAccount.mockResolvedValueOnce({
+      id: "ca_tasks",
+      status: "FAILED",
+      toolkitSlug: "googletasks",
+      email: null,
+    });
+
+    const response = await status(get("/api/google/composio/status?toolkit=googletasks"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.pruneCachedEvents).not.toHaveBeenCalled();
+    expect(mocks.writeConnectionSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "FAILED" }),
+      "google_composio_tasks",
+    );
   });
 
   it("does not rewrite an unchanged non-active status on every poll", async () => {

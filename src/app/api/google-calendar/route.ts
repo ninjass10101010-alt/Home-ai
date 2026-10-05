@@ -52,6 +52,16 @@ function newestSyncAt(rows: Awaited<ReturnType<typeof readCalendarSyncRows>>): s
   return newest;
 }
 
+const STALE_SYNC_MS = 15 * 60_000;
+
+// Connected but not fresh: a missing timestamp or one older than 15 minutes
+// (the cron cadence is every 5 minutes) means the rows on screen may be stale.
+function isStaleSync(lastSyncAt: string | null): boolean {
+  if (!lastSyncAt) return true;
+  const parsed = Date.parse(lastSyncAt);
+  return !Number.isFinite(parsed) || Date.now() - parsed > STALE_SYNC_MS;
+}
+
 // Plain GET remains session-scoped for product calendar events; only `sync=now`
 // enters the parent gate before collection or connection-state work. calendarId
 // → Google colorRgb, so the client can paint each synced event in its own
@@ -130,13 +140,15 @@ export async function GET(request: NextRequest) {
         events,
       }, { status: 502 });
     }
+    const lastSyncAt = newestSyncAt(rows);
     return NextResponse.json({
       ok: true,
       connected: true,
       source: "google",
       provider: "composio",
+      stale: isStaleSync(lastSyncAt),
       account_email: accountEmail,
-      last_sync_at: newestSyncAt(rows),
+      last_sync_at: lastSyncAt,
       calendar_colors: calendarColors(rows),
       events,
     });

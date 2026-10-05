@@ -22,6 +22,7 @@ import {
   listCalendars,
 } from "../../src/lib/google/calendar.ts";
 import { GoogleAuthError } from "../../src/lib/google/connection-state.ts";
+import { pruneCachedEvents } from "../../src/lib/google/token-store.ts";
 
 const PRIMARY = "primary";
 const FAMILY = "family@group.calendar.google.com";
@@ -207,6 +208,25 @@ describe("syncCalendar — Composio EVENTS_LIST", () => {
     expect(calRows[0].sync_token).toBe("STALE");
   });
 
+  it("full-window replace deletes cached rows absent from the pull", async () => {
+    const { pb, writes, eventRows } = pbMock({
+      eventRows: [
+        { id: "e-ghost", calendar_id: PRIMARY, google_id: "ghost1" },
+        { id: "e-live", calendar_id: PRIMARY, google_id: "evt_alpha" },
+      ],
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    mocks.execute.mockResolvedValueOnce(fixture.executeListEvents);
+
+    const outcome = (await syncCalendar()) as any;
+
+    expect(writes.eventDeletes).toEqual(["e-ghost"]);
+    expect(outcome.deleted).toBe(1);
+    expect(outcome.events).toBe(2);
+    expect(eventRows.some((r: any) => r.id === "e-ghost")).toBe(false);
+    expect(eventRows.some((r: any) => r.id === "e-live")).toBe(true);
+  });
+
   it("isolates a per-calendar Composio api_error and records last_status:error", async () => {
     const { pb, writes } = pbMock({
       calRows: [
@@ -284,6 +304,30 @@ describe("syncCalendar — Composio EVENTS_LIST", () => {
 
     expect(caught).toBeInstanceOf(GoogleAuthError);
     expect((caught as GoogleAuthError).code).toBe("config");
+    expect(writes.calUpdates.find((u: any) => u.payload.last_status === "error")).toBeUndefined();
+  });
+
+  it("promotes a not_configured Composio key failure to a run-level error", async () => {
+    const { pb, writes } = pbMock({
+      calRows: [
+        { id: "cp", calendar_id: PRIMARY, summary: "Primary", selected: true, sync_token: null },
+        { id: "cf", calendar_id: FAMILY, summary: "Family", selected: true, sync_token: null },
+      ],
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    mocks.execute.mockRejectedValue(
+      Object.assign(new Error("Composio key is not configured"), { code: "not_configured" }),
+    );
+
+    let caught: unknown;
+    try {
+      await syncCalendar();
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(GoogleAuthError);
+    expect((caught as GoogleAuthError).code).toBe("not_configured");
     expect(writes.calUpdates.find((u: any) => u.payload.last_status === "error")).toBeUndefined();
   });
 
@@ -423,6 +467,14 @@ describe("Composio write helpers", () => {
     await expect(deleteCalendarEvent("evt_9")).resolves.toBeUndefined();
   });
 
+  it("deleteCalendarEvent accepts successful:true with data:null (nothing to read)", async () => {
+    const { pb } = pbMock();
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    mocks.execute.mockResolvedValue({ data: null, successful: true, error: null });
+
+    await expect(deleteCalendarEvent("evt_9")).resolves.toBeUndefined();
+  });
+
   it("rejects a tool-level unsuccessful envelope instead of returning undefined", async () => {
     const { pb } = pbMock();
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
@@ -434,5 +486,25 @@ describe("Composio write helpers", () => {
 
     await expect(createCalendarEvent({ summary: "X", start: { dateTime: "2026-10-06T10:00:00Z" }, end: { dateTime: "2026-10-06T11:00:00Z" } }))
       .rejects.toThrow("tool execution failed");
+  });
+});
+
+describe("pruneCachedEvents", () => {
+  it("deletes only cached event rows, keeping selection and sync-state rows", async () => {
+    const { pb, writes, eventRows, calRows } = pbMock({
+      eventRows: [
+        { id: "e1", calendar_id: PRIMARY, google_id: "g1" },
+        { id: "e2", calendar_id: FAMILY, google_id: "g2" },
+      ],
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const deleted = await pruneCachedEvents();
+
+    expect(deleted).toBe(2);
+    expect(writes.eventDeletes.sort()).toEqual(["e1", "e2"]);
+    expect(eventRows).toHaveLength(0);
+    expect(calRows).toHaveLength(1);
+    expect(calRows[0]).toMatchObject({ id: "cp", calendar_id: PRIMARY });
   });
 });

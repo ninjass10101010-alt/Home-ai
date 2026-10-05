@@ -7,7 +7,7 @@ const LOCK = "google-connection-state";
 
 export const TASKS_SNAPSHOT_KEY = "google_composio_tasks";
 
-export type GoogleAuthErrorCode = "no_grant" | "unavailable" | "revoked" | "expired" | "refresh_failed" | "config";
+export type GoogleAuthErrorCode = "no_grant" | "unavailable" | "revoked" | "expired" | "refresh_failed" | "config" | "not_configured";
 
 export class GoogleAuthError extends Error {
   code: GoogleAuthErrorCode;
@@ -19,7 +19,12 @@ export class GoogleAuthError extends Error {
 
 export function mapGoogleAuthError(error: unknown) {
   if (error instanceof GoogleAuthError) {
-    const status = error.code === "unavailable" ? 503 : error.code === "no_grant" ? 409 : 401;
+    const status =
+      error.code === "unavailable" || error.code === "not_configured"
+        ? 503
+        : error.code === "no_grant"
+          ? 409
+          : 401;
     return { status, body: { ok: false as const, code: error.code, error: error.message } };
   }
   const message = error instanceof Error && error.message ? error.message : "Unknown Google auth error";

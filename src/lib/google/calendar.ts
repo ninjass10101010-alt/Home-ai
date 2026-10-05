@@ -91,14 +91,22 @@ async function requireConnectedAccountId(): Promise<string> {
 
 // Composio auth_failed means the brokered grant (or the broker key) is dead —
 // every calendar shares it, so it must abort the run instead of isolating to
-// one calendar. Every other ComposioError (api_error/timeout, not_configured)
-// propagates as-is and is contained by the per-calendar catch below.
+// one calendar. not_configured means the broker key itself is missing — also
+// shared by every calendar, so it is run-level too. Every other ComposioError
+// (api_error/timeout) propagates as-is and is contained by the per-calendar
+// catch below.
 function rethrowRunLevelComposioError(err: unknown): never {
   const code = (err as { code?: unknown } | null)?.code;
   if (code === "auth_failed") {
     throw new GoogleAuthError(
       "config",
       err instanceof Error ? err.message : "Composio is not usable",
+    );
+  }
+  if (code === "not_configured") {
+    throw new GoogleAuthError(
+      "not_configured",
+      err instanceof Error ? err.message : "Composio is not configured",
     );
   }
   throw err;
@@ -121,6 +129,14 @@ function unwrapComposioData<T>(result: ComposioEnvelope<T>): T {
     throw new Error(result?.error?.message || "Composio tool execution failed");
   }
   return result.data;
+}
+
+// Deletes carry no data payload: `{successful:true, data:null}` is a success.
+// Only a failed flag or an error envelope makes the tool call a failure.
+function unwrapComposioSuccess(result: ComposioEnvelope<unknown>): void {
+  if (!result || result.successful === false || result.error) {
+    throw new Error(result?.error?.message || "Composio tool execution failed");
+  }
 }
 
 // Rows written before multi-calendar sync carry an empty calendar_id — they belong to the primary calendar.
@@ -364,7 +380,16 @@ async function upsertCalendarEvents(
       } else {
         await pb.collection(EVENTS_COLLECTION).create(row, { requestKey: null });
       }
+      byGoogleId.delete(ev.id);
       upserted++;
+    }
+
+    // Full-window replace: every pull is complete for the window, so any row
+    // left in the map was absent from it — a ghost from a reconnect or an
+    // event moved out of the window. Matched rows were removed above.
+    for (const ghost of byGoogleId.values()) {
+      await pb.collection(EVENTS_COLLECTION).delete(ghost.id, { requestKey: null });
+      deleted++;
     }
   });
   return { upserted, deleted };
@@ -655,8 +680,9 @@ export async function deleteCalendarEvent(eventId: string): Promise<void> {
     connectedAccountId,
   );
   // DELETE arrives as HTTP 200 even when the tool failed (`successful:false`),
-  // so unwrap like the create/patch writes — a failed delete must reject.
-  createWriteResult(result);
+  // and a SUCCESSFUL delete has no payload (`data:null`) — a failed delete must
+  // reject, a data-less success must not.
+  unwrapComposioSuccess(result);
 }
 
 export interface CalendarListEntry {

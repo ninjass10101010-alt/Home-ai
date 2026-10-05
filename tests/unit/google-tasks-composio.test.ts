@@ -266,6 +266,25 @@ describe("syncTasks through Composio", () => {
     expect(mocks.withAdmin).not.toHaveBeenCalled();
   });
 
+  it("skips a FAILED tasks account without a Composio call", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValue({ ...TASKS_ACCOUNT, status: "FAILED" });
+
+    const result = await syncTasks();
+
+    expect(result).toEqual({ skipped: true, reason: "tasks_not_connected" });
+    expect(mocks.executeComposioAction).not.toHaveBeenCalled();
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
+  it("rejects a task action for a FAILED tasks account without a Composio call", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValue({ ...TASKS_ACCOUNT, status: "FAILED" });
+
+    await expect(createTask("list_consuela", { title: "Nope" })).rejects.toMatchObject({
+      code: "not_connected",
+    });
+    expect(mocks.executeComposioAction).not.toHaveBeenCalled();
+  });
+
   it("rejects on a tasks failure so the caller can contain it (never calendar)", async () => {
     mocks.readConnectionSnapshot.mockResolvedValue(TASKS_ACCOUNT);
     mocks.executeComposioAction.mockRejectedValue(new Error("Composio error (500)"));
