@@ -134,6 +134,15 @@ export async function createConnectedAccountLink(
   return { redirectUrl, connectedAccountId, expiresAt };
 }
 
+export async function deleteConnectedAccount(id: string): Promise<boolean> {
+  const key = await getComposioKey();
+  const res = await call(`${COMPOSIO_CONNECTED_ACCOUNTS_PATH}/${encodeURIComponent(id)}`, {
+    method: "DELETE", headers: { "X-API-Key": key },
+  });
+  if (res.ok || res.status === 404) return true;
+  throw classify(res.status);
+}
+
 export async function getConnectedAccount(
   id: string,
 ): Promise<{ id: string; status: string; toolkitSlug: string; email: string | null } | null> {

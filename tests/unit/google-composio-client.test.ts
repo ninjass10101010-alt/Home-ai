@@ -5,7 +5,8 @@ const { getServiceConfig } = vi.hoisted(() => ({ getServiceConfig: vi.fn() }));
 vi.mock("@/lib/services/config", () => ({ getServiceConfig }));
 
 import {
-  createConnectedAccountLink, ensureAuthConfig, executeComposioAction, getConnectedAccount,
+  createConnectedAccountLink, deleteConnectedAccount, ensureAuthConfig, executeComposioAction,
+  getConnectedAccount,
 } from "@/lib/google/composio";
 
 describe("composio client", () => {
@@ -133,5 +134,33 @@ describe("composio client", () => {
     const body = JSON.parse(String(init.body));
     expect(body.auth_config_id).toBe("ac_1");
     expect(body.user_id).toBe("consuela-family");
+  });
+
+  it("deletes a connected account via v3.1 and treats 404 as already deleted", async () => {
+    getServiceConfig.mockResolvedValue("sk-test");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response("", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteConnectedAccount("ca_1")).resolves.toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/v3.1/connected_accounts/ca_1");
+    expect(init.method).toBe("DELETE");
+    expect((init.headers as Record<string, string>)["X-API-Key"]).toBe("sk-test");
+    await expect(deleteConnectedAccount("ca_missing")).resolves.toBe(true);
+  });
+
+  it("maps a failed connected-account delete and never leaks the key", async () => {
+    getServiceConfig.mockResolvedValue("sk-secret");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 401 })));
+    const authError = await deleteConnectedAccount("ca_1").catch((e: unknown) => e);
+    expect(authError).toMatchObject({ code: "auth_failed" });
+    expect(String((authError as Error).message)).not.toContain("sk-secret");
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("boom", { status: 500 })));
+    await expect(deleteConnectedAccount("ca_1")).rejects.toMatchObject({
+      code: "api_error", status: 500,
+    });
   });
 });
