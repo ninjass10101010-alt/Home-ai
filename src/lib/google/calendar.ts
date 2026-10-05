@@ -65,8 +65,7 @@ function escapePb(s: string): string {
   return s.replace(/"/g, '\\"');
 }
 
-// Rows written before multi-calendar sync (and by the Composio-backed cron)
-// carry an empty calendar_id — they all belong to the primary calendar.
+// Rows written before multi-calendar sync carry an empty calendar_id — they belong to the primary calendar.
 function calendarIdFilter(calendarId: string): string {
   return calendarId === PRIMARY
     ? `(calendar_id = "${PRIMARY}" || calendar_id = "")`

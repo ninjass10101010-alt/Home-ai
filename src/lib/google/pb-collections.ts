@@ -283,7 +283,7 @@ async function migrateCalendarSelection(pb: any): Promise<string> {
 // Index self-heal for consuela_google_calendar_events: swap the legacy
 // UNIQUE(google_id) index for UNIQUE(calendar_id, google_id). Creating the
 // unique index on a table that still holds duplicates fails, so the heal
-// first normalizes empty calendar_id (Composio-populated rows belong to the
+// first normalizes empty calendar_id (pre-multi-calendar rows belong to the
 // primary calendar) and dedupes any (calendar_id, google_id) collisions,
 // then rewrites the collection's index list. Runs only while the composite
 // index is missing — steady-state calls are a cheap metadata check.
