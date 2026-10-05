@@ -37,6 +37,11 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/time-capsules/[id]/view` | POST | Session **and** a live PocketBase member row (`getLiveMemberById`; 401 `unauthorized`/`member_missing`, 503 `member_lookup_failed`) **and** capsule visibility (creator / named recipient / family-wide; 403 `forbidden`, 404 `capsule_not_found`). It resolves the caller's name from the LIVE row, never the session cookie's own claim, and writes nothing on any failure. This verb had **no ownership check at all** while every sibling has one, so any signed-in member could stamp `viewedBy` onto a parent's private capsule |
 | `/api/time-capsules/unlock` | POST | Session. A signed-in-member trigger for the capsule unlock sweep; it previously carried no auth. Automation belongs on `POST /api/cron/time-capsules/unlock` (`CRON_SECRET`) — see the sweep contract below |
 | `/api/ha/call-service`, `notify-config`, `notify-prefs`, `notify-test` | POST | Parent session (`authorizeAdminRequest`); HA reads stay session-level |
+| `/api/google/composio/setup` | POST | Parent session (`authorizeAdminRequest`); body `{toolkit?: "googlecalendar"\|"googletasks"}` (default calendar); returns the hosted Composio `auth_url` + `connected_account_id`; 400 `invalid_json`/`invalid_body`/`invalid_toolkit`, 401 `auth_failed`, 502 Composio failure, 503 `not_configured`/`google_state_unavailable` |
+| `/api/google/composio/status` | GET | Parent session (`authorizeCurrentParentRequest`, live PB identity); optional `?toolkit=`; reads the `consuela_data_snapshots` snapshot then Composio, persists the first ACTIVE transition and triggers one calendar sync; `connected:false` + `status`/`reason` when not active; 502 `api_error`, 503 `google_state_unavailable` |
+| `/api/google/composio/disconnect` | POST | Parent session (`authorizeAdminRequest`); deletes the remote connected account + clears the local snapshot and calendar cache; `outcome:"disconnected"`, or an honest `outcome:"local_only"` with a warning when the remote delete fails; 500 `failed`, 503 `google_state_unavailable` |
+
+**The direct Google connect routes are deleted (2026-10-05).** `/api/google/device-grant`, `device-poll` and `device-revoke` no longer exist, and neither do `src/lib/google/{device-auth,oauth-client,device-attempts,encryption}.ts`; there is no direct Google OAuth/consent path, by policy (parent `docs/INTEGRATIONS.md` + the PROVIDER POLICY rule in `AGENTS.md`). The only connect affordance is the hosted Composio link above.
 
 ---
 
@@ -138,7 +143,7 @@ User → Ask Consuela → POST /api/hermes/chat
 | `POST /api/cron/consuela/briefing` | 7am daily | Writes today's morning briefing (events/tasks/meals/suggestions); pushes to phones when the `briefing` pref is on |
 | `POST /api/cron/consuela/weather-alert` | every 15 min | Reads Open-Meteo; pushes a severe-weather heads-up (storm/heavy-snow) once per episode via `broadcastHouseAlert` when the `weather` pref is on; deduped in `ha_alert_state`; 9pm–7am quiet hours |
 | `POST /api/cron/consuela/calendar-alert` | every 15 min | Pushes a ~60-min lead-time heads-up for important (`importanceScore ≥ 50`) events today via `broadcastHouseAlert` when the `calendar` pref is on; one push per event/date deduped in `ha_alert_state`; quiet hours |
-| `POST /api/cron/consuela/google-sync` | every 5 min | Pulls Google Calendar + updates last-auto-sync state (quota-guarded) |
+| `POST /api/cron/consuela/google-sync` | every 5 min | Pulls Google Calendar through Composio (one full-window list per selected calendar) + updates sync state; paused when the Composio-execute daily cap trips |
 | `POST /api/cron/consuela/telegram-poll` | every 5 min | Polls Telegram and mirrors group messages into the daily chat thread |
 | `POST /api/cron/time-capsules/unlock` | hourly | Flips `time_capsules.status` → `unlocked` for every capsule whose `unlockDate` has passed (`checkAndUnlockCapsules`) |
 
@@ -512,6 +517,30 @@ silent empty day (`not_connected` / `unavailable`, neutral copy naming who can f
 it), and a connected-but-empty read says **nothing** — a day genuinely without
 school events is a real answer. The server's raw `error` string is never rendered;
 a token-store message is a developer string, not a family one.
+
+**Composio is the only provider behind these reads (2026-10-05).** Connection
+state lives in `consuela_data_snapshots`, key `google_composio_connection`
+(calendar) / `google_composio_tasks` (tasks) — the opaque `connectedAccountId` +
+`status`/`accountEmail`/timestamps, **no Google tokens on the NAS**.
+`GET /api/google-calendar` adds `provider:"composio"` and a real `last_sync_at`
+(the newest selected per-calendar sync row) when live, and answers
+`connected:false` + `source:"none"` + `stale:true` + `events:[]` when the account
+is missing or not ACTIVE — cached Google rows must never render as current, and
+`last_sync_at` must never be the legacy sync-state stamp. Calendar sync is one
+full-window `GOOGLECALENDAR_EVENTS_LIST` per selected calendar (30 days back /
+90 forward, upsert by `(calendar_id, google_id)`) — Composio exposes no
+incremental sync token — and tasks sync best-effort via `GOOGLETASKS_*` on a
+separate optional connect. Chat `add_event`/`remove_event` dual-write the family
+row and the Google copy (the family save always stands; a failed Google leg is a
+reported `warning`, never a silent success), `get_week_events` reads the next
+7 days from the synced caches, and `check_conflicts` spans 7 days. The
+`consuela_google_api_usage` row counts **Composio execute calls** — not Google
+project quota — and `quota-guard` pauses sync at the rolling daily cap so a
+runaway loop cannot burn executions. `consuela_google_tokens` is out of
+`COLLECTIONS` (the seed no longer manages it) but the live collection is **not**
+dropped. The direct Google files/routes (`device-auth`, `oauth-client`,
+`device-attempts`, `encryption`, `/api/google/device-*`) are deleted — do not
+restore them (parent `docs/INTEGRATIONS.md`).
 
 **Parent-only admin auth (pets denied).** `authorizeAdminRequest`
 (`src/lib/admin-auth.ts`) is an **allowlist on `role === "parent"`**: a valid
