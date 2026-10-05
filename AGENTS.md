@@ -42,7 +42,7 @@ If you are asked to document or debug something that touches credentials, descri
 
 - **Composio-brokered:** Google Calendar, Google Tasks/Reminders, Instacart. These go through the Composio v3.1 execute API (`COMPOSIO_API_KEY`); no direct provider OAuth/consent flow may be added or restored.
 - **First-party/direct (no Composio):** Home Assistant, Telegram, Gmail SMTP, Open-Meteo weather, TheMealDB.
-- **Placeholders / stored-only / dead:** Google Photos, Gmail import, Spotify, Google Maps, Greenlight, Khan Academy — leave dead until `docs/INTEGRATIONS.md` says otherwise.
+- **Placeholders / stored-only / dead:** Google Photos, Gmail import, Spotify (its v1 network functions are dead; the file stays — `isSpotifyEnabled`/`FAMILY_PLAYLISTS` are live in `SpotifyWidget`), Google Maps, Greenlight, Khan Academy — leave dead until `docs/INTEGRATIONS.md` says otherwise.
 - **Never reintroduce** direct Google Device Flow for Calendar (`device-grant`/`device-poll`/`device-revoke`, `oauth-client`, `googleFetch`). A `composio.dev/api/v1` call in a live path is also a bug — v3.1 is the only version.
 
 ---
