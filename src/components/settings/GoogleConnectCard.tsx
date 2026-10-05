@@ -675,7 +675,7 @@ export default function GoogleConnectCard() {
           <p className="text-sm font-semibold text-text-primary">
             {status === "error:config" ? "Google credentials not configured" : status === "error:revoked" ? "Previously connected — please reconnect" : "Connect a Google account"}
           </p>
-          <p className="mt-0.5 text-xs text-text-secondary">Sync your family calendar with Consuela. Google sign-in opens a secure consent page in a new tab.</p>
+          <p className="mt-0.5 text-xs text-text-secondary">Google sign-in opens a secure consent page in a new tab.</p>
         </div>
       </div>
       {errorMessage ? <p role="alert" className="rounded-xl border border-[var(--color-accent-rose)]/30 bg-[var(--color-accent-rose)]/10 px-3 py-2 text-xs text-[var(--color-accent-rose)]">{errorMessage}</p> : null}

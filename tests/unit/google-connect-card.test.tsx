@@ -163,6 +163,16 @@ describe("GoogleConnectCard", () => {
     expect(host.querySelectorAll(".widget-card .widget-card")).toHaveLength(0);
   });
 
+  it("does not repeat the card description inside the connect body", async () => {
+    mocks.hook.status = "unconnected";
+    mocks.hook.state = null as any;
+    const host = render(<GoogleConnectCard />);
+    await settle();
+
+    expect(host.textContent).toContain("Google sign-in opens a secure consent page in a new tab.");
+    expect(host.textContent).not.toContain("Sync your family calendar with Consuela.");
+  });
+
   it("syncs only the calendar resource", async () => {
     const host = render(<GoogleConnectCard />);
     await settle();

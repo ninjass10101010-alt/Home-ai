@@ -139,11 +139,24 @@ describe("Task 12 — stale Google rows are never shown as current", () => {
     localStorage.setItem("consuela-events", JSON.stringify([savedGoogleEvent()]));
   });
 
-  it("not connected + stale: drops the saved Google rows and says who can connect it", async () => {
+  it("not connected + stale: drops the saved Google rows and addresses the parent directly", async () => {
     stubGoogle({ ok: true, connected: false, source: "none", stale: true, events: [] });
     const el = await renderCalendar();
     expect(text(el)).not.toContain("Saved school assembly");
     expect(statusLine(el)).toMatch(/school events aren't on the calendar yet/i);
+    expect(statusLine(el)).toContain("connect Google Calendar in Settings \u2192 Connections & System");
+    expect(statusLine(el)).not.toMatch(/a parent can connect/i);
+  });
+
+  it("not connected + child: asks a parent and names the corrected Settings path", async () => {
+    mockAuth.currentUser = { name: "Sam", role: "child" };
+    stubGoogle({ ok: true, connected: false, source: "none", stale: true, events: [] });
+    const el = await renderCalendar();
+    expect(text(el)).not.toContain("Saved school assembly");
+    expect(statusLine(el)).toContain(
+      "a parent can connect Google Calendar in Settings \u2192 Connections & System",
+    );
+    expect(statusLine(el)).not.toContain("yet \u2014 connect Google Calendar");
   });
 
   it("connected + stale: keeps the saved Google rows and says they are not refreshing", async () => {

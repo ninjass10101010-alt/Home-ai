@@ -336,20 +336,31 @@ function getShortWeekday(year: number, month: number, day: number) {
  */
 type GoogleCalendarStatus = "idle" | "not_connected" | "unavailable" | "stale";
 
-const GOOGLE_STATUS_COPY: Record<Exclude<GoogleCalendarStatus, "idle">, string> = {
-  not_connected:
-    "School events aren't on the calendar yet \u2014 a parent can connect Google Calendar in Settings \u2192 Integrations.",
+const GOOGLE_STATUS_COPY: Record<Exclude<GoogleCalendarStatus, "idle" | "not_connected">, string> = {
   unavailable:
     "Couldn't reach the school calendar just now \u2014 family events are still here.",
   stale:
     "Showing saved school events \u2014 not refreshing right now.",
 };
 
-function CalendarGoogleStatusLine({ status }: { status: GoogleCalendarStatus }) {
+const GOOGLE_NOT_CONNECTED_COPY = {
+  parent:
+    "School events aren't on the calendar yet \u2014 connect Google Calendar in Settings \u2192 Connections & System.",
+  other:
+    "School events aren't on the calendar yet \u2014 a parent can connect Google Calendar in Settings \u2192 Connections & System.",
+} as const;
+
+function CalendarGoogleStatusLine({ status, isParent }: { status: GoogleCalendarStatus; isParent: boolean }) {
   if (status === "idle") return null;
+  const copy =
+    status === "not_connected"
+      ? isParent
+        ? GOOGLE_NOT_CONNECTED_COPY.parent
+        : GOOGLE_NOT_CONNECTED_COPY.other
+      : GOOGLE_STATUS_COPY[status];
   return (
     <p className="calendar-google-status" role="status" data-testid="calendar-google-status">
-      {GOOGLE_STATUS_COPY[status]}
+      {copy}
     </p>
   );
 }
@@ -734,7 +745,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
       if (!data.connected) {
         setCalEvents((prev) => prev.filter((event: CalEvent) => event.member !== "Google"));
         setGoogleStatus("not_connected");
-        if (announce) showToast("Connect Google in Settings → Integrations");
+        if (announce) showToast("Connect Google in Settings → Connections & System");
         return;
       }
       // Connected, but the answer is a saved snapshot rather than a fresh
@@ -1005,7 +1016,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
             connection state, not a headline — inside the card it pushed the
             date block into four wrapped lines and made the hero 350px tall on a
             390px phone. */}
-        <CalendarGoogleStatusLine status={googleStatus} />
+        <CalendarGoogleStatusLine status={googleStatus} isParent={currentUser?.role === "parent"} />
 
         <div className="calendar-member-strip scrollbar-hide">
           <button
