@@ -10,8 +10,10 @@
 //
 // Harness: no @testing-library/react in this repo — createRoot + act, clicking
 // via `.click()`. The calendar is a house `Modal`, which portals to
-// `document.body`, so queries read from there. Day cells expose their local ISO
-// as `aria-label`, which is both the query hook and the screen-reader name.
+// `document.body`, so queries read from there. A day cell SPEAKS a human date
+// ("Mon, Oct 5", plus the year only for the out-of-month spill) and carries its
+// local ISO on `data-date`, which is the query hook here: the announced name is
+// for the family, the attribute is for the tests.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
@@ -60,17 +62,16 @@ function buttonByText(text: string): HTMLButtonElement {
   return el as HTMLButtonElement;
 }
 
-function clickByLabel(label: string) {
-  const el = document.body.querySelector(`[aria-label="${label}"]`);
-  expect(el, `control "${label}"`).toBeTruthy();
-  click(el!);
-}
-
 /** The trigger's accessible name carries the value, so match by prefix. */
 function clickByLabelPrefix(prefix: string) {
   const el = document.body.querySelector(`[aria-label^="${prefix}"]`);
   expect(el, `control starting with "${prefix}"`).toBeTruthy();
   click(el!);
+}
+
+/** Tap one calendar day: the name is spoken as a human date, `data-date` is the hook. */
+function clickDay(iso: string) {
+  click(cellByDate(iso));
 }
 
 /** The value's visible/announced form, same options as the picker. */
@@ -82,11 +83,28 @@ function expectedValueLabel(iso: string): string {
   });
 }
 
-/** The 42 calendar day buttons, identified by their ISO aria-label. */
+/** The calendar day cells, identified by their machine-readable `data-date`. */
 function dayCells(): HTMLButtonElement[] {
-  return Array.from(document.body.querySelectorAll<HTMLButtonElement>("button[aria-label]")).filter((b) =>
-    /^\d{4}-\d{2}-\d{2}$/.test(b.getAttribute("aria-label") || "")
-  );
+  return Array.from(document.body.querySelectorAll<HTMLButtonElement>("button[data-date]"));
+}
+
+/** One day cell by its local ISO. */
+function cellByDate(iso: string): HTMLButtonElement {
+  const el = document.body.querySelector<HTMLButtonElement>(`button[data-date="${iso}"]`);
+  expect(el, `day cell ${iso}`).toBeTruthy();
+  return el!;
+}
+
+/**
+ * Monday-first weeks a month actually needs. `getMonthGrid` always returns 42
+ * cells, so the component trims the pad to this — the count under test is
+ * derived here from the calendar rather than pinned to a constant, so the
+ * assertion survives whichever month the suite happens to run in.
+ */
+function weeksNeeded(year: number, monthIndex: number): number {
+  const leading = (new Date(year, monthIndex, 1).getDay() + 6) % 7;
+  const days = new Date(year, monthIndex + 1, 0).getDate();
+  return Math.ceil((leading + days) / 7);
 }
 
 afterEach(() => {
@@ -121,7 +139,7 @@ describe("DueDatePicker", () => {
     expect(document.body.textContent).toContain(monthLabel(now.getFullYear(), now.getMonth()));
 
     const expected = localTodayISO(new Date(now.getFullYear(), now.getMonth(), 15));
-    clickByLabel(expected);
+    clickDay(expected);
     expect(onChange).toHaveBeenCalledWith(expected);
 
     await settle(); // let the Modal exit phase finish
@@ -147,13 +165,32 @@ describe("DueDatePicker", () => {
   });
 
   it("4. every day cell carries the tap-target and 360px-fit class contract", () => {
+    const now = new Date();
     render(<DueDatePicker value={getISO.today} onChange={vi.fn()} />);
     clickByLabelPrefix("Choose due date");
 
     const cells = dayCells();
-    expect(cells).toHaveLength(42);
+    // The grid is trimmed to the weeks the month on screen actually needs
+    // (5 rows = 35 cells), so the count is derived from the calendar here
+    // instead of pinned to the old always-42 pad. That derived count is what
+    // proves a whole month is laid out: a whole number of Monday-first weeks
+    // with no phantom 6th row, and every day of the month on the grid exactly
+    // once. (The 35-vs-42 rows themselves are pinned against a frozen October
+    // in tasks-components-a11y-fixes.test.tsx.)
+    const weeks = weeksNeeded(now.getFullYear(), now.getMonth());
+    expect(weeks).toBeGreaterThanOrEqual(4);
+    expect(weeks).toBeLessThanOrEqual(6);
+    expect(cells).toHaveLength(weeks * 7);
+
+    const shown = cells.map((c) => c.getAttribute("data-date")!);
+    expect(new Set(shown).size, "no day rendered twice").toBe(shown.length);
+    const monthDays = getMonthGrid(now.getFullYear(), now.getMonth())
+      .filter((c) => c.inMonth)
+      .map((c) => c.iso);
+    expect(shown.filter((iso) => monthDays.includes(iso))).toEqual(monthDays);
+
     for (const cell of cells) {
-      const label = cell.getAttribute("aria-label") || "";
+      const label = cell.getAttribute("aria-label") || cell.getAttribute("data-date") || "";
       expect(cell.className, label).toContain("h-11");
       expect(cell.className, label).toContain("w-11");
       expect(cell.className, label).toContain("max-w-full");
@@ -167,11 +204,11 @@ describe("DueDatePicker", () => {
     clickByLabelPrefix("Choose due date");
 
     const cells = dayCells();
-    const selected = cells.find((c) => c.getAttribute("aria-label") === today)!;
+    const selected = cells.find((c) => c.getAttribute("data-date") === today)!;
     expect(selected).toBeTruthy();
     expect(selected.getAttribute("aria-pressed")).toBe("true");
 
-    const other = cells.find((c) => c.getAttribute("aria-label") !== today)!;
+    const other = cells.find((c) => c.getAttribute("data-date") !== today)!;
     expect(other.getAttribute("aria-pressed")).toBe("false");
   });
 });

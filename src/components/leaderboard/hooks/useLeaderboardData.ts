@@ -133,7 +133,7 @@ export function useLeaderboardData() {
     if (!mounted || !weekData) return [];
     const members = db.selectMembers();
     const currentMonday = localWeekStartISO();
-    return members
+    const roster = members
       .filter((m: any) => m.role !== "pet")
       .map((m: any) => {
         const name = m.fullName;
@@ -173,9 +173,31 @@ export function useLeaderboardData() {
             )
           ).length,
         };
-      })
+      });
+
+    // Standard competition ranking — the SAME convention the Tasks page
+    // documents (src/app/tasks/page.tsx: "Tied points share a rank … so equal
+    // scores don't read as 1st vs 2nd"): a tie shares the previous rank and the
+    // next rank is SKIPPED, so 100/100/60/60/10 ranks 1, 1, 3, 3, 5. This hook
+    // feeds Home, the wall and KidHome off the same weekData the Tasks page
+    // renders, so an ordinal rank here read "1st / 2nd" on Home and
+    // "1st / 1st / 3rd" on Tasks for one and the same week.
+    //
+    // A new (un-tied) group takes its POSITION + 1, and only a tie repeats the
+    // previous rank. The repeated rank is carried in a local instead of read
+    // back off the previous row, because the rows still carry the `rank: 0`
+    // placeholder here — which is exactly what page.tsx:2121-2124 does today,
+    // so its tied rows print "#0". The page owner needs the same carry.
+    let lastPoints: number | null = null;
+    let lastRank = 0;
+    return roster
       .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
-      .map((e, i) => ({ ...e, rank: i + 1 }));
+      .map((e, i) => {
+        const rank = lastPoints !== null && e.points === lastPoints ? lastRank : i + 1;
+        lastPoints = e.points;
+        lastRank = rank;
+        return { ...e, rank };
+      });
   }, [weekData, tasks, hall, mounted, allTime.totals]);
 
   return {

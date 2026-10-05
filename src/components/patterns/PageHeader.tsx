@@ -26,7 +26,7 @@ interface PageHeaderProps {
 export default function PageHeader({ title, subtitle, subtitleTone = "eyebrow", action, icon, className = "", backHref, backLabel = "Back" }: PageHeaderProps) {
   const content = (
     <div className="min-w-0">
-      {subtitle && subtitleTone === "eyebrow" && <p className="text-eyebrow mb-1">{subtitle}</p>}
+      {subtitle && subtitleTone === "eyebrow" && <p className="text-eyebrow mb-2">{subtitle}</p>}
       <div className="flex items-center gap-2.5">
         {icon && <span aria-hidden="true" className="text-2xl leading-none">{icon}</span>}
         <h1 className="truncate text-display text-[1.75rem] sm:text-[2rem] text-text-primary">{title}</h1>

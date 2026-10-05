@@ -57,6 +57,9 @@ export default function MemberSheet({
   );
   const levelInfo = resolveAllTimeLevel(allTimePoints);
   const maxGraphPoints = Math.max(1, ...weekGraph.map(d => d.points));
+  // Rank 1 on zero points means the whole family is at zero, so the champion
+  // glow is earned on points — same rule as the podium's plinth.
+  const leadsOnPoints = entry.rank === 1 && (entry.points ?? 0) > 0;
 
   return (
     <Modal
@@ -68,25 +71,43 @@ export default function MemberSheet({
     >
       <div className="space-y-5">
         <div className="flex items-center gap-4">
-          <Avatar name={entry.name} color={color} emoji={entry.emoji} size="lg" variant="emoji" glow={entry.rank === 1} />
+          <Avatar name={entry.name} color={color} emoji={entry.emoji} size="lg" variant="emoji" glow={leadsOnPoints} />
           <div>
             <div className="text-2xl font-bold text-text-primary display-numeral">{weeklyPoints} <span className="text-sm text-text-muted font-normal">pts this week</span></div>
             <div className="text-sm text-text-secondary">
               {allTimeCaption(allTimePoints, allTimeRead.state, allTimeRead.updatedAt)} · {allTimeCompletionsCaption(allTimeComps, allTimeRead.state)}
             </div>
-            {entry.streak > 0 && <div className="mt-1 text-[var(--color-accent-amber)] text-sm font-semibold">🔥 {entry.streak}-day streak</div>}
+            {entry.streak > 0 && <div className="mt-1 text-[var(--color-accent-ink-amber)] text-sm font-semibold">🔥 {entry.streak}-day streak</div>}
           </div>
         </div>
 
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary mb-2">This Week</p>
-          <div className="flex items-end gap-1 h-16">
+          {/* The bar height was the ONLY carrier of the points — no role, no
+              name, no textual value — so the graph was unreadable to a screen
+              reader. The container is one labelled image that enumerates the
+              day/point pairs it draws. */}
+          <div
+            role="img"
+            aria-label={`Points by day: ${weekGraph.map((d) => `${d.day} ${d.points} points`).join(", ")}`}
+            /* The 1px baseline under the bars is what turns seven floating
+               columns into a chart — without it the shapes read as unrelated
+               pills. */
+            className="flex h-16 items-end gap-1 border-b border-[var(--color-border)] pb-px"
+          >
             {weekGraph.map((d) => (
               <div key={d.day} className="flex-1 flex flex-col items-center gap-0.5">
-                <div
-                  className="w-full rounded-t-md bg-gradient-to-t from-[var(--color-accent-selected)]/40 to-[var(--color-accent-selected)] transition-all duration-500"
-                  style={{ height: `${Math.max(2, (d.points / maxGraphPoints) * 56)}px` }}
-                />
+                {/* A day with a KNOWN zero draws no bar: `Math.max(2, …)`
+                    overstated it as a stub of progress. A zero day is not
+                    unknown — the day simply has no points. */}
+                {d.points > 0 ? (
+                  <div
+                    data-week-bar="true"
+                    data-week-day={d.day}
+                    className="w-full rounded-t-md bg-gradient-to-t from-[var(--color-accent-selected)]/40 to-[var(--color-accent-selected)] transition-all duration-500"
+                    style={{ height: `${(d.points / maxGraphPoints) * 56}px` }}
+                  />
+                ) : null}
                 <span className="text-xs text-text-muted">{d.day}</span>
               </div>
             ))}
@@ -126,7 +147,7 @@ export default function MemberSheet({
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary mb-2">Can Redeem Now</p>
             <div className="flex flex-wrap gap-2">
               {affordableRewards.map((r: any) => (
-                <Chip key={r.id} size="sm" tone="accent">{r.emoji} {r.name} ({r.cost}pts)</Chip>
+                <Chip key={r.id} as="span" size="sm" tone="accent">{r.emoji} {r.name} ({r.cost}pts)</Chip>
               ))}
             </div>
           </div>
@@ -145,7 +166,7 @@ export default function MemberSheet({
                         photo from the sheet entry (live-roster emoji). */}
                     <Avatar name={t.assignee} color={getMemberColor(t.assignee)} emoji={t.assignee === entry.name ? entry.emoji : t.assigneeEmoji} size="xs" variant="emoji" />
                     <span className="flex-1 truncate text-text-primary">{t.title}</span>
-                    <Chip size="sm" tone="success">+{t.points}pts</Chip>
+                    <Chip as="span" size="sm" tone="success">+{t.points}pts</Chip>
                   </div>
                 </Surface>
               ))}
@@ -156,10 +177,14 @@ export default function MemberSheet({
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary mb-2">Level Progress</p>
           <div className="h-3 w-full overflow-hidden rounded-full bg-white/5">
-            {levelInfo.known && (
+            {/* A KNOWN 0% (a brand-new member, or one exactly on a threshold)
+                draws no fill — the same rule the row's progress bar and the
+                week graph use. An UNKNOWN all-time total still shows the
+                unavailable label below, never a 0. */}
+            {levelInfo.known && levelInfo.progress > 0 && (
               <div
                 className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-selected)]/50 to-[var(--color-accent-selected)] animate-progress-fill"
-                style={{ width: `${Math.max(2, levelInfo.progress)}%` }}
+                style={{ width: `${levelInfo.progress}%` }}
               />
             )}
           </div>
@@ -167,7 +192,10 @@ export default function MemberSheet({
             {levelInfo.known ? (
               <>
                 <span>{levelInfo.title}</span>
-                <span>{levelInfo.progress}% to next</span>
+                {/* `next === null` is the top level. "100% to next" there is a
+                    lie: there is no next. The bar above is already full at
+                    100%, so the right-hand label says what that means. */}
+                <span>{levelInfo.next === null ? "Top level" : `${levelInfo.progress}% to next`}</span>
               </>
             ) : (
               <span>{PROGRESS_UNAVAILABLE_LABEL}</span>

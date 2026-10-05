@@ -11,6 +11,7 @@ import { hasUnreversedTaskEarn, recomputeWeekPoints } from "@/lib/task-ledger";
 import {
   findCanonicalTask,
   getSnapshotOperationReceipts,
+  describeSnapshotWriteError,
   liveSnapshotTasks,
   mutateSnapshotWithMeta,
   normalizeWeekData,
@@ -577,7 +578,6 @@ interface PreparedTask {
   entries: LedgerEntryInput[];
   expectedEntries: LedgerEntryInput[];
   replay: boolean;
-  needsLedger: boolean;
   projectionInvalid: boolean;
   receiptOnly: boolean;
   skip: boolean;
@@ -809,7 +809,6 @@ async function resolveTasks(
   const transactionState = validateOperationTransactions(allTransactions, command, fingerprint);
   if (transactionState === "conflict") return "operation_conflict";
   const byTransactionTask = transactionState.byTask;
-  const hasCurrentTransactions = search.currentTransactions.length > 0;
   const prepared: PreparedTask[] = [];
   for (const id of ids) {
     let lookup: CanonicalTaskLookup;
@@ -828,7 +827,7 @@ async function resolveTasks(
       prepared.push({
         id, lookup, task: null, receipt, transactions, intent: null, payees: [], skippedPayees: [],
         entries: proofEntries, expectedEntries: proofEntries, replay: true,
-        needsLedger: false, projectionInvalid: true, receiptOnly: true, skip: false,
+        projectionInvalid: true, receiptOnly: true, skip: false,
       });
       continue;
     }
@@ -837,7 +836,7 @@ async function resolveTasks(
         if (!task && !lookup.tombstoned) return "task_store_unavailable";
         prepared.push({
           id, lookup, task, receipt, transactions, intent: null, payees: [], skippedPayees: [],
-          entries: [], expectedEntries: [], replay: true, needsLedger: false,
+          entries: [], expectedEntries: [], replay: true,
           projectionInvalid: false, receiptOnly: task === null, skip: false,
         });
         continue;
@@ -847,7 +846,7 @@ async function resolveTasks(
       if (pending === null) {
         prepared.push({
           id, lookup, task, receipt, transactions, intent: null, payees: [], skippedPayees: [],
-          entries: [], expectedEntries: [], replay: false, needsLedger: false,
+          entries: [], expectedEntries: [], replay: false,
           projectionInvalid: false, receiptOnly: false, skip: true,
         });
         continue;
@@ -857,7 +856,7 @@ async function resolveTasks(
       }
       prepared.push({
         id, lookup, task, receipt, transactions, intent: pending, payees: [], skippedPayees: [],
-        entries: [], expectedEntries: [], replay: false, needsLedger: false,
+        entries: [], expectedEntries: [], replay: false,
         projectionInvalid: false, receiptOnly: false, skip: false,
       });
       continue;
@@ -868,7 +867,7 @@ async function resolveTasks(
         prepared.push({
           id, lookup, task: null, receipt, transactions, intent: null, payees: [], skippedPayees: [],
           entries: proofEntries, expectedEntries: proofEntries, replay: true,
-          needsLedger: hasCurrentTransactions, projectionInvalid: true,
+          projectionInvalid: true,
           receiptOnly: true, skip: false,
         });
         continue;
@@ -902,7 +901,7 @@ async function resolveTasks(
         id, lookup, task, receipt, transactions, intent, payees,
         skippedPayees,
         entries: expectedEntries, expectedEntries, replay: true,
-        needsLedger: hasCurrentTransactions, projectionInvalid,
+        projectionInvalid,
         receiptOnly: task === null || lookup.tombstoned, skip: false,
       });
       continue;
@@ -913,7 +912,7 @@ async function resolveTasks(
     if (pending === null) {
       prepared.push({
         id, lookup, task, receipt, transactions, intent: null, payees: [], skippedPayees: [],
-        entries: [], expectedEntries: [], replay: false, needsLedger: false,
+        entries: [], expectedEntries: [], replay: false,
         projectionInvalid: false, receiptOnly: false, skip: true,
       });
       continue;
@@ -926,7 +925,7 @@ async function resolveTasks(
     prepared.push({
       id, lookup, task, receipt, transactions, intent: pending, payees: resolved.payees,
       skippedPayees: resolved.skipped,
-      entries, expectedEntries: entries, replay: false, needsLedger: true,
+      entries, expectedEntries: entries, replay: false,
       projectionInvalid: false, receiptOnly: false, skip: false,
     });
   }
@@ -1166,7 +1165,8 @@ async function writeApprovalSnapshot(
     return verified
       ? mutation.result
       : { ok: false, cleared: 0, conflict: false };
-  } catch {
+  } catch (error) {
+    console.warn(`[task-approval] snapshot write failed: ${describeSnapshotWriteError(error)}`);
     return { ok: false, cleared: 0, conflict: false };
   }
 }
@@ -1415,7 +1415,8 @@ async function executeSendBack(
     noCurrentTask = current.noCurrentTask;
     return true;
       });
-    } catch {
+    } catch (error) {
+      console.warn(`[task-approval] send-back write failed: ${describeSnapshotWriteError(error)}`);
       return failure(command.operationId, command.action, "snapshot_write_failed", prepared.week);
     }
   if (!snapshotDurable) {

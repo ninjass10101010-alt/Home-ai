@@ -375,8 +375,12 @@ describe("/tasks on the board", () => {
   });
 
   it("claims column 2 explicitly for everything the panel owns", () => {
-    expect(tasks).toMatch(/className="panel-swap space-y-6 2xl:col-start-2"/);
-    expect(tasks).toMatch(/data-testid="task-command-queue"[\s\S]{0,120}?2xl:col-start-2/);
+    // Below 1536px the panel spans the full width (md:col-span-2 — a distinct
+    // column would leave a dead half beside it); at 2xl the span MUST be reset
+    // to 1 or start-2+span-2 would overflow the two-track grid into an implicit
+    // third column.
+    expect(tasks).toMatch(/className="panel-swap space-y-6 md:col-span-2 2xl:col-span-1 2xl:col-start-2"/);
+    expect(tasks).toMatch(/data-testid="task-command-queue"[\s\S]{0,120}?md:col-span-2 2xl:col-span-1 2xl:col-start-2/);
   });
 
   it("is unchanged below the rail breakpoint — the stat band still spans the page", () => {

@@ -45,7 +45,7 @@ class SettingsErrorBoundary extends React.Component<SettingsErrorBoundaryProps, 
                 <button
                   type="button"
                   onClick={this.reset}
-                  className="inline-flex min-h-[64px] items-center justify-center rounded-2xl border border-[var(--color-accent-selected)]/20 bg-[var(--color-accent-button)] px-5 text-sm font-semibold text-white tap"
+                  className="inline-flex min-h-[64px] items-center justify-center rounded-2xl border border-[var(--color-accent-selected)]/20 bg-[color-mix(in_srgb,var(--color-accent-selected)_60%,black)] px-5 text-sm font-semibold text-white tap"
                 >
                   Try again
                 </button>

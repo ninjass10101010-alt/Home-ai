@@ -8,6 +8,7 @@ import type {
   LedgerOperationMeta,
   LedgerOperationSource,
   Transaction,
+  WeekData,
 } from "@/types/tasks";
 
 export const LEDGER_TRANSACTION_TYPES = [
@@ -136,7 +137,45 @@ export function parseCanonicalTransactions(value: unknown): Transaction[] | null
   return transactions;
 }
 
-export function mergeCanonicalTransactions(histories: Transaction[][]): Transaction[] {
+/**
+ * A duplicate `earn` this merge DELETED rather than keeping.
+ *
+ * The drop itself is correct — one standing payment per (task, member) — but
+ * it used to be invisible, so a hand-edited or legacy duplicate earn changed
+ * the family's points with no transaction, no receipt and no reconciliation
+ * record, and the resulting balance was indistinguishable from a repaired one.
+ */
+export interface DroppedDuplicateEarn {
+  /** The transaction that was NOT kept. */
+  transaction: Transaction;
+  /** The transaction left in its place. */
+  retainedTransaction: Transaction;
+  /** The dropped transaction's id — what a caller logs or traces. */
+  transactionId: number;
+  /** The surviving transaction's id. */
+  retainedTransactionId: number;
+  taskId: number;
+  member: string;
+  amount: number;
+}
+
+export interface CanonicalMergeReport {
+  /** Byte-identical to what `mergeCanonicalTransactions` returns. */
+  history: Transaction[];
+  droppedDuplicateEarns: DroppedDuplicateEarn[];
+}
+
+/**
+ * `mergeCanonicalTransactions` plus the record of what it dropped.
+ *
+ * The plain function stays the entry point every existing caller uses (wave 1's
+ * `mergedArchiveWeek` union and `mergeHistory`); this one exists so a caller
+ * that can HONESTLY report a conflict — the reconcile pass — can see the drop
+ * instead of inheriting a silent points change.
+ */
+export function mergeCanonicalTransactionsWithReport(
+  histories: Transaction[][],
+): CanonicalMergeReport {
   const candidates = histories
     .flat()
     .sort(
@@ -145,6 +184,7 @@ export function mergeCanonicalTransactions(histories: Transaction[][]): Transact
     );
   const byId = new Map<number, Transaction>();
   const history: Transaction[] = [];
+  const droppedDuplicateEarns: DroppedDuplicateEarn[] = [];
   for (const transaction of candidates) {
     const existing = byId.get(transaction.id);
     if (existing) {
@@ -155,15 +195,120 @@ export function mergeCanonicalTransactions(histories: Transaction[][]): Transact
     }
     if (
       transaction.type === "earn" &&
-      transaction.taskId !== undefined &&
-      hasUnreversedTaskEarn(history, transaction.taskId, transaction.member)
+      transaction.taskId !== undefined
     ) {
-      continue;
+      const retained = history.find(
+        (candidate) =>
+          candidate.type === "earn" &&
+          candidate.taskId === transaction.taskId &&
+          candidate.member === transaction.member,
+      );
+      if (retained && hasUnreversedTaskEarn(history, transaction.taskId, transaction.member)) {
+        droppedDuplicateEarns.push({
+          transaction,
+          retainedTransaction: retained,
+          transactionId: transaction.id,
+          retainedTransactionId: retained.id,
+          taskId: transaction.taskId,
+          member: transaction.member,
+          amount: transaction.amount,
+        });
+        continue;
+      }
     }
     byId.set(transaction.id, transaction);
     history.push(transaction);
   }
-  return history;
+  droppedDuplicateEarns.sort((left, right) => left.transaction.id - right.transaction.id);
+  return { history, droppedDuplicateEarns };
+}
+
+/** Stable, greppable, member-name-free warning tags for the dropped earns. */
+export function droppedDuplicateEarnTags(
+  scope: string,
+  dropped: readonly DroppedDuplicateEarn[],
+): string[] {
+  return dropped.map(
+    (entry) => `${scope}:dropped_duplicate_earn:${entry.taskId}:${entry.transaction.id}`,
+  );
+}
+
+export function mergeCanonicalTransactions(histories: Transaction[][]): Transaction[] {
+  return mergeCanonicalTransactionsWithReport(histories).history;
+}
+
+export type MemberNameMigrationOutcome =
+  | { status: "migrated"; week: WeekData }
+  /** Nothing under the old name in this week — write nothing. */
+  | { status: "unchanged" }
+  /** The target name already has history here: merging two people's balances. */
+  | { status: "conflict"; reasons: string[] };
+
+/**
+ * Which name-keyed fields of a week assert something about `name`.
+ *
+ * A bare `points: 0` key is NOT history: `recomputeWeekPoints` builds the map
+ * from transactions, so a zero key is an artifact (an earn fully reversed by a
+ * penalty, a member with no transactions) and contributes no balance to merge.
+ */
+function nameKeyedHistory(week: WeekData, name: string): string[] {
+  const reasons: string[] = [];
+  if (week.history.some((transaction) => transaction.member === name)) reasons.push("history");
+  if (Object.prototype.hasOwnProperty.call(week.streak, name)) reasons.push("streak");
+  if (Object.prototype.hasOwnProperty.call(week.lastActive, name)) reasons.push("lastActive");
+  const points = week.points[name];
+  if (typeof points === "number" && Number.isFinite(points) && points !== 0) reasons.push("points");
+  return reasons;
+}
+
+function renameMapKey<V>(map: Record<string, V>, from: string, to: string): Record<string, V> {
+  if (!Object.prototype.hasOwnProperty.call(map, from)) return { ...map };
+  const next = { ...map };
+  delete next[from];
+  next[to] = map[from];
+  return next;
+}
+
+/**
+ * Move ONE member's ledger identity from `from` to `to` inside a week.
+ *
+ * The ledger is keyed on the member's mutable display name, so a mid-week
+ * rename orphans the balance: `history[].member`, `points`, `streak` and
+ * `lastActive` all still carry the old key, every lookup by the new name reads
+ * `undefined`, and the negative-balance gate — which only sees a key that
+ * exists — is blinded into letting a penalty push the child below their real
+ * balance.
+ *
+ * `points` is RECOMPUTED from the migrated history, never carried across from
+ * the stored map: the stored map is not authority.
+ *
+ * Pure and idempotent in both directions, which is what lets the rename be
+ * rolled back week by week when one of them fails.
+ */
+export function migrateWeekDataMemberName(
+  week: WeekData,
+  from: string,
+  to: string,
+): MemberNameMigrationOutcome {
+  const source = String(from ?? "").trim();
+  const target = String(to ?? "").trim();
+  if (!source || !target || source === target) return { status: "unchanged" };
+  const conflict = nameKeyedHistory(week, target);
+  if (conflict.length > 0) return { status: "conflict", reasons: conflict };
+  if (nameKeyedHistory(week, source).length === 0) return { status: "unchanged" };
+  const history = week.history.map((transaction) =>
+    transaction.member === source ? { ...transaction, member: target } : transaction,
+  );
+  return {
+    status: "migrated",
+    week: {
+      ...week,
+      history,
+      points: recomputeWeekPoints(history),
+      streak: renameMapKey(week.streak, source, target),
+      lastActive: renameMapKey(week.lastActive, source, target),
+    },
+  };
 }
 
 /**

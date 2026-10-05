@@ -94,12 +94,30 @@ export default function SwipeableRow({ children, leftAction, rightAction, onSwip
     });
   }, []);
 
+  // The ✓/✕ layers are painted UNDER the translucent row content (`.schedule-row`
+  // is 72–75% opaque), so at rest they ghosted through every pending row — a
+  // dimmed rose ✕ band on the right ~80px. They fade in only as the row is
+  // actually dragged off them: fully transparent at offset 0, fully opaque from
+  // |offset| ≥ 24px (a vertical scroll's 1–2px horizontal drift stays
+  // invisible), following the same snap timing as the content's own slide.
+  const reveal = offset === 0 ? 0 : Math.min(1, Math.abs(offset) / 24);
+  const layerStyle = {
+    opacity: reveal,
+    transition: snapping ? `opacity ${SNAP_MS}ms cubic-bezier(0.2, 0, 0, 1)` : "none",
+  };
+
   return (
     <div className={`relative overflow-hidden rounded-2xl ${className}`}>
-      <div className="absolute inset-y-0 left-0 flex w-20 items-center justify-start rounded-l-2xl bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)]">
+      <div
+        className="absolute inset-y-0 left-0 flex w-20 items-center justify-start rounded-l-2xl bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)]"
+        style={layerStyle}
+      >
         {leftAction}
       </div>
-      <div className="absolute inset-y-0 right-0 flex w-20 items-center justify-end rounded-r-2xl bg-[var(--color-accent-rose)]/20 text-[var(--color-accent-rose)]">
+      <div
+        className="absolute inset-y-0 right-0 flex w-20 items-center justify-end rounded-r-2xl bg-[var(--color-accent-rose)]/20 text-[var(--color-accent-rose)]"
+        style={layerStyle}
+      >
         {rightAction}
       </div>
       <div

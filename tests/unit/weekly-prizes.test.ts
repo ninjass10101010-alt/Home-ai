@@ -52,9 +52,26 @@ describe("raceGap", () => {
   it("reports the gap for off-podium members", () => {
     expect(raceGap("Caspian", board)).toEqual({ rank: 4, onPodium: false, gapToPodium: 20, leader: { name: "Rebecca", points: 120 } });
   });
-  it("reports zero-point members as not yet in the race", () => {
-    expect(raceGap("Aurora", { ...board, Aurora: 0 }))
-      .toEqual({ rank: null, onPodium: false, gapToPodium: 30, leader: { name: "Rebecca", points: 120 } });
+  it("a 0-point member is ranked, not excused", () => {
+    // The old `myPoints === 0` short-circuit answered `rank: null` for exactly
+    // these members — which is what let a surface that lists their competition
+    // rank as a prize rank also tell them they had not entered the race.
+    // Competition rank is a fact about the FIELD and is computed over every
+    // entry now; the zero guard decides only whether they HOLD a prize
+    // (`onPodium`, still false here), never whether they are ranked at all.
+    const withAurora = { ...board, Aurora: 0 };
+    expect(raceGap("Aurora", withAurora)).toEqual({
+      rank: 5,
+      onPodium: false,
+      gapToPodium: 30,
+      leader: { name: "Rebecca", points: 120 },
+    });
+    // Every field above is contract: `rank` is now always the true competition
+    // rank, `gapToPodium` is the cutoff holder's distance, and the leader is
+    // still the highest scorer. The caller's map is never reordered by the
+    // ranking — the sort runs on a derived list, because other surfaces key
+    // their leaderboard off this same object.
+    expect(Object.keys(withAurora)).toEqual(["Rebecca", "Jeffery", "Emily", "Caspian", "Aurora"]);
   });
   it("handles an empty week honestly", () => {
     expect(raceGap("Rebecca", {})).toEqual({ rank: null, onPodium: false, gapToPodium: null, leader: null });

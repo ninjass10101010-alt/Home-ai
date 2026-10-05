@@ -71,6 +71,35 @@ function rosterNames(rows: readonly unknown[]): string[] {
   return names;
 }
 
+function weekStartOf(row: unknown): string {
+  return isRecord(row) && typeof row.weekStart === "string" ? row.weekStart.trim() : "";
+}
+
+/**
+ * B4: `week_data` rows older than the current week that have NO `week_archive`
+ * row. The rollover used to archive only ONE prior week, so any older row was
+ * orphaned forever — its points vanished from all-time while this payload
+ * actively asserted `historyComplete: true`. The rollover now archives every
+ * older week, so this is the honest leftover: a week whose total is genuinely
+ * unknown must be reported as unknown, not dropped.
+ */
+function unarchivedOlderWeekStarts(
+  dataRows: readonly unknown[],
+  archiveRows: readonly unknown[],
+  weekStart: string,
+): string[] {
+  const archived = new Set(archiveRows.map(weekStartOf).filter((value) => value.length > 0));
+  const starts: string[] = [];
+  for (const row of dataRows) {
+    const start = weekStartOf(row);
+    if (!start || start === weekStart) continue;
+    if (archived.has(start)) continue;
+    if (starts.includes(start)) continue;
+    starts.push(start);
+  }
+  return starts;
+}
+
 async function computePayload(weekStart: string): Promise<AllTimeTotalsPayload> {
   const read = await withAdmin(async (pb) => {
     const dataRows = await pb.collection("week_data").getFullList({ requestKey: null });
@@ -83,7 +112,12 @@ async function computePayload(weekStart: string): Promise<AllTimeTotalsPayload> 
   }
   const currentWeek = canonicalCurrentWeek(read.dataRows, weekStart);
   if (!currentWeek) throw new Error("all_time_no_current_week");
-  return buildAllTimeTotals(currentWeek, archiveWeekRows(read.archiveRows), rosterNames(read.memberRows));
+  return buildAllTimeTotals(
+    currentWeek,
+    archiveWeekRows(read.archiveRows),
+    rosterNames(read.memberRows),
+    unarchivedOlderWeekStarts(read.dataRows, read.archiveRows, weekStart),
+  );
 }
 
 export async function GET(request: NextRequest) {

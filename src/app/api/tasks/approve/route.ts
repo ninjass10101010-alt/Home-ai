@@ -13,7 +13,17 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// B6: like `/api/tasks/claim`, this route is in the middleware's API_EXEMPT
+// list, so no gate runs ahead of it. It must bound the body ITSELF, and BEFORE
+// it reads, or an unauthenticated caller can make the server buffer an
+// arbitrarily large body before the PIN is checked — a memory-exhaustion
+// primitive against a single-container NAS. Declared length first, then the
+// ACTUAL byte length of what arrived (a chunked body may omit or understate the
+// header). Same value and same reason code as the claim and ledger routes.
+const MAX_BODY_BYTES = 4 * 1024;
+
 function statusForReason(reason: string | undefined): number {
+  if (reason === "payload_too_large") return 413;
   if (reason === "unauthorized") return 401;
   if (reason === "adult_only") return 403;
   if (reason === "unknown_task") return 404;
@@ -38,6 +48,10 @@ function errorResponse(
   status: number,
   action?: ApproveAction,
 ) {
+  // B7 (kept): the deliberate display/machine split. `reason`/`error` carry the
+  // human-facing `unknown-task` while `code` keeps the real `unknown_task`, so
+  // the outbox's machine classification reads a slug while the rendered message
+  // reads as English.
   const publicReason = reason === "unknown_task" ? "unknown-task" : reason;
   const retryable = reason === "task_store_unavailable" ||
     reason === "member_roster_unavailable" ||
@@ -62,9 +76,22 @@ function rawOperationId(body: unknown): string {
 }
 
 export async function POST(request: NextRequest) {
+  // Size guard, BEFORE any credential work.
+  const oversized = () => errorResponse("", "payload_too_large", 413);
+  const declared = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return oversized();
+
+  let text: string;
+  try {
+    text = await request.text();
+  } catch {
+    return errorResponse("", "invalid_body", 400);
+  }
+  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) return oversized();
+
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(text);
   } catch {
     return errorResponse("", "invalid_body", 400);
   }
@@ -132,6 +159,22 @@ export async function POST(request: NextRequest) {
   }
 
   const reconciled = result.reconciled === true;
+  const projectionFailures = Array.isArray(result.projectionFailures) ? result.projectionFailures : [];
+  // B8: a partial projection was returned but read by NO surface — only
+  // `skipped` was consumed anywhere. A parent approving 12 chores where 3 fail
+  // projection got a 202, the outbox reconciled it silently, and nothing
+  // anywhere said those 3 approvals had not reached the kitchen display.
+  //
+  // `error` is the DISPLAY channel the outbox reads via `serverMessageOf` and
+  // persists into `lastErrorMessage`. Deliberately a fixed sentence and NOT a
+  // member of `ERROR_CHANNEL_CODE_LIST`: a vocabulary member here would be
+  // picked up by `reasonOf` as a machine code and reclassify a 202 that the
+  // outbox is supposed to reconcile, not refuse. No task id, no title and no
+  // PocketBase string ever reaches a client on this channel — only a count of
+  // rows this handler already decided are ids, not names.
+  const projectionFailureNotice = !reconciled && projectionFailures.length > 0
+    ? `${projectionFailures.length} approval${projectionFailures.length === 1 ? "" : "s"} did not reach the kitchen display yet. Consuela is still retrying.`
+    : null;
   return NextResponse.json({
     success: true,
     operationId: result.operationId,
@@ -143,7 +186,8 @@ export async function POST(request: NextRequest) {
     reconciled,
     repairRequired: !reconciled || result.repairRequired === true,
     ...(reconciled ? {} : { retryable: true }),
-    ...(result.projectionFailures?.length ? { projectionFailures: result.projectionFailures } : {}),
+    ...(projectionFailureNotice ? { error: projectionFailureNotice } : {}),
+    ...(projectionFailures.length ? { projectionFailures } : {}),
     ...(result.duplicate ? { duplicate: true } : {}),
     ...(result.task !== undefined ? { task: result.task } : {}),
     ...(result.noCurrentTask ? { noCurrentTask: true } : {}),

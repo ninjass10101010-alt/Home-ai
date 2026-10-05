@@ -17,7 +17,7 @@ export default function StreakSaverBanner({ streak, quickTask, onGoToTasks }: St
       <div className="flex items-center gap-3">
         <span className="text-3xl animate-badge-sparkle">🔥</span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-[var(--color-accent-amber)]">Save your {streak}-day streak!</p>
+          <p className="text-sm font-bold text-[var(--color-accent-ink-amber)]">Save your {streak}-day streak!</p>
           <p className="text-xs text-text-secondary mt-0.5">
             {quickTask
               ? `Complete "${quickTask.title}" today to keep it alive!`

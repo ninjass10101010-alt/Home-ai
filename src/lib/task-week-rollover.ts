@@ -40,6 +40,14 @@ export interface TaskWeekRolloverResult {
   currentWeekData: WeekData;
   revision: SnapshotRevision;
   reconciled: boolean;
+  /**
+   * Honest failure categories for the legs that failed soft instead of
+   * throwing — `week_archive:invalid` for an unreadable prior week, and
+   * `week_data:invalid` for an unreadable current week. Empty on a fully
+   * reconciled run. The sync route renders these as repair hints; they are
+   * never a silent "looks fine".
+   */
+  failed: string[];
 }
 
 type Row = Record<string, any>;
@@ -260,12 +268,60 @@ async function ensureCurrentWeekRow(
   }
 }
 
+/**
+ * B3 — the canonical a `week_archive` row must converge to.
+ *
+ * `week_data` and `week_archive` are two stores of the same week that can
+ * legitimately disagree: the archive is written once at the rollover, while
+ * week_data stays live and can still receive a late claim at the boundary (a
+ * chore approved seconds before Monday). `all-time` reads ONLY the archive
+ * (plus the current week's own row), so a transaction that exists on either
+ * side and not on the other is worth zero to the family forever.
+ *
+ * The old repair passed the week_data read as the archive's authoritative
+ * payload, so an archive-only transaction was deleted along with its row —
+ * silently, and with `historyComplete: true`. The canonical is therefore the
+ * LOSSLESS union of both sides (via `mergeCanonicalTransactions`, which drops
+ * only a genuine double-earn of the same task — never a distinct
+ * transaction), and the frozen archive wins on the scalar maps it owns.
+ *
+ * `conflicting_transaction_id` (the two sides disagree about the CONTENT of one
+ * transaction id) is genuinely unknowable, so it is reported as unreadable data
+ * (`ok: false`) instead of picking a winner.
+ */
+function mergedArchiveWeek(prior: CanonicalRows, observed: CanonicalRows): WeekData {
+  const history = mergeCanonicalTransactions([prior.week.history, observed.week.history]);
+  return {
+    weekStart: observed.week.weekStart,
+    points: recomputeWeekPoints(history),
+    streak: { ...prior.week.streak, ...observed.week.streak },
+    lastActive: { ...prior.week.lastActive, ...observed.week.lastActive },
+    history,
+  };
+}
+
+type ArchiveOutcome =
+  | { ok: true; week: WeekData; changed: boolean }
+  /**
+   * B7: the stored archive row for this week cannot be READ (an unparseable
+   * transaction, a duplicate id with conflicting content). Nothing is written —
+   * a corrupt archive is never accepted as authoritative — and the caller
+   * retries on the next sync with the current week still usable.
+   */
+  | { ok: false };
+
+/**
+ * Store-INTEGRITY failures (our own write did not persist, or did not verify)
+ * still throw out of here: PocketBase is not holding writes, and that is a hard
+ * outage every caller must see. Only unreadable stored DATA fails soft.
+ */
 async function archiveCanonicalWeek(
   pb: AdminPB,
   prior: CanonicalRows,
+  archiveRows: Row[],
   now: Date,
-): Promise<{ week: WeekData; changed: boolean }> {
-  const rows = (await readRows(pb, "week_archive")).filter(
+): Promise<ArchiveOutcome> {
+  const rows = archiveRows.filter(
     (row) => normalizeWeekStart(row.weekStart) === prior.week.weekStart,
   );
   if (rows.length === 0) {
@@ -284,25 +340,93 @@ async function archiveCanonicalWeek(
     if (verified.needsRepair || !sameWeek(verified.week, prior.week)) {
       throw new TypeError("week_archive_verification_failed");
     }
-    return { week: verified.week, changed: true };
+    return { ok: true, week: verified.week, changed: true };
   }
-  const observed = canonicalizeRows(rows, prior.week.weekStart);
+  let observed: CanonicalRows;
+  let week: WeekData;
+  try {
+    observed = canonicalizeRows(rows, prior.week.weekStart);
+    week = mergedArchiveWeek(prior, observed);
+  } catch {
+    return { ok: false };
+  }
   const group: CanonicalRows = {
     rows: observed.rows,
-    week: prior.week,
-    needsRepair: observed.needsRepair || !sameWeek(observed.week, prior.week),
+    week,
+    // Structural drift (duplicate rows, an unparseable row, a stale points
+    // map) OR a divergence between the two stores — both are repaired to the
+    // union, so a repair can only ever ADD the missing side, never drop one.
+    needsRepair: observed.needsRepair || !sameWeek(observed.week, week),
   };
+  if (!group.needsRepair) return { ok: true, week, changed: false };
   const archivedAt =
     typeof observed.rows[0].archivedAt === "string" && observed.rows[0].archivedAt
       ? observed.rows[0].archivedAt
       : now.toISOString();
   await reconcileCanonicalRows(pb, "week_archive", group, { archivedAt });
-  return { week: prior.week, changed: group.needsRepair };
+  return { ok: true, week, changed: true };
 }
 
 function validCompletedWeek(value: unknown): string | null {
   const week = typeof value === "string" ? value.trim() : "";
   return normalizeWeekStart(week);
+}
+
+/**
+ * B8 — a recurring LINEAGE is one chore, not a title coincidence.
+ *
+ * `recurringLineage` (title + recurrence + owner) treated two identically
+ * titled chores as one lineage. The sweep then tombstoned EVERY stale row in
+ * the group and spawned ONE clone, and a tombstone is not an undo: the second
+ * chore — and the points value a kid was earning on it — was gone for good.
+ * The weekly rollover deduped the same way but kept the LAST clone, silently
+ * dropping the other lineage's field differences.
+ *
+ * Two rows now only merge when they are provably the same chore: a clone
+ * records the row it came from (`recurringOriginId`) and the lineage keys on
+ * that, so the key is stable across generations; a legacy row predating the
+ * stamp falls back to the distinguishing fields below. Every field listed here
+ * is one `recurringClone` copies through VERBATIM — the crew roster, the crew
+ * speed bonus and the assignee emoji are deliberately excluded because the
+ * clone rewrites them, and `due` because it is the regeneration target.
+ */
+const LINEAGE_DISCRIMINATORS = [
+  "points",
+  "category",
+  "priority",
+  "crewSize",
+  "crewCloseMode",
+  "universal",
+  "stealable",
+  "expiresAfterDays",
+] as const;
+
+function lineageStamp(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
+  return "";
+}
+
+export function recurringLineageKey(task: SnapshotTask): string {
+  const origin = Number(task?.recurringOriginId);
+  if (Number.isSafeInteger(origin) && origin > 0) return `origin:${origin}`;
+  return [
+    recurringLineage(task),
+    ...LINEAGE_DISCRIMINATORS.map(
+      (key) => `${key}:${lineageStamp((task as Record<string, unknown>)[key])}`,
+    ),
+  ].join("\u0000");
+}
+
+/** A recurring clone that remembers the row it continues, so its lineage never
+ *  merges with a same-titled chore that happens to share its title. */
+export function recurringCloneWithOrigin(task: SnapshotTask, id: number, due: string): SnapshotTask {
+  const recorded = Number(task?.recurringOriginId);
+  const origin = Number.isSafeInteger(recorded) && recorded > 0 ? recorded : Number(task?.id);
+  return {
+    ...recurringClone(task, id, due),
+    recurringOriginId: Number.isSafeInteger(origin) && origin > 0 ? origin : null,
+  } as SnapshotTask;
 }
 
 export function resetRecurringTasksForWeek(
@@ -334,7 +458,7 @@ export function resetRecurringTasksForWeek(
   const lineageSources: SnapshotTask[] = [];
   const seenLineages = new Set<string>();
   for (const task of sourceTasks) {
-    const lineage = recurringLineage(task);
+    const lineage = recurringLineageKey(task);
     if (seenLineages.has(lineage)) continue;
     seenLineages.add(lineage);
     lineageSources.push(task);
@@ -350,7 +474,7 @@ export function resetRecurringTasksForWeek(
       id = Number(issueId(existing));
     }
     existing.add(id);
-    return recurringClone(task, id, current);
+    return recurringCloneWithOrigin(task, id, current);
   });
 
   return {
@@ -412,13 +536,66 @@ export function familyWeekStart(now: Date = new Date()): string {
   return localWeekStartISO(validNow(now));
 }
 
+/**
+ * LOCK ORDER (B3, the Monday boundary).
+ *
+ * The rollover is the ONLY path that takes more than one week-ledger lock; every
+ * other ledger writer (claim, approval, redeem, manage, the projection
+ * reconciler, the day sweep) takes exactly one, keyed by the week it writes.
+ * It therefore acquires its locks in one total order — ASCENDING weekStart, so
+ * the OLDEST week first and the current week LAST — and holds them for the whole
+ * body.
+ *
+ * That closes the boundary race: a claim landing at Sun 23:59:59.9 holds the
+ * OLDER week's lock, so it either commits before the rollover's read (its
+ * transaction is archived with the week) or after it (the next run's merged
+ * repair pulls it into the archive). Ascending order is the deadlock-free
+ * direction: no single-lock path can invert it, and this path is the only one
+ * that takes two.
+ */
+function withWeekLocksInOrder<T>(weeks: readonly string[], fn: () => Promise<T>): Promise<T> {
+  const [head, ...rest] = weeks;
+  if (!head) return fn();
+  return withWeekLedgerLock(head, () => withWeekLocksInOrder(rest, fn));
+}
+
+/**
+ * Which prior weeks might need archiving. Read-only and unlocked, purely to
+ * learn the lock set before any write; the body re-reads under the locks and
+ * only archives a week whose lock this run actually holds, so a peek that is
+ * stale or fails outright costs only deferred work, never a lost lock.
+ */
+async function peekPriorWeekStarts(weekStart: string): Promise<string[]> {
+  try {
+    return await withAdmin(async (pb): Promise<string[]> => {
+      const rows = await readRows(pb, "week_data");
+      return priorWeekStarts(rows, weekStart);
+    });
+  } catch {
+    return [];
+  }
+}
+
+function priorWeekStarts(rows: Row[], weekStart: string): string[] {
+  return [
+    ...new Set(
+      rows
+        .map((row) => normalizeWeekStart(row.weekStart))
+        .filter((value): value is string => value !== null && value < weekStart),
+    ),
+  ].sort();
+}
+
 export async function ensureCurrentTaskWeek(
   options: { now?: Date } = {},
 ): Promise<TaskWeekRolloverResult> {
   const now = validNow(options?.now ?? new Date());
   const weekStart = familyWeekStart(now);
+  const peeked = await peekPriorWeekStarts(weekStart);
+  const lockOrder = [...new Set([...peeked, weekStart])].sort();
+  const lockedWeeks = new Set(peeked);
 
-  return withWeekLedgerLock(weekStart, () =>
+  return withWeekLocksInOrder(lockOrder, () =>
     withAdmin(async (pb): Promise<TaskWeekRolloverResult> => {
       const initialSnapshot = await readSnapshotWithRevision();
       if (initialSnapshot.rowId != null && !Array.isArray(initialSnapshot.data.tasks)) {
@@ -431,30 +608,61 @@ export async function ensureCurrentTaskWeek(
           currentWeekData: emptyWeekData(weekStart),
           revision: initialSnapshot.revision,
           reconciled: false,
+          failed: [],
         };
       }
+      // ONE read of each store, taken under every lock held above: the
+      // per-week work below is already serialized against every writer that
+      // could touch those rows.
       const weekRows = await readRows(pb, "week_data");
+      const archiveRows = await readRows(pb, "week_archive");
       const normalizedRows = weekRows
         .map((row) => ({ row, weekStart: normalizeWeekStart(row.weekStart) }))
         .filter((entry): entry is { row: Row; weekStart: string } => entry.weekStart !== null);
-      const priorStarts = normalizedRows
-        .filter((entry) => entry.weekStart < weekStart)
-        .map((entry) => entry.weekStart)
-        .sort();
+      // B2: EVERY week older than the current one is archived, not just the
+      // most recent. `ensureCurrentWeekRow` can fail soft (and does, whenever
+      // the snapshot's task list is malformed), which skips a week entirely —
+      // with only the newest week archived, every older row stayed orphaned
+      // forever and its points vanished from all-time behind
+      // `historyComplete: true`. Nothing else ever deletes a week_data row.
+      const priorStarts = priorWeekStarts(weekRows, weekStart);
       const previousWeekStart = priorStarts.at(-1) ?? null;
-      let previous: CanonicalRows | null = null;
+      const archiveFailures: string[] = [];
       let archived = false;
 
-      if (previousWeekStart) {
-        previous = canonicalizeRows(
-          normalizedRows
-            .filter((entry) => entry.weekStart === previousWeekStart)
-            .map((entry) => entry.row),
-          previousWeekStart,
-        );
-        await reconcileCanonicalRows(pb, "week_data", previous);
-        const archiveResult = await archiveCanonicalWeek(pb, previous, now);
-        archived = archiveResult.changed;
+      for (const priorStart of priorStarts) {
+        // Not in this run's lock set (created after the peek): next run. It is
+        // deferred, never archived outside a lock.
+        if (!lockedWeeks.has(priorStart)) continue;
+        const priorRows = normalizedRows
+          .filter((entry) => entry.weekStart === priorStart)
+          .map((entry) => entry.row);
+        let prior: CanonicalRows;
+        try {
+          prior = canonicalizeRows(priorRows, priorStart);
+        } catch {
+          // B7, the fail-soft contract `ensureCurrentWeekRow` already uses: ONE
+          // unreadable prior week must not throw out of the rollover. A throw
+          // here 503s every sync and fails `task_store_unavailable` on claim,
+          // approve and ledger, so a single malformed transaction (a blank
+          // description, a non-integer id, an unknown type) left the family
+          // unable to complete a chore at all — indefinitely, with no
+          // self-heal. The current week is still created and usable, the
+          // archive is retried on the next sync, and the category below is the
+          // honest signal that it is still wrong.
+          archiveFailures.push("week_archive:invalid");
+          console.warn("[task-week-rollover] week_archive:invalid");
+          continue;
+        }
+        // A store that will not hold a write still throws, as it always did.
+        await reconcileCanonicalRows(pb, "week_data", prior);
+        const outcome = await archiveCanonicalWeek(pb, prior, archiveRows, now);
+        if (!outcome.ok) {
+          archiveFailures.push("week_archive:invalid");
+          console.warn("[task-week-rollover] week_archive:invalid");
+          continue;
+        }
+        archived = archived || outcome.changed;
       }
 
       const currentResult = await ensureCurrentWeekRow(pb, weekStart);
@@ -482,6 +690,7 @@ export async function ensureCurrentTaskWeek(
           currentWeekData: fallback,
           revision: existingSnapshot.revision,
           reconciled: false,
+          failed: [...archiveFailures, "week_data:invalid"],
         };
       }
 
@@ -516,7 +725,8 @@ export async function ensureCurrentTaskWeek(
           hallOfFameRecorded: projection.recorded,
           currentWeekData: currentWeek,
           revision: existingSnapshot.revision,
-          reconciled: projection.reconciled,
+          reconciled: archiveFailures.length === 0 && projection.reconciled,
+          failed: archiveFailures,
         };
       }
 
@@ -619,7 +829,8 @@ export async function ensureCurrentTaskWeek(
         hallOfFameRecorded: projection.recorded,
         currentWeekData: currentWeek,
         revision: verifiedSnapshot.revision,
-        reconciled: projection.reconciled && snapshotReconciled,
+        reconciled: archiveFailures.length === 0 && projection.reconciled && snapshotReconciled,
+        failed: archiveFailures,
       };
     }),
   );

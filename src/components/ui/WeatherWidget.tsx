@@ -918,11 +918,21 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // party accent, and the celebratory layers stay home until it passes.
   const accent = resolveAccent(rawSkin, holidayStyle?.accent);
   const headerSurfaces = weatherHeaderTextSurfaces(heroScene, isPaused, heroHeavySnow, heroSkyPhase);
-  const chromeInk = contrastSafeTextAccent(accent, headerSurfaces, "#1E293B");
+  const rawStops = posterTextSurface(heroScene, heroHeavySnow, heroSkyPhase);
+  const darkScene = heroScene === "storm" || heroHeavySnow;
+  // The header pill paints translucent glass over the RAW sky, but the walker's
+  // model only held the glass-lifted stops — on the real canvas the Details
+  // link measured 4.33:1 (clear), 4.41:1 (night) and 2.50:1 (storm), the
+  // critic's "hard-coded trio" family. The ink must clear the raw stops too.
+  // A dark scene cannot hold any ink across its thin-glass/thick-glass range,
+  // so those pills get a dark glass wash (see `pillWash`) and the ink walks
+  // over the raw stops with a white fallback.
+  const chromeSurfaces = darkScene ? rawStops : [...headerSurfaces, ...rawStops];
+  const chromeInk = contrastSafeTextAccent(accent, chromeSurfaces, darkScene ? "#FFFFFF" : "#1E293B");
   const holidayBadgeInk = holidayStyle
     ? contrastSafeTextAccent(
         holidayStyle.accent,
-        headerSurfaces.map((surface) => mixHex(surface, holidayStyle.accent, 0x22 / 255)),
+        chromeSurfaces.map((surface) => mixHex(surface, holidayStyle.accent, 0x22 / 255)),
         chromeInk
       )
     : chromeInk;
@@ -949,7 +959,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     // storm keeps white; every other scene (incl. the lightened night) reads
     // as a pastel that dark slate-800 ink passes AA on at every stop.
     const toyInk = heroScene === "storm" || heroHeavySnow ? "#FFFFFF" : "#1E293B";
-    const softAlpha = isBoosted ? 0.9 : heroScene === "storm" || heroHeavySnow ? 0.95 : 0.78;
+    // 0.78 was tuned against the glass-lifted model; on the real canvas the
+    // inkSoft lines (H:L, outlook, strip ticks) measured 4.41:1 on the night
+    // wash (and worse at the strip's thin-scrim bottom). 0.92 clears 4.5:1 on
+    // the worst painted stop of every light scene family (night 6.4:1).
+    const softAlpha = isBoosted ? 0.9 : heroScene === "storm" || heroHeavySnow ? 0.95 : 0.92;
     return {
       ...rawSkin,
       ink: toyInk,
@@ -963,6 +977,24 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     ? activeHour.temp == null ? null : conv(activeHour.temp)
     : (weatherData?.temp == null ? null : conv(weatherData.temp));
   const heroTemp = useAnimatedNumber(heroTempTarget ?? 0);
+
+  // Dark-scene pill wash: a translucent DARK glass replaces the white-glass
+  // gradient (inline background out-ranks the GLASS utility) so the header
+  // pill has a deterministic backdrop for the white-ish chromeInk. Without it
+  // no ink can clear both the raw storm stop and the white-glass lift at once.
+  const pillWash = darkScene
+    ? { background: "linear-gradient(135deg, rgba(10,14,26,0.72), rgba(10,14,26,0.46))" }
+    : undefined;
+
+  // The failed-fetch pill (the old `bg-amber-500/15 text-amber-900` raw
+  // palette literal) sits on whichever scene is live — including the dark
+  // storm wash — so its ink is the scene-independent walk over the pill's own
+  // amber-tinted surface, not a theme token.
+  const errorPillInk = contrastSafeTextAccent(
+    "#F59E0B",
+    (darkScene ? rawStops : headerSurfaces).map((surface) => mixHex(surface, "#F59E0B", 0.15)),
+    darkScene ? "#FFFFFF" : "#1E293B"
+  );
 
   const displayHigh = weatherData?.todayHigh == null ? null : conv(weatherData.todayHigh);
   const displayLow = weatherData?.todayLow == null ? null : conv(weatherData.todayLow);
@@ -1135,7 +1167,10 @@ export default function WeatherWidget({ className = "" }: { className?: string }
 
         <div className="pointer-events-none relative z-20 flex h-full min-h-0 flex-col px-4 pb-3 pt-3 sm:px-5 sm:pb-4 sm:pt-4">
           <div className="flex items-center justify-between gap-2">
-            <div className={`flex min-w-0 items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${heroScene === "storm" ? GLASS_NIGHT : GLASS}`}>
+            <div
+              className={`flex min-w-0 items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${heroScene === "storm" ? GLASS_NIGHT : GLASS}`}
+              style={pillWash}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
                 className="relative h-3.5 w-3.5 shrink-0" style={{ color: accent }}>
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
@@ -1160,7 +1195,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
               aria-controls="weather-details-dialog"
               aria-label="Open weather details"
               className={`pointer-events-auto relative z-30 flex min-h-[44px] items-center gap-1 rounded-full px-3 py-1 text-xs font-bold transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 ${heroScene === "storm" ? GLASS_NIGHT : GLASS}`}
-              style={{ color: chromeInk, ["--tw-ring-color" as string]: accent }}
+              style={{ color: chromeInk, ["--tw-ring-color" as string]: accent, ...pillWash }}
             >
               <span>Details</span>
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-60" aria-hidden="true">
@@ -1242,7 +1277,14 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                   </p>
                 )}
                 {fetchError && (
-                  <p className="pointer-events-auto mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-900" role="alert">
+                  <p
+                    className="pointer-events-auto mt-1.5 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
+                    role="alert"
+                    style={{
+                      background: "color-mix(in srgb, var(--color-accent-amber) 15%, transparent)",
+                      color: errorPillInk,
+                    }}
+                  >
                     {fetchError}
                     <button
                       type="button"

@@ -930,7 +930,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
         right={
           <button
             onClick={activeTab === "calendar" ? startAddEvent : startAddSched}
-            className="calendar-icon-btn"
+            className="calendar-icon-btn hit-44"
             aria-label={activeTab === "calendar" ? "Add event" : "Add routine"}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
@@ -1043,11 +1043,11 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                   {MONTHS[month]} <span className="calendar-month-year">{year}</span>
                 </h2>
                 <div className="calendar-month-nav">
-                  <button onClick={prevMonth} className="calendar-icon-btn" aria-label="Previous month">
+                  <button onClick={prevMonth} className="calendar-icon-btn hit-44" aria-label="Previous month">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </button>
                   <button onClick={goToToday} className="calendar-today-btn">Today</button>
-                  <button onClick={nextMonth} className="calendar-icon-btn" aria-label="Next month">
+                  <button onClick={nextMonth} className="calendar-icon-btn hit-44" aria-label="Next month">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </button>
                 </div>

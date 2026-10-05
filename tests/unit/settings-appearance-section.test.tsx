@@ -111,7 +111,7 @@ const customWriteCases = [
 
 const targetFallbackCases = [
   { target: "Selected", expected: "#3b82f6" },
-  { target: "Button", expected: "#2563eb" },
+  { target: "Button", expected: "#3b82f6" },
   { target: "Glow", expected: "#3b82f6" },
   { target: "Border", expected: "#3b82f6" },
 ] as const;

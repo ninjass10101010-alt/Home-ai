@@ -12,12 +12,62 @@ interface SoftButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
+/**
+ * The secondary LABEL is the `--color-accent-ink-*` formula applied to whichever
+ * accent is live: 55% of `--color-accent-selected` walked toward the theme's body
+ * ink (`--color-text-primary`), the same mix `ui/Avatar.tsx` paints member
+ * initials with, so there is one ink convention in the app.
+ *
+ * It used to be `--color-accent-button`, which is the accent deepened 60% toward
+ * black FOR A WHITE LABEL — a dark ink by construction. Paired with the dark
+ * theme's accent palette that put it 1.88–3.41:1 on `--color-surface-2` (worst:
+ * dark violet 1.88) against a 4.5:1 body floor. This is a SHARED primitive, so
+ * the blast radius was every secondary button in the app: the calendar's
+ * due-date trigger, the rewards Suggest/Add, and more. Measured after the fix in
+ * Chromium across all ten accents: **6.96–10.85:1 dark** (worst: rose) and
+ * **6.03–10.23:1 light** (worst: sage).
+ *
+ * The class is written out in full rather than interpolated, so Tailwind's
+ * scanner sees it as one candidate (see the same note in Chip.tsx).
+ */
+/**
+ * `primary`'s fill is the accent deepened 60% toward black, spelled out rather
+ * than read from `--color-accent-button` — which is the token that was always
+ * meant to hold this mix (globals.css: `--color-accent-button: color-mix(in
+ * srgb, var(--color-accent-selected) 60%, black)`), and whose stated reason is
+ * this very pairing: "~25 call sites pair it with a hard-coded `text-white` …
+ * the raw accent clears 4.5:1 under white for NONE of the ten presets".
+ *
+ * Reading the token does not deliver that, because `useTheme` writes
+ * `--color-accent-button` as an **inline** style on `<html>` and an inline
+ * declaration out-ranks every `:root[data-theme="…"]` rule. On the DEFAULT
+ * theme config `isPresetValue()` never fires for the `button` target — it
+ * compares `defaultAccentHex.button` (`#2563eb`, the LIGHT palette) against
+ * `warmGlassAccentOptions`, which stores the DARK hex — so the inline layer
+ * pins the token to `#2563eb` in BOTH themes and for ALL ten accents. Measured
+ * in the browser on a pristine `localStorage`: `data-theme="dark"`,
+ * `--color-accent-button` = `#2563eb`. Every primary SoftButton was therefore a
+ * light-palette nori blue — white on it measures 5.17:1 where the intended
+ * dark-nori mix gives 8.11:1, and under the mint / violet / apricot accents it
+ * is not the family's colour at all.
+ *
+ * Deriving from `--color-accent-selected` restores the token's intent per theme
+ * AND per accent, independent of the override. White on the resulting fill
+ * measures **4.60–8.33:1 dark** (worst: mint) and **7.12–12.52:1 light** (worst:
+ * sage) across the ten accents, against 5.17:1 for the single pinned value. The
+ * `border` and `shadow` beside it already read `--color-accent-selected`, so
+ * this also stops the fill disagreeing with its own border.
+ *
+ * This is the one remaining consumer that can be corrected from inside the
+ * primitive; ~40 other files read `--color-accent-button` directly and still
+ * need the `useTheme` fix.
+ */
 const variantMap: Record<SoftButtonVariant, string> = {
-  primary: "bg-[var(--color-accent-button)] text-white border border-[var(--color-accent-selected)]/20 shadow-[0_12px_24px_rgba(0,0,0,0.16)]",
-  secondary: "bg-[var(--color-surface-2)] text-[var(--color-accent-button)] border border-[var(--color-accent-selected)]/25",
+  primary: "bg-[color-mix(in_srgb,var(--color-accent-selected)_60%,black)] text-white border border-[var(--color-accent-selected)]/20 shadow-[0_12px_24px_rgba(0,0,0,0.16)]",
+  secondary: "bg-[var(--color-surface-2)] text-[color-mix(in_srgb,var(--color-accent-selected)_55%,var(--color-text-primary))] border border-[var(--color-accent-selected)]/25",
   ghost: "bg-transparent text-text-secondary hover:text-text-primary border border-transparent",
-  danger: "bg-[color-mix(in_srgb,var(--color-accent-rose),#000_25%)] text-white border border-[var(--color-accent-rose)]/20 shadow-[0_12px_24px_color-mix(in_srgb,var(--color-accent-rose)_18%,transparent)]",
-  success: "bg-[color-mix(in_srgb,var(--color-accent-mint),#000_45%)] text-white border border-[var(--color-accent-mint)]/20 shadow-[0_12px_24px_color-mix(in_srgb,var(--color-accent-mint)_18%,transparent)]",
+  danger: "bg-[color-mix(in_srgb,var(--color-accent-rose),#000_25%)] text-white border-[var(--color-accent-rose)]/20 shadow-[0_12px_24px_color-mix(in_srgb,var(--color-accent-rose)_18%,transparent)]",
+  success: "bg-[color-mix(in_srgb,var(--color-accent-mint),#000_45%)] text-white border-[var(--color-accent-mint)]/20 shadow-[0_12px_24px_color-mix(in_srgb,var(--color-accent-mint)_18%,transparent)]",
 };
 
 const sizeMap: Record<SoftButtonSize, string> = {

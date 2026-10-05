@@ -23,6 +23,13 @@ export function resolveDefaultMemberPin(name?: string): string {
   return MEMBER_DEFAULT_PINS[firstName] || "";
 }
 
+// The tasks-snapshot `data` json field cap (2026-10-05 incident): PB's default
+// 1 MiB maxSize rejected every member-assigned add once the blob passed ~960KB
+// (validation_json_size_limit). 8 MiB keeps the live blob — even before the
+// emoji slim heal runs — far under the cap. Coherence with the per-emoji
+// ceiling is pinned by tests/unit/snapshot-size-cap-guards.test.ts.
+export const SNAPSHOT_DATA_MAX_SIZE = 8_388_608;
+
 export const COLLECTIONS = [
   {
     name: "members",
@@ -213,6 +220,15 @@ export const COLLECTIONS = [
       { name: "archivedAt", type: "text" },
       { name: "points", type: "json" },
       { name: "streak", type: "json" },
+      // `week_payload()` writes the whole WeekData on every archive (points,
+      // streak, lastActive, history) and `sameWeek()` — the verification that
+      // decides whether the archive is trustworthy — compares `lastActive`.
+      // Without this field PocketBase silently DROPS the write, the archive
+      // reads back `{}` while the source week has a value, and the rollover
+      // throws `week_archive_verification_failed` → sync 503
+      // `rollover_unavailable` + `task_store_unavailable` on claim/approve.
+      // The seed only ever ADDS declared fields, so it could never heal.
+      { name: "lastActive", type: "json" },
       { name: "history", type: "json" },
       // Optional: legacy live field was required.
       { name: "userId", type: "text", required: false },
@@ -296,7 +312,11 @@ export const COLLECTIONS = [
     name: "consuela_data_snapshots",
     schema: [
       { name: "key", type: "text", required: true },
-      { name: "data", type: "json" },
+      // The whole tasks snapshot lives here; PB's default 1 MiB maxSize was
+      // tripped by photo-avatar emoji payloads copied into task rows. The
+      // explicit maxSize is self-healed (raised only) by the field-option
+      // drift pass below, like members.emoji's text max.
+      { name: "data", type: "json", options: { maxSize: SNAPSHOT_DATA_MAX_SIZE } },
       { name: "updated_at", type: "date" },
     ],
     indexes: [
@@ -1030,6 +1050,14 @@ export async function seedCollections() {
               const maxDrift = s.options?.max !== undefined && liveField.max !== s.options.max;
               return maxDrift ? { schemaField: s, liveField } : null;
             }
+            if (s.type === "json" && s.options?.maxSize !== undefined) {
+              // Raise-only: a live field at PB's default (1 MiB) or smaller is
+              // patched up to the seed's maxSize; a field someone raised
+              // higher (or set unlimited, maxSize 0) is never lowered.
+              const liveMaxSize = Number(liveField.maxSize ?? 0);
+              const maxSizeDrift = liveMaxSize > 0 && liveMaxSize < s.options.maxSize;
+              return maxSizeDrift ? { schemaField: s, liveField } : null;
+            }
             if (s.type === "select" && s.options?.values) {
               const seedValues = s.options.values;
               const liveValues = liveField.values || [];
@@ -1072,6 +1100,7 @@ export async function seedCollections() {
                   lf.values = d.schemaField.options.values;
                 } else {
                   if (d.schemaField.options?.max !== undefined) lf.max = d.schemaField.options.max;
+                  if (d.schemaField.options?.maxSize !== undefined) lf.maxSize = d.schemaField.options.maxSize;
                   if (d.schemaField.required !== undefined) lf.required = !!d.schemaField.required;
                 }
               }

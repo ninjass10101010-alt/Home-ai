@@ -125,24 +125,38 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   protectedWeeks.forEach((weekStart) => canonicalWeeks.delete(weekStart));
   const latestArchivedWeek = archivedWeeks.at(-1) ?? "";
   const expected = new Map<string, HallOfFameEntry>();
+  const historicalByKey = new Map<string, boolean>();
   let changed = 0;
 
-  const coreMatches = (row: any, entry: HallOfFameEntry) =>
+  // B4 — "prize text frozen at the rollover" is a CONTRACT, and this backfill
+  // runs on EVERY `GET /api/tasks/sync`, so comparing `prize` for a historical
+  // week made it a rewrite-everything lever: a parent editing the rank-1 prize
+  // on Wednesday silently rewrote `hall_of_fame.prize` for EVERY past podium
+  // (and deleting all `weekly_prizes` rows rewrote the whole history to the
+  // hardcoded `DEFAULT_WEEKLY_PRIZES` fallback). The rewrite was invisible —
+  // `celebrated` was preserved, so the ceremony did not re-fire.
+  //
+  // Only the NEWEST archived week may heal its prize text from the live
+  // catalog; a historical row keeps whatever text was frozen into it. An
+  // existing historical row with no prize keeps having none — inventing one
+  // would be the same silent rewrite.
+  const coreMatches = (row: any, entry: HallOfFameEntry, historical: boolean) =>
     !!row &&
     Number(row.points) === entry.points &&
     Number(row.rank) === entry.rank &&
     String(row.emoji || "") === entry.emoji &&
-    String(row.prize || "") === String(entry.prize || "");
+    (historical || String(row.prize || "") === String(entry.prize || ""));
 
-  const primaryRepairs: { id: string; entry: HallOfFameEntry }[] = [];
+  const primaryRepairs: { id: string; entry: HallOfFameEntry; historical: boolean }[] = [];
   for (const { weekStart, points } of archiveData) {
     const entries = hallEntriesForWeek(points, weekStart, emojis, prizeCatalog);
     const historical = weekStart !== latestArchivedWeek;
     for (const entry of entries) {
       const key = `${entry.member}\u0000${entry.weekStart}`;
       expected.set(key, entry);
+      historicalByKey.set(key, historical);
       const rows = byKey.get(key) ?? [];
-      const validRows = rows.filter((row) => coreMatches(row, entry));
+      const validRows = rows.filter((row) => coreMatches(row, entry, historical));
       const celebrated = validRows.some((candidate) => candidate.celebrated === true);
       if (rows.length === 0) {
         await pb.collection("hall_of_fame").create({
@@ -153,17 +167,22 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
         continue;
       }
       const primary = rows[0];
-      if (!coreMatches(primary, entry)) {
+      if (!coreMatches(primary, entry, historical)) {
         await pb.collection("hall_of_fame").update(primary.id, {
           member: entry.member,
           weekStart: entry.weekStart,
           emoji: entry.emoji,
           points: entry.points,
           rank: entry.rank,
-          prize: entry.prize ?? null,
-          celebrated,
+          // Never blank a frozen prize: keep the stored text for a historical
+          // week, whatever the catalog says now.
+          prize: historical ? (primary.prize ?? null) : (entry.prize ?? null),
+          // An older week has already had its ceremony; a repair must not
+          // re-arm it. The newest week keeps the "don't trust a stale
+          // celebration flag" rule.
+          celebrated: historical ? true : celebrated,
         }, { requestKey: null });
-        primaryRepairs.push({ id: String(primary.id), entry });
+        primaryRepairs.push({ id: String(primary.id), entry, historical });
         changed += 1;
       }
     }
@@ -174,7 +193,7 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
     const readBackById = new Map<string, any>();
     for (const row of Array.isArray(readBack) ? readBack : []) readBackById.set(String(row.id), row);
     for (const repair of primaryRepairs) {
-      if (!coreMatches(readBackById.get(repair.id), repair.entry)) {
+      if (!coreMatches(readBackById.get(repair.id), repair.entry, repair.historical)) {
         throw new Error("hall_of_fame_primary_verification_failed");
       }
     }
@@ -204,7 +223,7 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   }
   for (const [key, entry] of expected) {
     const rows = verifiedByKey.get(key) ?? [];
-    if (rows.length !== 1 || !coreMatches(rows[0], entry)) {
+    if (rows.length !== 1 || !coreMatches(rows[0], entry, historicalByKey.get(key) === true)) {
       throw new Error("hall_of_fame_write_verification_failed");
     }
   }

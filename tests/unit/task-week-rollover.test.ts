@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 import type { SnapshotTask } from "@/lib/snapshot-tasks";
 
 process.env.TZ = "America/Detroit";
@@ -17,10 +18,30 @@ import {
 } from "@/lib/task-week-rollover";
 import { __resetWeekLedgerLockForTests } from "@/lib/week-ledger-lock";
 import { reconcileTaskProjection } from "@/lib/task-projection-reconciler";
+import { SESSION_COOKIE, signSession } from "@/lib/session";
 
 const PRIOR = "2026-09-21";
 const CURRENT = "2026-09-28";
 const NOW = new Date("2026-09-28T12:00:00-04:00");
+
+// GET /api/tasks/sync is `GET(request: NextRequest)` and authorizes itself with
+// `requireLiveSession` before its three write legs, so it needs a request
+// carrying a genuinely signed session cookie — the same HMAC-cookie shape
+// `tasks-sync-legs.test.ts` builds for its POST leg. Only PocketBase is mocked:
+// `requireLiveSession` itself runs for real and re-reads the harness's member
+// row, so the cookie role and the live role have to agree.
+const LIVE_MEMBER = { id: "member-1", name: "Alex", role: "parent", emoji: "🦊" };
+
+async function syncRequest() {
+  const token = await signSession({
+    memberId: LIVE_MEMBER.id,
+    name: LIVE_MEMBER.name,
+    role: LIVE_MEMBER.role,
+  });
+  return new NextRequest("http://localhost/api/tasks/sync", {
+    headers: { cookie: `${SESSION_COOKIE}=${token}` },
+  });
+}
 
 type Row = Record<string, any>;
 
@@ -85,7 +106,7 @@ function createHarness(options: {
     tasks: [],
     consuela_data_snapshots: [],
     hall_of_fame: [],
-    members: [{ id: "member-1", name: "Alex", emoji: "🦊" }],
+    members: [{ ...LIVE_MEMBER }],
     weekly_prizes: [{ id: "prize-1", rank: 1, emoji: "🥇", text: "Pick the movie" }],
   };
   const calls = {
@@ -225,12 +246,16 @@ let warnSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   mocks.withAdmin.mockReset();
+  // The sync GET authorizes itself with a real HMAC session cookie; without a
+  // secret `verifySession` refuses every token and the leg is unreachable.
+  vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
   __resetWeekLedgerLockForTests();
   warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
   warnSpy.mockRestore();
+  vi.unstubAllEnvs();
 });
 
 describe("familyWeekStart", () => {
@@ -496,10 +521,15 @@ describe("ensureCurrentTaskWeek", () => {
       seedRollover(harness, [sourceTask({ id: 1 })]);
       mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
 
-      const response = await GET();
+      const response = await GET(await syncRequest());
       const body = await response.json();
 
-      expect(response.status).toBe(200);
+      // The title's guarantee — "surfaces reconciled false" — is unchanged; what
+      // changed is that the STATUS no longer contradicts it. Both consumers
+      // branch on the status alone, so an unreconciled rollover used to answer
+      // 200 with `reconciled: false` and both applied the snapshot anyway.
+      expect(response.status).not.toBe(200);
+      expect(response.status).toBe(503);
       expect(body.reconciled).toBe(false);
       expect(body.failed).toEqual(expect.arrayContaining(["rollover:pending"]));
       expect(warnSpy).toHaveBeenCalledWith("[task-week-rollover] projection reconciliation pending");
@@ -535,7 +565,7 @@ describe("ensureCurrentTaskWeek", () => {
       }];
       mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
 
-      const response = await GET();
+      const response = await GET(await syncRequest());
 
       expect(response.status).toBe(200);
       expect(harness.state.hall_of_fame).toHaveLength(1);
@@ -888,7 +918,7 @@ describe("GET /api/tasks/sync", () => {
       const harness = createHarness();
       mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
 
-      const response = await GET();
+      const response = await GET(await syncRequest());
       const body = await response.json();
 
       expect(response.status).toBe(200);

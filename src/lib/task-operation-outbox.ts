@@ -20,6 +20,10 @@ export const TASK_OUTBOX_MAX_AUTH_BACKOFF_MS = 30 * 60_000;
 export const TASK_OUTBOX_MAX_RECONCILE_BACKOFF_MS = 30 * 60_000;
 export const TASK_OUTBOX_REQUEST_TIMEOUT_MS = 30_000;
 export const TASK_OUTBOX_STORAGE_WRITE_ATTEMPTS = 2;
+// How many times one pump re-reads the outbox looking for work that arrived
+// while it was running. It exits as soon as a pass finds nothing new, so this
+// only bounds a writer that enqueues on every notification.
+export const TASK_OUTBOX_MAX_FLUSH_PASSES = 8;
 
 export type TaskOperationRoute =
   | "/api/tasks/claim"
@@ -160,14 +164,20 @@ const APPROVE_PAYLOAD_KEYS: Record<string, readonly string[]> = {
 };
 
 // A parent-authoritative point movement: a catalog penalty or a manual adjust.
+// `memberName` is the ACTOR whose PIN this command presents; `targetMemberName`
+// is the member whose balance actually moves and is OPTIONAL, defaulting to the
+// actor. Both must be admitted: a sanitizer that keeps only `memberName` turns a
+// queued child-target command into a SELF-adjust against the parent on replay —
+// the one thing the actor/target split exists to prevent, applied silently and
+// only while the device was offline.
 // A penalty carries an item id ONLY — the route refuses a client `points`
 // outright and reads the canonical value from the config leg, so admitting the
 // key here would advertise a field that can never be honoured. An adjust
 // carries the signed amount and its reason. The resulting BALANCE is never a
 // client input: the server re-derives it under the week-ledger lock.
 const LEDGER_PAYLOAD_KEYS: Record<string, readonly string[]> = {
-  penalty: ["memberName", "itemId"],
-  adjust: ["memberName", "amount", "reason"],
+  penalty: ["memberName", "targetMemberName", "itemId"],
+  adjust: ["memberName", "targetMemberName", "amount", "reason"],
 };
 
 // A redemption names the reward and the member; the stored reward row decides
@@ -314,6 +324,9 @@ const DUPLICATE_REASONS: ReadonlySet<string> = new Set(DUPLICATE_REASON_CODES);
 const EMPTY_SERVER_SNAPSHOT: TaskOutboxEntry[] = Object.freeze<TaskOutboxEntry[]>([]) as TaskOutboxEntry[];
 
 const RETAINED: FlushTaskOutboxResult = { acknowledged: 0, retryable: 1, permanent: 0 };
+// The entry left the outbox before its turn came, so there is nothing to report
+// about it: it was never sent, and it is no longer queued.
+const NOTHING_SENT: FlushTaskOutboxResult = { acknowledged: 0, retryable: 0, permanent: 0 };
 
 function cappedLadder(baseMs: number, capMs: number, step: number): number {
   const attempt = Math.max(1, Math.floor(step));
@@ -456,14 +469,25 @@ function createdMs(entry: TaskOutboxEntry): number {
   return Number.isFinite(epoch) ? epoch : 0;
 }
 
-function boundEntries(entries: TaskOutboxEntry[]): TaskOutboxEntry[] {
+interface BoundedEntries {
+  kept: TaskOutboxEntry[];
+  /**
+   * What the retention floor or `TASK_OUTBOX_MAX_ENTRIES` dropped. An evicted
+   * entry is GONE, so whatever optimistic mark it carried has no operation
+   * left to release it — a terminal event is owed for each one, exactly as it
+   * is for a cancel or a refusal.
+   */
+  evicted: TaskOutboxEntry[];
+}
+
+function boundEntries(entries: TaskOutboxEntry[]): BoundedEntries {
   const floor = Date.now() - TASK_OUTBOX_RETENTION_MS;
   const kept = entries
     .filter((entry) => entry.status === "failed" || createdMs(entry) >= floor)
     .sort((left, right) => createdMs(left) - createdMs(right));
-  return kept.length > TASK_OUTBOX_MAX_ENTRIES
-    ? kept.slice(kept.length - TASK_OUTBOX_MAX_ENTRIES)
-    : kept;
+  if (kept.length <= TASK_OUTBOX_MAX_ENTRIES) return { kept, evicted: [] };
+  const boundary = kept.length - TASK_OUTBOX_MAX_ENTRIES;
+  return { kept: kept.slice(boundary), evicted: kept.slice(0, boundary) };
 }
 
 function mergeByOperationId(
@@ -473,7 +497,7 @@ function mergeByOperationId(
   if (!extras.length) return stored;
   const extrasById = new Map(extras.map((entry) => [entry.operationId, entry]));
   const kept = stored.filter((entry) => !extrasById.has(entry.operationId));
-  return boundEntries([...kept, ...extras]);
+  return boundEntries([...kept, ...extras]).kept;
 }
 
 interface TaskOutboxIndex {
@@ -485,7 +509,22 @@ interface TaskOutboxIndex {
 let cache: TaskOutboxEntry[] | null = null;
 let cacheIndexRaw: string | null = null;
 let unpersisted = new Map<string, TaskOutboxEntry>();
-let inFlightByDriver = new WeakMap<TaskOutboxDriver, Promise<FlushTaskOutboxResult>>();
+// The in-flight guard is keyed on the OUTBOX, not on a driver object — see
+// flushGuardKey. `driverStack` is the stable identity every registered driver
+// shares.
+const driverStack: TaskOutboxDriver[] = [];
+let inFlightByDriver = new WeakMap<object, Promise<FlushTaskOutboxResult>>();
+// Operation ids whose request is on the wire RIGHT NOW. `reconciling` already
+// says "may already be applied" in the persisted status, and it is the only
+// status the UI's cancellable predicate excludes, so it is also the in-flight
+// marker (see markSendInFlight). This set is the module's own memory of the
+// same fact, so a cancel refuses the entry even if the persisted status has
+// not been re-read yet.
+const inFlightOperationIds = new Set<string>();
+// The raw legacy index this module instance has already rehydrated. Content
+// addressed, so a read loop cannot become a write loop.
+let legacyMigratedRaw: string | null = null;
+let flushScheduled = false;
 
 function isBrowser(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
@@ -569,50 +608,132 @@ function loadStoredEntries(index: TaskOutboxIndex): {
 }
 
 let orphanIds: string[] = [];
-let evictedEntryIds: string[] = [];
-let evictionPruneScheduled = false;
+let evictedEntries: TaskOutboxEntry[] = [];
+let pruneScheduled = false;
+let pruneGeneration = 0;
 
-function scheduleEvictionPrune(): void {
-  if (evictionPruneScheduled || typeof window === "undefined") return;
-  evictionPruneScheduled = true;
+function scheduleStoragePrune(): void {
+  if (pruneScheduled || typeof window === "undefined") return;
+  pruneScheduled = true;
+  const generation = pruneGeneration;
   const run = () => {
-    evictionPruneScheduled = false;
-    const ids = evictedEntryIds;
-    evictedEntryIds = [];
-    if (!ids.length) return;
-    try {
-      for (const id of ids) {
-        unpersisted.delete(id);
-        window.localStorage.removeItem(taskOutboxEntryStorageKey(id));
-      }
-    } catch {
-      /* storage unavailable — the index prune on the next write still wins */
+    if (generation !== pruneGeneration) {
+      // The module was reset while this prune was queued; the next write
+      // re-derives both lists, so a stale prune must not touch storage.
+      pruneScheduled = false;
+      return;
     }
+    pruneScheduled = false;
+    runStoragePrune();
   };
   if (typeof queueMicrotask === "function") queueMicrotask(run);
   else Promise.resolve().then(run);
 }
 
+function runStoragePrune(): void {
+  const dropped = evictedEntries;
+  const orphans = [...orphanIds];
+  evictedEntries = [];
+  if (!dropped.length && !orphans.length) return;
+  try {
+    for (const entry of dropped) {
+      unpersisted.delete(entry.operationId);
+      window.localStorage.removeItem(taskOutboxEntryStorageKey(entry.operationId));
+    }
+  } catch {
+    /* storage unavailable — the index prune on the next write still wins */
+  }
+  pruneOrphanIds(orphans);
+  if (!dropped.length) return;
+  // The terminal events go out one microtask LATER than the key removal, so a
+  // consumer that watches the outbox for the entry DISAPPEARING (the config
+  // client's refusal path does) settles on that signal first and never reads
+  // an eviction as a landing.
+  const run = () => notifyEvictedEntries(dropped);
+  if (typeof queueMicrotask === "function") queueMicrotask(run);
+  else Promise.resolve().then(run);
+}
+
+function notifyEvictedEntries(dropped: TaskOutboxEntry[]): void {
+  const seen = new Set<string>();
+  for (const entry of dropped) {
+    if (seen.has(entry.operationId)) continue;
+    seen.add(entry.operationId);
+    notifyAcknowledged({
+      operationId: entry.operationId,
+      action: entry.action,
+      failed: true,
+      evicted: true,
+      reason: "outbox_evicted",
+    });
+  }
+}
+
+/**
+ * An index id with no per-entry key is a GHOST: it names an operation whose
+ * record is gone, so the outbox can never act on it, cancel it, or age it out
+ * — the id just sits in the index forever. The prune used to happen only as a
+ * side effect of the next real mutation, which meant a device that only ever
+ * READ the outbox (a parent who queued on another device and never touched
+ * this one) accumulated them indefinitely. It is DEFERRED for the same reason
+ * the key removal is: a read must not write synchronously.
+ */
+function pruneOrphanIds(ids: string[]): void {
+  if (!ids.length || !isBrowser()) return;
+  try {
+    const index = parseIndex(readIndexRaw());
+    if (!index.ids.length) return;
+    const dropping = new Set(ids);
+    // Re-read each candidate: an id that gained a record between the read and
+    // this prune is a live entry, not a ghost, and must be kept.
+    const kept = index.ids.filter((id) => !dropping.has(id) || readStoredEntry(id) !== null);
+    if (kept.length === index.ids.length) return;
+    window.localStorage.setItem(
+      TASK_OUTBOX_STORAGE_KEY,
+      JSON.stringify({ rev: index.rev + 1, ids: kept }),
+    );
+  } catch {
+    /* the next real mutation prunes the same ids */
+  }
+}
+
 function readRaw(): TaskOutboxEntry[] {
   if (!isBrowser()) return EMPTY_SERVER_SNAPSHOT;
+  // A legacy whole-ARRAY index is rehydrated into per-entry keys HERE, BEFORE
+  // the cache short-circuit. On a COLD load `cache` is null, so the first
+  // readRaw() — driven by useSyncExternalStore DURING render, long before any
+  // mutation — parsed the array, found every id pointing at a per-entry key
+  // that did not exist yet, and returned `[]`: every command the current build
+  // had queued was silently dropped until a NEW command was queued in the same
+  // session (which is when migrateLegacyIndex finally ran, inside
+  // mutateOutbox). The array shape is still read, never rewritten in place:
+  // the first real mutation commits a `{rev, ids}` index and the guard below
+  // then goes quiet on its own.
+  migrateLegacyIndex();
   const raw = readIndexRaw();
   if (cache && raw === cacheIndexRaw) return cache;
   const index = parseIndex(raw);
-  const extras = index.legacy && cache ? [...cache, ...unpersisted.values()] : [...unpersisted.values()];
+  const legacyEntries = index.legacy ? parseLegacyEntries() : [];
+  const extras = [
+    ...(index.legacy && cache ? cache : []),
+    ...legacyEntries,
+    ...unpersisted.values(),
+  ];
   const loaded = loadStoredEntries(index);
   orphanIds = loaded.orphanIds;
   const merged = mergeByOperationId(loaded.entries, extras);
   const bounded = boundEntries(merged);
-  const evicted = collectEvictedEntryIds(merged, bounded);
-  releaseEvictedCredentials(merged, bounded);
-  if (evicted.length > 0) {
+  const evicted = collectEvictedEntryIds(merged, bounded.kept);
+  releaseEvictedCredentials(merged, bounded.kept);
+  if (evicted.length > 0 || orphanIds.length > 0) {
     // A bounded list is re-anchored through the normal write path so the index
-    // and the per-entry keys agree again. It is coalesced behind the cached
-    // index so a read loop cannot turn into a write loop.
-    evictedEntryIds = [...new Set([...evictedEntryIds, ...evicted])];
-    scheduleEvictionPrune();
+    // and the per-entry keys agree again, and an index that points at records
+    // which are gone is pruned. Both are coalesced behind the cached index so a
+    // read loop cannot turn into a write loop.
+    evictedEntries = [...evictedEntries, ...evicted];
+    scheduleStoragePrune();
   }
-  cache = bounded;
+  cache = bounded.kept;
   cacheIndexRaw = raw;
   return cache;
 }
@@ -629,31 +750,55 @@ function releaseEvictedCredentials(merged: TaskOutboxEntry[], bounded: TaskOutbo
 
 /**
  * A READ must not write SYNCHRONOUSLY. The evicted per-entry keys are therefore
- * not removed inline; the ids are collected here and the removal is DEFERRED to
- * a microtask (see scheduleEvictionPrune), coalesced behind the cached index so
- * a read loop cannot turn into a write loop. The next real mutation also drops
- * them, because commitEntries diffs against the bounded list — so the deferred
- * prune is a promptness fix, not a correctness one.
+ * not removed inline; the entries are collected here and the removal is DEFERRED
+ * to a microtask (see scheduleStoragePrune), coalesced behind the cached index
+ * so a read loop cannot turn into a write loop. The next real mutation also
+ * drops them, because commitEntries diffs against the bounded list — so the
+ * deferred prune is a promptness fix, not a correctness one.
+ *
+ * The whole ENTRY is kept, not just its id: an evicted operation is terminal
+ * for its consumer too, and the terminal event has to carry the action so a
+ * listener can tell an approval from a claim.
  */
 function collectEvictedEntryIds(
   merged: TaskOutboxEntry[],
   bounded: TaskOutboxEntry[],
-): string[] {
+): TaskOutboxEntry[] {
   if (merged.length === bounded.length) return [];
   const kept = new Set(bounded.map((entry) => entry.operationId));
-  return merged.filter((entry) => !kept.has(entry.operationId)).map((entry) => entry.operationId);
+  return merged.filter((entry) => !kept.has(entry.operationId));
 }
 
-function migrateLegacyIndex(): void {
-  if (!isBrowser()) return;
+function parseLegacyEntries(): TaskOutboxEntry[] {
+  if (!isBrowser()) return [];
   let parsed: unknown = null;
   try {
     const raw = readIndexRaw();
     parsed = raw ? JSON.parse(raw) : null;
   } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((value) => parseEntry(value))
+    .filter((entry): entry is TaskOutboxEntry => Boolean(entry));
+}
+
+function migrateLegacyIndex(): void {
+  if (!isBrowser()) return;
+  const raw = readIndexRaw();
+  if (!raw || raw === legacyMigratedRaw) return;
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    legacyMigratedRaw = raw;
     return;
   }
-  if (!Array.isArray(parsed)) return;
+  if (!Array.isArray(parsed)) {
+    legacyMigratedRaw = raw;
+    return;
+  }
   for (const value of parsed) {
     const entry = parseEntry(value);
     if (!entry) continue;
@@ -664,6 +809,7 @@ function migrateLegacyIndex(): void {
       unpersisted.set(entry.operationId, entry);
     }
   }
+  legacyMigratedRaw = raw;
 }
 
 function rememberUnpersisted(entries: TaskOutboxEntry[]): void {
@@ -733,7 +879,15 @@ function mutateOutbox(reducer: (fresh: TaskOutboxEntry[]) => TaskOutboxEntry[]):
   let previous: TaskOutboxEntry[] = cache ?? EMPTY_SERVER_SNAPSHOT;
   for (let attempt = 0; attempt < TASK_OUTBOX_STORAGE_WRITE_ATTEMPTS; attempt += 1) {
     previous = readRaw();
-    next = boundEntries(reducer(previous));
+    const bounded = boundEntries(reducer(previous));
+    next = bounded.kept;
+    // The cap can bite HERE as well as on a read, and on the degraded
+    // (memory-only) path below no read follows to diff the two lists, so the
+    // eviction is recorded at the only place that knows what it dropped.
+    if (bounded.evicted.length) {
+      evictedEntries = [...evictedEntries, ...bounded.evicted];
+      scheduleStoragePrune();
+    }
     if (!commitEntries(next, previous)) {
       notify();
       return cache ?? next;
@@ -757,6 +911,19 @@ function mutateOutbox(reducer: (fresh: TaskOutboxEntry[]) => TaskOutboxEntry[]):
 // landed carries them, a local cancel raises the event with no body at all, and
 // every consumer must read them defensively (`0` is omitted by the routes, an
 // older ack shape simply has no key).
+//
+// This is the module's TERMINAL event, and there is more than one way to reach
+// it. Removal from the outbox IS the terminal outcome — there is deliberately
+// no `done` status — so a consumer that keys an optimistic mark on the
+// operation id must release it on EVERY one of these, not only on a success:
+//   · a landing      — the server applied it and the ack was adopted
+//   · a local cancel — the user took it back before it was sent
+//   · `failed: true` — a refusal; the entry stays, unfixable, but it will
+//                      NEVER be applied, so the mark must come off
+//   · `evicted: true`— the entry was dropped by the entry cap or the retention
+//                      floor, so nothing is left to release the mark at all
+// Releasing only on a success is what stranded a rejected Add's "⏳ Saving"
+// row next to "⚠️ 1 couldn't be sent" forever.
 export interface TaskOutboxAcknowledgedEvent {
   operationId?: string;
   /** The landed entry's action, so a listener can tell an approval from a claim. */
@@ -765,6 +932,17 @@ export interface TaskOutboxAcknowledgedEvent {
   cleared?: number;
   /** Award-list members the server left out — surfaced as eligibility, never as a timestamp. */
   skipped?: number;
+  /**
+   * Terminal WITHOUT a landing: the command will never be applied. A consumer
+   * releases its optimistic mark on this exactly as it does on a success — the
+   * difference is only whether the row is now true on the server.
+   */
+  failed?: boolean;
+  /** The entry was DROPPED from the outbox (entry cap / retention floor). */
+  evicted?: boolean;
+  /** The machine reason behind a `failed` terminal event. */
+  reason?: string;
+  category?: TaskOutboxErrorCategory;
 }
 
 // A separate signal from the acknowledgment: the canonical STORES were just
@@ -919,7 +1097,7 @@ export function enqueueTaskOperation(
     throw new TypeError(`unsupported_task_operation:${String(input.route)}:${action}`);
   }
   const operationId = normalizeOperationId(input.operationId) ?? createTaskOperationId();
-  const entry: TaskOutboxEntry = {
+  const fresh: TaskOutboxEntry = {
     version: 1,
     operationId,
     route: input.route,
@@ -932,11 +1110,38 @@ export function enqueueTaskOperation(
     ...(input.lastErrorCategory ? { lastErrorCategory: input.lastErrorCategory } : {}),
     ...(input.nextAttemptAt ? { nextAttemptAt: input.nextAttemptAt } : {}),
   };
-  mutateOutbox((current) => [
-    ...current.filter((candidate) => candidate.operationId !== operationId),
-    entry,
-  ]);
-  return entry;
+  const stored = mutateOutbox((current) => {
+    const existing = current.find((candidate) => candidate.operationId === operationId);
+    // Re-queuing a KNOWN operation id is a retry of the same command, not a new
+    // one: `RewardsShop` reuses one id across its retries so the double-tap
+    // window stays ONE deduction. The old behaviour dropped the entry and
+    // appended a fresh one, which reset `attemptCount` to 0 — so
+    // TASK_OUTBOX_MAX_ATTEMPTS was no bound at all on how many times a single
+    // operation could reach the wire. The budget is the same command's budget,
+    // so it survives the re-queue; the backoff does not, because an explicit
+    // re-queue IS the retry the backoff was waiting for (a kid tapping redeem
+    // again must not be told to wait out the ladder).
+    const entry: TaskOutboxEntry = existing
+      ? {
+          ...fresh,
+          attemptCount: existing.attemptCount,
+          ...(existing.authAttemptCount !== undefined
+            ? { authAttemptCount: existing.authAttemptCount }
+            : {}),
+          ...(existing.reconcileAttemptCount !== undefined
+            ? { reconcileAttemptCount: existing.reconcileAttemptCount }
+            : {}),
+        }
+      : fresh;
+    return [...current.filter((candidate) => candidate.operationId !== operationId), entry];
+  });
+  // The command is durable now, so ask for a pump. `mutateOutbox`'s notify()
+  // only wakes React subscribers — nothing re-pumped, so an operation queued
+  // while a flush was in flight sat until some unrelated later trigger. The
+  // pump's own pass loop would pick it up too; this makes the common case (a
+  // fresh command, nothing else in flight) not wait for that at all.
+  scheduleFlush();
+  return stored.find((candidate) => candidate.operationId === operationId) ?? fresh;
 }
 
 export function removeTaskOutboxEntry(operationId: string): boolean {
@@ -948,7 +1153,20 @@ export function removeTaskOutboxEntry(operationId: string): boolean {
   return removed;
 }
 
+/**
+ * Take an entry back before it is sent.
+ *
+ * The one thing this must never do is remove an entry whose request is ALREADY
+ * on the wire: the server goes on to complete the chore and pay the points,
+ * the entry is deleted so the ack is never adopted, and the row snaps back to
+ * un-completed with no points and no ledger line until the next 60s refresh.
+ * `markSendInFlight` moves the entry into `reconciling` — the status the UI's
+ * cancellable predicate already excludes — before the request leaves, and
+ * `inFlightOperationIds` is the module's own memory of the same fact for the
+ * instant before that write is re-read.
+ */
 export function cancelTaskOutboxEntry(operationId: string): boolean {
+  if (inFlightOperationIds.has(operationId)) return false;
   const entry = readRaw().find((candidate) => candidate.operationId === operationId);
   if (!entry) return false;
   if (entry.status === "reconciling") return false;
@@ -1025,6 +1243,10 @@ export function taskOutboxReconcileBackoffMs(reconcileAttemptCount: number): num
  * `unknown-task` (hyphenated) is deliberately absent: the approve route does send
  * it in `error`, but always alongside `reason` and `code`, so `reasonOf` returns at
  * the machine channel and the vocabulary is never consulted.
+ * `pet_target` is a member of `LedgerFailureReason`, which no `AssertNever` guard
+ * covers. It is registered because the ledger route delivers it on `reason` with a
+ * 403, so the vocabulary is never consulted for it and no existing outcome changes
+ * — it is here so a future `error`-channel delivery cannot degrade to "unavailable".
  * `invalid_task_field` is gone because no route emits it.
  */
 const ERROR_CHANNEL_CODE_LIST = [
@@ -1043,6 +1265,7 @@ const ERROR_CHANNEL_CODE_LIST = [
   "member_lookup_failed",
   "member_missing",
   "pet_assignee",
+  "pet_target",
   "pin_required",
   "unknown_assignee",
   "unknown_task",
@@ -1095,13 +1318,15 @@ function serverMessageOf(body: TaskOutboxAcknowledgement): string {
 }
 
 /**
- * The two display/sentinel fields, written (or cleared) on every state change.
- *
  * `credentialMissing` is set ONLY here, from `markAuthRequired(..., deferred:
  * false)` — the one place this module decides a credential is absent. It exists
  * so that `runFlush`'s "never attempt this again without a credential" skip
  * reads a boolean it owns instead of string-matching `lastErrorReason`, which
- * no server response of any kind can then set to the sentinel's name.
+ * no server response of any kind can then set to the sentinel's name. Nothing
+ * else may set it: a route that needs a PIN only SOMETIMES (`redeem` above 100
+ * points) answers 401 for a member PIN just as readily as for a dead session,
+ * so treating "this route never always needs a PIN" as "the session expired"
+ * would hold a redemption forever.
  */
 function entryExtras(
   message: string,
@@ -1138,19 +1363,44 @@ function markRetryable(
   return RETAINED;
 }
 
+/**
+ * A refusal is TERMINAL, and terminal is an EVENT, not just a status.
+ *
+ * `patchEntry` alone left the optimistic mark that keyed on the operation id
+ * with nothing left to release it: the entry stayed in the outbox (the pump
+ * skips `failed` forever), so the acknowledgement listener — the Tasks page's
+ * ONLY releaser — never fired, and a rejected Add rendered "⏳ Saving" next to
+ * "⚠️ 1 couldn't be sent" until a reload. The same held for a rejected Delete,
+ * where the chore simply vanished with no confirmation and the only recovery
+ * was pressing Cancel on the right row of the banner.
+ *
+ * The event is raised AFTER the patch, and that order is load-bearing: the
+ * patch notifies the outbox subscribers first, so a consumer that watches for
+ * the entry's status (`task-config-client` reads `failed` there) settles on its
+ * refusal and unsubscribes before this reaches the acknowledgment listeners.
+ */
 function markFailed(
   entry: TaskOutboxEntry,
   category: TaskOutboxErrorCategory,
   reason: string,
   message = "",
 ): FlushTaskOutboxResult {
-  patchEntry(entry.operationId, {
+  const failed = patchEntry(entry.operationId, {
     status: "failed",
     lastErrorCategory: category,
     lastErrorReason: reason,
     ...entryExtras(message),
     nextAttemptAt: undefined,
   });
+  if (failed) {
+    notifyAcknowledged({
+      operationId: entry.operationId,
+      action: entry.action,
+      failed: true,
+      reason,
+      category,
+    });
+  }
   return { acknowledged: 0, retryable: 0, permanent: 1 };
 }
 
@@ -1171,6 +1421,15 @@ function markAuthRequired(
     return RETAINED;
   }
   const authAttemptCount = (entry.authAttemptCount ?? 0) + 1;
+  // The deferred branch had NO ceiling, and `classifyFailure` routes EVERY 401
+  // into it, so an entry re-POSTed itself on the 2s→30min auth ladder forever:
+  // TASK_OUTBOX_MAX_ATTEMPTS was not a bound on anything. The same ceiling the
+  // retryable path honours applies here, so a command the server keeps refusing
+  // ends as a refusal — with its terminal event, so the family's optimistic row
+  // comes off — instead of spinning under copy that promises a PIN.
+  if (authAttemptCount >= TASK_OUTBOX_MAX_ATTEMPTS) {
+    return markFailed(entry, "unauthorized", reason || "unauthorized", message);
+  }
   patchEntry(entry.operationId, {
     status: "auth-required",
     lastErrorCategory: "unauthorized",
@@ -1180,6 +1439,39 @@ function markAuthRequired(
     nextAttemptAt: new Date(Date.now() + taskOutboxAuthBackoffMs(authAttemptCount)).toISOString(),
   });
   return RETAINED;
+}
+
+/**
+ * Mark an operation in-flight, BEFORE its request leaves.
+ *
+ * `processEntry` used to write no status at all until the response came back, so
+ * for the whole `TASK_OUTBOX_REQUEST_TIMEOUT_MS` window the persisted status was
+ * still `queued` / `retrying` / `auth-required` — all of which the UI's
+ * cancellable predicate (`status !== "reconciling"`, mirrored in the Tasks page
+ * and KidHome) admits. A cancel in that window did exactly what it was asked
+ * to: removed the entry and released the optimistic mark, so the ack was never
+ * adopted and the server's applied chore was invisible until the next refresh.
+ *
+ * `reconciling` is the right marker and not an invention: it already means "may
+ * already be applied, do not offer a cancel", and it is the ONLY status the
+ * existing renderers exclude — a new status would still render as cancellable.
+ * Every PRE-send failure path (a throwing credential resolver, a missing
+ * credential, a refused socket) reverts to a cancellable status through
+ * markRetryable / markAuthRequired, and every POST-send outcome either removes
+ * the entry or names its own status, so the window is exactly the window.
+ */
+function markSendInFlight(entry: TaskOutboxEntry): void {
+  inFlightOperationIds.add(entry.operationId);
+  patchEntry(entry.operationId, {
+    status: "reconciling",
+    lastErrorCategory: "projection",
+    lastErrorReason: "send_in_flight",
+    nextAttemptAt: undefined,
+  });
+}
+
+function clearSendInFlight(operationId: string): void {
+  inFlightOperationIds.delete(operationId);
 }
 
 function markReconciling(entry: TaskOutboxEntry, reason: string, message = ""): FlushTaskOutboxResult {
@@ -1800,7 +2092,6 @@ export function createFetchTaskOutboxDriver(
   };
 }
 
-const driverStack: TaskOutboxDriver[] = [];
 let fallbackDriver: TaskOutboxDriver | null = null;
 
 export function registerTaskOutboxDriver(driver: Partial<TaskOutboxDriver>): () => void {
@@ -1836,6 +2127,13 @@ export function warnTaskOutboxStorageFailure(): void {
   console.warn("[task-outbox] storage write degraded to memory only");
 }
 
+/**
+ * The index ids with no per-entry record behind them. They are a real signal,
+ * not dead bookkeeping: a read used to leave them in the index for good, so a
+ * device that only ever READ the outbox accumulated ghosts forever. The prune
+ * is now scheduled (deferred — a read must not write synchronously) and runs
+ * from `runStoragePrune`.
+ */
 export function taskOutboxOrphanStorageIds(): string[] {
   return [...orphanIds];
 }
@@ -1892,38 +2190,55 @@ async function processEntry(
     return markAuthRequired(entry, "credential_missing", false);
   }
 
-  let status = 0;
-  let body: TaskOutboxAcknowledgement = { operationId: entry.operationId };
-  try {
-    const response = await options.send(entry, credential);
-    status = Number(response?.status ?? 0);
-    if (isRecord(response?.body)) body = response.body as TaskOutboxAcknowledgement;
-  } catch {
-    return markRetryable(entry, "network", "send_failed");
+  // The window opens HERE: everything above it returned without touching the
+  // network, so a cancel was still safe. Everything below it may already have
+  // been applied, so the entry is non-cancellable for the whole request.
+  //
+  // The liveness read closes the other side of the same race. A pump iterates
+  // the entries it read at the top of the pass, so a cancel that lands while an
+  // EARLIER entry is awaiting its response left this one already scheduled: the
+  // family was told "taken back" and the command went out anyway. `readRaw`
+  // serves the cache here, so this costs a scan of a bounded list and no I/O.
+  if (!readRaw().some((candidate) => candidate.operationId === entry.operationId)) {
+    return NOTHING_SENT;
   }
-
+  markSendInFlight(entry);
   try {
-    if (acknowledgedInFull(entry, status, body)) {
-      return await acknowledge(entry, body, options);
+    let status = 0;
+    let body: TaskOutboxAcknowledgement = { operationId: entry.operationId };
+    try {
+      const response = await options.send(entry, credential);
+      status = Number(response?.status ?? 0);
+      if (isRecord(response?.body)) body = response.body as TaskOutboxAcknowledgement;
+    } catch {
+      return markRetryable(entry, "network", "send_failed");
     }
-    if (status === 200 || status === 202 || status === 409) {
-      const proof = await resolveSnapshotProof(entry, body, options);
-      if (proof.kind === "proven") return await acknowledge(entry, proof.acknowledgement, options);
-      if (proof.kind === "blocked") return markReconciling(entry, "projection_pending");
-      if (status === 409) return await classifyConflict(entry, body);
-      if (status === 200) return markRetryable(entry, "projection", "unreconciled_success");
-      return markReconciling(entry, reasonOf(body) || "projection_pending");
+
+    try {
+      if (acknowledgedInFull(entry, status, body)) {
+        return await acknowledge(entry, body, options);
+      }
+      if (status === 200 || status === 202 || status === 409) {
+        const proof = await resolveSnapshotProof(entry, body, options);
+        if (proof.kind === "proven") return await acknowledge(entry, proof.acknowledgement, options);
+        if (proof.kind === "blocked") return markReconciling(entry, "projection_pending");
+        if (status === 409) return await classifyConflict(entry, body);
+        if (status === 200) return markRetryable(entry, "projection", "unreconciled_success");
+        return markReconciling(entry, reasonOf(body) || "projection_pending");
+      }
+      const stranded = strandedTaskId(entry, status, body);
+      if (stranded !== null) {
+        // `acknowledge()` needs the adoption seam; without it the row cannot
+        // actually leave the screen, and it degrades to "adoption_unavailable"
+        // rather than reporting a success that never happened.
+        return await acknowledge(entry, { ...body, taskId: stranded, deleted: true }, options);
+      }
+      return classifyFailure(entry, status, body);
+    } catch {
+      return markRetryable(entry, "network", "acknowledgement_failed");
     }
-    const stranded = strandedTaskId(entry, status, body);
-    if (stranded !== null) {
-      // `acknowledge()` needs the adoption seam; without it the row cannot
-      // actually leave the screen, and it degrades to "adoption_unavailable"
-      // rather than reporting a success that never happened.
-      return await acknowledge(entry, { ...body, taskId: stranded, deleted: true }, options);
-    }
-    return classifyFailure(entry, status, body);
-  } catch {
-    return markRetryable(entry, "network", "acknowledgement_failed");
+  } finally {
+    clearSendInFlight(entry.operationId);
   }
 }
 
@@ -1936,54 +2251,146 @@ function mergeResults(
   target.permanent += outcome.permanent;
 }
 
+/**
+ * The task rows an operation touches, as ordering keys. A command's order
+ * relative to another command on the SAME row is not advisory: op1 and op2 both
+ * write the row, so whoever the server applies last wins. Two operations with
+ * no shared task row (a config leg, a ledger adjust) are independent and are
+ * never held behind each other.
+ */
+function taskOrderKeys(entry: TaskOutboxEntry): string[] {
+  const keys: string[] = [];
+  // A task row is a POSITIVE id: `Number(null)` is 0, and an optional key the
+  // sanitizer kept must not become a shared ordering slot of its own.
+  const positive = (value: unknown): string | null => {
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? `task:${id}` : null;
+  };
+  const single = positive(entry.payload.taskId);
+  if (single) keys.push(single);
+  const many = entry.payload.taskIds;
+  if (Array.isArray(many)) {
+    for (const value of many) {
+      const key = positive(value);
+      if (key && !keys.includes(key)) keys.push(key);
+    }
+  }
+  return keys;
+}
+
 async function runFlush(options: FlushTaskOutboxOptions): Promise<FlushTaskOutboxResult> {
   const result: FlushTaskOutboxResult = { acknowledged: 0, retryable: 0, permanent: 0 };
-  let entries: TaskOutboxEntry[] = [];
-  try {
-    entries = readRaw();
-  } catch {
-    return result;
-  }
-  for (const entry of entries) {
+  // A pump is one pass over the entries it saw PLUS whatever arrived while it
+  // ran. The outbox is a durable store that other code paths keep writing to (a
+  // second modal, the chat action runner, another tab's write), and the old
+  // single snapshot meant an operation queued during an in-flight flush was not
+  // sent until some unrelated later trigger — a 60s refresh, an online event, a
+  // remount. The loop exits when a pass finds nothing this pump has not already
+  // considered, so it cannot spin; the cap is a belt-and-braces bound for a
+  // writer that enqueues on every notification.
+  const handled = new Set<string>();
+  for (let pass = 0; pass < TASK_OUTBOX_MAX_FLUSH_PASSES; pass += 1) {
+    let entries: TaskOutboxEntry[] = [];
     try {
-      if (entry.status === "failed") continue;
-      if (
-        entry.status === "auth-required" &&
-        entry.credentialMissing === true &&
-        !options.getCredential?.(entry)
-      ) {
+      entries = readRaw();
+    } catch {
+      return result;
+    }
+    const fresh = entries.filter((entry) => !handled.has(entry.operationId));
+    if (!fresh.length) return result;
+    // Rows whose EARLIER command is still waiting. Sending a later command on
+    // the same row first would let the earlier one overwrite it server-side
+    // while the app's own ledger showed the later value: the app contradicting
+    // itself, with the last edit lost. `retrying`, a deferred `auth-required`
+    // and a reconciling wait all set `nextAttemptAt`, so this skip fires on the
+    // most common path of all — one transient network failure.
+    const heldTasks = new Set<string>();
+    for (const entry of fresh) {
+      handled.add(entry.operationId);
+      try {
+        if (entry.status === "failed") continue;
+        if (inFlightOperationIds.has(entry.operationId)) continue;
+        const keys = taskOrderKeys(entry);
+        if (keys.some((key) => heldTasks.has(key))) continue;
+        if (
+          entry.status === "auth-required" &&
+          entry.credentialMissing === true &&
+          !options.getCredential?.(entry)
+        ) {
+          for (const key of keys) heldTasks.add(key);
+          continue;
+        }
+        if (entry.nextAttemptAt) {
+          const due = Date.parse(entry.nextAttemptAt);
+          if (Number.isFinite(due) && Date.now() < due) {
+            for (const key of keys) heldTasks.add(key);
+            continue;
+          }
+        }
+        let outcome: FlushTaskOutboxResult;
+        try {
+          outcome = await processEntry(entry, options);
+        } catch {
+          outcome = markRetryable(entry, "network", "entry_failed");
+        }
+        mergeResults(result, outcome);
+      } catch {
         continue;
       }
-      if (entry.nextAttemptAt) {
-        const due = Date.parse(entry.nextAttemptAt);
-        if (Number.isFinite(due) && Date.now() < due) continue;
-      }
-      let outcome: FlushTaskOutboxResult;
-      try {
-        outcome = await processEntry(entry, options);
-      } catch {
-        outcome = markRetryable(entry, "network", "entry_failed");
-      }
-      mergeResults(result, outcome);
-    } catch {
-      continue;
     }
   }
   return result;
+}
+
+/**
+ * The in-flight guard belongs to the OUTBOX, not to a driver object.
+ *
+ * `useTaskOperationOutbox` registers a FRESH driver on every mount, so keying
+ * the guard on driver identity meant a navigation that remounted the hook
+ * swapped the key while the first pump was still awaiting: a second pump then
+ * walked the SAME entries, POSTing the same operationId twice and computing
+ * `attemptCount` from the same stale value, so the retry budget under-counted
+ * and one pump could overwrite the other's terminal state. A driver that came
+ * from the registry is therefore keyed on the registry itself, which has one
+ * identity for the module's whole life; a hand-built driver passed straight to
+ * `flushTaskOutbox` (the test / harness seam) keeps a pump of its own.
+ */
+function flushGuardKey(driver: TaskOutboxDriver): object {
+  return driverStack.includes(driver) ? driverStack : driver;
 }
 
 export function flushTaskOutbox(
   options?: FlushTaskOutboxOptions,
 ): Promise<FlushTaskOutboxResult> {
   const driver = options ?? getTaskOutboxDriver();
-  const existing = inFlightByDriver.get(driver);
+  const guard = flushGuardKey(driver);
+  const existing = inFlightByDriver.get(guard);
   if (existing) return existing;
   const running = runFlush(driver);
   const shared = running.finally(() => {
-    if (inFlightByDriver.get(driver) === shared) inFlightByDriver.delete(driver);
+    if (inFlightByDriver.get(guard) === shared) inFlightByDriver.delete(guard);
   });
-  inFlightByDriver.set(driver, shared);
+  inFlightByDriver.set(guard, shared);
   return shared;
+}
+
+/**
+ * Ask for a pump without waiting for one. Coalesced to a single microtask, and
+ * only when a driver is REGISTERED: with no hook mounted there is nothing to
+ * send with, and a caller that only writes storage must not provoke a request
+ * it never asked for. `flushTaskOutbox`'s guard collapses this into the pump
+ * that is already running, so a burst of enqueues costs one pass.
+ */
+function scheduleFlush(): void {
+  if (flushScheduled || typeof window === "undefined") return;
+  if (!driverStack.length) return;
+  flushScheduled = true;
+  const run = () => {
+    flushScheduled = false;
+    void requestTaskOutboxFlush().catch(() => {});
+  };
+  if (typeof queueMicrotask === "function") queueMicrotask(run);
+  else void Promise.resolve().then(run);
 }
 
 export function requestTaskOutboxFlush(): Promise<FlushTaskOutboxResult> {
@@ -1993,10 +2400,16 @@ export function requestTaskOutboxFlush(): Promise<FlushTaskOutboxResult> {
 export function __resetTaskOutboxForTests(): void {
   cache = null;
   cacheIndexRaw = null;
-  evictedEntryIds = [];
-  evictionPruneScheduled = false;
+  evictedEntries = [];
+  pruneScheduled = false;
+  // A prune queued before the reset must not touch the fresh storage the next
+  // test set up; both lists are re-derived on the next read anyway.
+  pruneGeneration += 1;
+  legacyMigratedRaw = null;
+  flushScheduled = false;
+  inFlightOperationIds.clear();
   unpersisted = new Map<string, TaskOutboxEntry>();
-  inFlightByDriver = new WeakMap<TaskOutboxDriver, Promise<FlushTaskOutboxResult>>();
+  inFlightByDriver = new WeakMap<object, Promise<FlushTaskOutboxResult>>();
   driverStack.length = 0;
   fallbackDriver = null;
   listeners.clear();

@@ -131,19 +131,29 @@ describe("ShopTab category filters carry the 44px hit region", () => {
 
   it("the selected chip's accent fill is not shadowed by Chip's own base background", async () => {
     // `Chip`'s base class list carries `bg-[var(--color-surface-0)]/20` and its
-    // selected branch adds `bg-[var(--color-accent-button)]`. Both are Tailwind
-    // `bg-*` utilities in ONE layer, so the later rule in the STYLESHEET wins —
-    // not the later class in the attribute. Measured in the browser before this
-    // fix: the selected filter resolved to `oklab(... / 0.2)` (the translucent
-    // surface) while `text-white` DID apply — white ink on a 20%-opacity fill, an
-    // AA failure and a selected chip that looked unselected. The base fill has to
-    // be ABSENT when selected, not merely overridden.
+    // selected branch adds its own accent fill. Both are Tailwind `bg-*`
+    // utilities in ONE layer, so the later rule in the STYLESHEET wins — not the
+    // later class in the attribute. Measured in the browser before this fix: the
+    // selected filter resolved to `oklab(... / 0.2)` (the translucent surface)
+    // while `text-white` DID apply — white ink on a 20%-opacity fill, an AA
+    // failure and a selected chip that looked unselected. The base fill has to
+    // be ABSENT when selected, not merely overridden. The tone's INK has to go
+    // with it: `.widget-accent-text` is unlayered and out-ranks `text-white`.
+    //
+    // The fill is asserted by SHAPE (accent deepened 60% toward black) rather
+    // than by the old `--color-accent-button` token name, because `useTheme`
+    // writes that token inline on <html> and it no longer carries a per-theme
+    // or per-accent value — see SoftButton.tsx.
+    const ACCENT_FILL = /bg-\[color-mix\(in_srgb,var\(--color-accent-selected\)_60%,black\)\]/;
     const root = await render(makeProps({ activeCategory: "dairy" }));
     const chip = byText(root, "Dairy");
-    expect(chip.className).toMatch(/bg-\[var\(--color-accent-button\)\]/);
+    expect(chip.className).toMatch(ACCENT_FILL);
     expect(chip.className).not.toMatch(/bg-\[var\(--color-surface-0\)\]/);
+    expect(chip.className).toMatch(/text-white/);
+    expect(chip.className).not.toMatch(/widget-accent-text/);
     // And the unselected sibling keeps its surface fill.
     expect(byText(root, "All").className).toMatch(/bg-\[var\(--color-surface-0\)\]/);
+    expect(byText(root, "All").className).not.toMatch(ACCENT_FILL);
   });
 });
 
@@ -160,8 +170,12 @@ describe("ShopTab has no full-width accent bar on the fold", () => {
     const root = await render(makeProps());
     const btn = byText(root, "Add missing from meal plan");
     expect(btn.className).not.toMatch(/(?<![\w-])w-full(?![\w-])/);
-    // It stays the primary action — just sized by its own label.
-    expect(btn.className).toMatch(/accent-button/);
+    // It stays the primary action — just sized by its own label. Asserted by
+    // the SHAPE of the primary fill (accent deepened 60% toward black), not by
+    // the old `--color-accent-button` token name, which `useTheme` now pins
+    // inline to one palette (see SoftButton.tsx).
+    expect(btn.className).toMatch(/bg-\[color-mix\(in_srgb,var\(--color-accent-selected\)_60%,black\)\]/);
+    expect(btn.className).toMatch(/text-white/);
   });
 
   it("no control in the Sync and order card is w-full", async () => {

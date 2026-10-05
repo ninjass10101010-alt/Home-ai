@@ -5,6 +5,7 @@ import type { LiveMember } from "@/lib/live-member";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import {
   deleteSnapshotTask,
+  describeSnapshotWriteError,
   getSnapshotOperationReceipts,
   liveSnapshotTasks,
   mutateSnapshotWithMeta,
@@ -97,7 +98,11 @@ export type TaskManageParseResult =
 
 export const TASK_MANAGE_MAX_TITLE_LENGTH = 200;
 export const TASK_MANAGE_MAX_CATEGORY_LENGTH = 40;
-export const TASK_MANAGE_MAX_EMOJI_LENGTH = 400_000;
+// One emoji may never approach the snapshot json cap: a real photo data URL
+// is 25-60x this ceiling and falls back to 👤 in canonicalEmoji. Keep in
+// lockstep with TASK_SNAPSHOT_EMOJI_MAX (pinned by
+// tests/unit/snapshot-size-cap-guards.test.ts against the snapshot maxSize).
+export const TASK_MANAGE_MAX_EMOJI_LENGTH = 4_096;
 export const TASK_MANAGE_MAX_TRANSPORT_LENGTH = 500_000;
 export const TASK_MANAGE_MAX_POINTS = 100;
 export const TASK_MANAGE_MAX_SPEED_BONUS = 5;
@@ -393,7 +398,9 @@ function taskShape(
   if (!title) return { ok: false, reason: "invalid_task_command" };
   if (
     raw.assigneeEmoji !== undefined &&
-    (typeof raw.assigneeEmoji !== "string" || !canonicalEmoji(raw.assigneeEmoji, ""))
+    (typeof raw.assigneeEmoji !== "string" ||
+      !raw.assigneeEmoji.trim() ||
+      /[\u0000-\u001f\u007f]/u.test(raw.assigneeEmoji))
   ) {
     return { ok: false, reason: "invalid_task_command" };
   }
@@ -1065,7 +1072,8 @@ async function handleCommand(
         }),
       ),
     );
-  } catch {
+  } catch (error) {
+    console.warn(`[task-manage] snapshot write failed: ${describeSnapshotWriteError(error)}`);
     return failure(operationId, "snapshot_write_failed");
   }
 }

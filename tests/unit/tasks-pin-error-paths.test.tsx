@@ -94,6 +94,34 @@ function stubRedeemWire(posted: Array<Record<string, unknown>>) {
   }));
 }
 
+/**
+ * A penalty wire that only a PARENT's PIN can pass: a child PIN presented for a
+ * child target is the child verifying for themselves, which the route refuses
+ * 403 `adult_only` — the exact payload shape that used to be the only one the
+ * page could build. Records the ledger body for the actor/target assertions.
+ */
+function stubPenaltyWire(posted: Array<Record<string, unknown>>) {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/members/verify")) {
+      const body = JSON.parse(String(init?.body || "{}"));
+      if (String(body.memberName ?? "") !== "Rebecca (Mom)" || body.pin !== PARENT_PIN) {
+        return { ok: false, status: 401, json: async () => ({}) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ member: { name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent" } }),
+      };
+    }
+    if (url.includes("/api/tasks/ledger")) {
+      posted.push(JSON.parse(String(init?.body || "{}")));
+      return { ok: true, status: 200, json: async () => ({ success: true, reconciled: true }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
+  }));
+}
+
 let activeRoot: Root | null = null;
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
@@ -136,6 +164,18 @@ async function typeAndSubmit(placeholder: string, buttonText: string, pin = "123
   expect(input).not.toBeNull();
   await act(async () => { setInputValue(input, pin); });
   await act(async () => { buttonByText(buttonText)!.click(); });
+  await settle();
+}
+
+/** The penalty dialog's "Apply to" target — whose balance the penalty moves. */
+async function selectApplyTo(fullName: string) {
+  const select = document.querySelector('[role="dialog"] select') as HTMLSelectElement;
+  expect(select, "the penalty dialog's target select").toBeTruthy();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value")!.set!;
+    setter.call(select, fullName);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   await settle();
 }
 
@@ -356,12 +396,29 @@ describe("Tasks gate: reward redemption", () => {
 });
 
 describe("Tasks gate: penalty", () => {
-  async function openPenalty() {
+  /**
+   * Open the penalty dialog as the PARENT it is for, aiming it at the CHILD.
+   *
+   * As a guest the panel renders no admin surface at all — the whole
+   * Add/Edit/Delete reward + Add penalty + Apply penalty row is gated on a
+   * parent — so driving this block as a guest pressed a control that cannot
+   * exist, and the PIN discrimination below was untestable. A real parent CAN
+   * press it, which is the point of this block.
+   *
+   * Targeting the child also makes "a wrong PIN (401 for member AND every
+   * parent)" literally true: the page verifies the member first, then falls
+   * back to the parents, and with the parent as the target it would only ever
+   * ask the same person twice.
+   */
+  async function openPenalty(target = "Jasmine") {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent", emoji: "👩" };
+    mockAuth.isLoggedIn = true;
     seed({ penalties: [PENALTY] });
     await renderAsync(<TasksPage />);
     await settle();
     await toLeaderboard();
     await clickByAriaLabel("Apply penalty");
+    await selectApplyTo(target);
   }
 
   it("network rejection says 'Couldn't reach Consuela', never 'Wrong PIN', and books nothing", async () => {
@@ -385,6 +442,36 @@ describe("Tasks gate: penalty", () => {
     expect(text).toContain("Wrong PIN. Try again.");
     expect(text).not.toContain("Couldn't reach");
     expect(pinInput("4-digit PIN").value).toBe("");
+    // A refused PIN books nothing at all: no ledger command, no local line.
+    expect(storedHistory()).toHaveLength(0);
+  });
+
+  it("the PIN that verified is the ACTOR and the penalised child is the TARGET on the wire", async () => {
+    // The penalty path had the same impossible payload the manual adjust had:
+    // `command.memberName` was SIMULTANEOUSLY the PIN subject, the route's live
+    // `role === "parent"` gate and the debited member. A grown-up penalising a
+    // child could therefore only build a CHILD-PIN body, which the gate refused
+    // 403 adult_only — after the client had already thrown the rejection away
+    // and toasted success. Two identities, two fields: the verified parent rides
+    // as `memberName`, the child whose points move as `targetMemberName`.
+    const posted: Array<Record<string, unknown>> = [];
+    stubPenaltyWire(posted);
+    await openPenalty();
+    await typeAndSubmit("4-digit PIN", "Deduct", PARENT_PIN);
+
+    const ledger = posted.filter((body) => body.action === "penalty");
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({
+      memberName: "Rebecca (Mom)",
+      targetMemberName: "Jasmine",
+      itemId: PENALTY.id,
+      pin: PARENT_PIN,
+    });
+    expect(ledger[0].memberName).not.toBe(ledger[0].targetMemberName);
+    // The catalog id travels, never a client-chosen point value.
+    expect(ledger[0].points).toBeUndefined();
+    // And no ledger line is written locally: the deduction is the server's.
+    expect(storedHistory()).toHaveLength(0);
   });
 });
 

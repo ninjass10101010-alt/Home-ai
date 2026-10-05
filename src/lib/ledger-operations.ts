@@ -151,7 +151,13 @@ function resultOperationId(operation: unknown): string {
   return normalizeOperationId(operation.operationId) ?? "";
 }
 
-function normalizeWeekStart(value: unknown): string | null {
+/**
+ * The ONE week-key rule. Exported so a reader that resolves a week row outside
+ * this seam (`task-claim`'s `readWeek`) matches rows exactly the way the write
+ * path does — a `weekStart` with stray whitespace must not be invisible to one
+ * and visible to the other.
+ */
+export function normalizeWeekStart(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const weekStart = value.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return null;
@@ -468,19 +474,148 @@ async function readWeekRow(
   row: Record<string, any> | null;
   weekData: WeekData;
   pointsNeedRepair: boolean;
+  rows: Record<string, any>[];
 }> {
   const rows = await pb.collection("week_data").getFullList({ requestKey: null });
-  const matchingRows = (Array.isArray(rows) ? rows : []).filter(
+  const list = Array.isArray(rows) ? rows : [];
+  const matchingRows = list.filter(
     (candidate: any) => normalizeWeekStart(candidate?.weekStart) === weekStart,
   );
   if (matchingRows.length > 1) {
     throw new LedgerOperationAbort("ledger_write_conflict", emptyWeekData(weekStart));
   }
   const row = matchingRows[0] as Record<string, any> | undefined;
-  if (!row) return { row: null, weekData: emptyWeekData(weekStart), pointsNeedRepair: false };
+  if (!row) return { row: null, weekData: emptyWeekData(weekStart), pointsNeedRepair: false, rows: list };
   const canonical = canonicalWeek(row, weekStart);
   if (!canonical) throw new LedgerOperationAbort("invalid_ledger_operation", emptyWeekData(weekStart));
-  return { row, weekData: canonical.weekData, pointsNeedRepair: canonical.pointsNeedRepair };
+  return { row, weekData: canonical.weekData, pointsNeedRepair: canonical.pointsNeedRepair, rows: list };
+}
+
+/**
+ * `week_archive` as a handle, or `null` when this PB cannot name the collection.
+ *
+ * Only a non-PocketBase client throws synchronously from `collection(name)` (or
+ * hands back an object with no `getFullList`); the real admin client always
+ * returns a RecordService and surfaces a missing/unreachable collection as a
+ * REJECTED read, which is a real outage and is handled as one.
+ */
+function archiveCollection(pb: AdminPB): { getFullList: (options?: unknown) => Promise<unknown> } | null {
+  let handle: unknown;
+  try {
+    handle = pb.collection("week_archive");
+  } catch {
+    return null;
+  }
+  if (!handle || typeof (handle as { getFullList?: unknown }).getFullList !== "function") return null;
+  return handle as { getFullList: (options?: unknown) => Promise<unknown> };
+}
+
+/**
+ * Every transaction stored in a week OTHER than the one this operation writes.
+ *
+ * Replay detection used to look at the ONE `week_data` row it was about to
+ * write. Past weeks are never deleted and the rollover upserts them into
+ * `week_archive` as well, so an operation already applied in an older week was
+ * invisible to the check and a re-sent browser outbox entry paid a SECOND time.
+ *
+ * `week_archive` is only READ once `week_data` itself holds a second week,
+ * because the rollover upserts rather than moves: a row that exists in the
+ * archive also exists in `week_data`, so a single-row `week_data` means this
+ * database has never had another week and has nothing archived to find. That
+ * keeps the common write path free of an extra round-trip and keeps a
+ * single-collection PocketBase client (a test double, or a trimmed deployment)
+ * from being asked for a collection it cannot name.
+ *
+ * A REJECTED archive read FAILS CLOSED. "I could not look" and "there is
+ * nothing there" must not both collapse into "apply it again".
+ */
+async function readOtherWeekTransactions(
+  pb: AdminPB,
+  weekStart: string,
+  dataRows: readonly Record<string, any>[],
+): Promise<Transaction[]> {
+  const byId = new Map<number, Transaction>();
+  const add = (transaction: Transaction): void => {
+    if (!byId.has(transaction.id)) byId.set(transaction.id, transaction);
+  };
+  const collect = (row: unknown): void => {
+    const week = normalizeWeekData(row);
+    // A week whose stored history no longer parses is not replay evidence in
+    // either direction: every balance computation runs the same canonical
+    // parser, so such a row counts for nobody. Skipping it keeps one corrupt
+    // old week from freezing the current one.
+    if (!week) return;
+    for (const transaction of week.history) add(transaction);
+  };
+  let otherWeeks = 0;
+  for (const row of dataRows) {
+    if (normalizeWeekStart((row as { weekStart?: unknown })?.weekStart) === weekStart) continue;
+    otherWeeks += 1;
+    collect(row);
+  }
+  if (otherWeeks > 0) {
+    const archive = archiveCollection(pb);
+    if (archive) {
+      let rows: unknown;
+      try {
+        rows = await archive.getFullList({ requestKey: null });
+      } catch {
+        throw new LedgerOperationAbort("ledger_write_conflict", emptyWeekData(weekStart));
+      }
+      for (const row of Array.isArray(rows) ? rows : []) collect(row);
+    }
+  }
+  return [...byId.values()];
+}
+
+interface OutsideWeekReplay {
+  /** This operationId is already applied in another week. */
+  applied: boolean;
+  /** Another operation already paid one of this operation's (task, member) pairs. */
+  semanticDuplicate: boolean;
+  /** One operationId, two meanings — refused exactly like the same-week case. */
+  conflict: boolean;
+}
+
+/**
+ * @param otherWeeks transactions from every week OTHER than the one being
+ *   written — the only rows that can prove this operation was already applied
+ *   somewhere else.
+ * @param combined   the same rows plus the target week's own history, so a
+ *   reversal written TODAY still cancels an earn from last week.
+ */
+function outsideWeekReplay(
+  otherWeeks: readonly Transaction[],
+  combined: readonly Transaction[],
+  operation: NormalizedLedgerOperation,
+): OutsideWeekReplay {
+  const applied = otherWeeks.filter(
+    (transaction) => transaction.meta?.operationId === operation.operationId,
+  );
+  if (applied.length > 0) {
+    const fingerprinted = applied.filter((transaction) => transaction.meta?.fingerprint);
+    if (fingerprinted.some((transaction) => transaction.meta?.fingerprint !== operation.fingerprint)) {
+      return { applied: false, semanticDuplicate: false, conflict: true };
+    }
+    return { applied: true, semanticDuplicate: false, conflict: false };
+  }
+  // An earn the CURRENT week already holds is not this check's business: the
+  // same-week replay path detects it and still repairs a stale points map, which
+  // is the behaviour it is there for. This asks a narrower question — is a
+  // standing payment for this (task, member) already sitting in ANOTHER week?
+  const paidElsewhere = new Set(
+    otherWeeks
+      .filter((transaction) => transaction.type === "earn" && transaction.taskId !== undefined)
+      .map((transaction) => `${transaction.taskId}:${transaction.member}`),
+  );
+  const semanticDuplicate = operation.entries.some(
+    (entry) =>
+      entry.type === "earn" &&
+      entry.taskId !== undefined &&
+      paidElsewhere.has(`${entry.taskId}:${entry.member}`) &&
+      hasUnreversedTaskEarn([...combined], entry.taskId, entry.member),
+  );
+  return { applied: false, semanticDuplicate, conflict: false };
 }
 
 async function readWrittenWeek(
@@ -544,15 +679,65 @@ export async function applyWeekLedgerOperationLocked(
   const operation = input.operation;
   const operationId = resultOperationId(operation);
   const fallback = emptyWeekData(weekStart);
-  const project = input.project;
+  const projectInput = input.project;
+  const project = typeof projectInput === "function" ? (projectInput as LedgerProjection) : null;
   const now = validNow(input.now);
   const timestamp = now ? normalizeTimestamp(now.toISOString()) : null;
+
+  /**
+   * The one place a projection runs, so the duplicate paths and the write path
+   * report `reconciled`/`projectionError` identically. A duplicate still
+   * projects: that is how a snapshot receipt lost while the ledger leg landed
+   * gets repaired.
+   */
+  const runProjection = async (
+    pb: AdminPB,
+    outcome: {
+      weekData: WeekData;
+      operationId: string;
+      applied: boolean;
+      duplicate: boolean;
+      semanticDuplicate: boolean;
+    },
+  ): Promise<LedgerOperationResult> => {
+    let reconciled = true;
+    let projectionError: string | undefined;
+    if (project) {
+      try {
+        const projected = await project({
+          pb,
+          weekData: outcome.weekData,
+          operationId: outcome.operationId,
+          applied: outcome.applied,
+          duplicate: outcome.duplicate,
+          semanticDuplicate: outcome.semanticDuplicate,
+        });
+        if (projected === false) {
+          reconciled = false;
+          projectionError = projectionFailure;
+        }
+      } catch {
+        reconciled = false;
+        projectionError = projectionFailure;
+      }
+    }
+    return {
+      ok: true,
+      applied: outcome.applied,
+      duplicate: outcome.duplicate,
+      semanticDuplicate: outcome.semanticDuplicate,
+      reconciled,
+      weekData: outcome.weekData,
+      operationId: outcome.operationId,
+      ...(projectionError === undefined ? {} : { projectionError }),
+    };
+  };
 
   if (
     !weekStart ||
     !now ||
     !timestamp ||
-    (project !== undefined && typeof project !== "function")
+    (projectInput !== undefined && project === null)
   ) {
     return failure("invalid_ledger_operation", fallback, operationId);
   }
@@ -571,6 +756,31 @@ export async function applyWeekLedgerOperationLocked(
         }
         if (replay.conflict) {
           return failure("operation_conflict", current, normalizedOperation.operationId);
+        }
+
+        // Replay scope is EVERY week, not this one row. An operation already
+        // applied in an older week — which the browser outbox re-POSTs for up to
+        // 7 days, and which the rollover keeps in `week_data` AND
+        // `week_archive` — is reported as a duplicate instead of applied a
+        // second time. Nothing below the write is weakened: this returns before
+        // any write happens.
+        const otherWeeks = await readOtherWeekTransactions(pb, weekStart, read.rows);
+        const outside = outsideWeekReplay(
+          otherWeeks,
+          [...otherWeeks, ...current.history],
+          normalizedOperation,
+        );
+        if (outside.conflict) {
+          return failure("operation_conflict", current, normalizedOperation.operationId);
+        }
+        if (outside.applied || outside.semanticDuplicate) {
+          return runProjection(pb, {
+            weekData: current,
+            operationId: normalizedOperation.operationId,
+            applied: false,
+            duplicate: true,
+            semanticDuplicate: outside.semanticDuplicate,
+          });
         }
         // NOTE: there is deliberately no pre-check on the CURRENT history here.
         // The old week-scoped `hasNegativeOutcome(current.history)` refused every
@@ -654,38 +864,13 @@ export async function applyWeekLedgerOperationLocked(
           weekData = verified;
         }
 
-        let reconciled = true;
-        let projectionError: string | undefined;
-        if (project) {
-          try {
-            const projected = await project({
-              pb,
-              weekData,
-              operationId: normalizedOperation.operationId,
-              applied: newTransactions.length > 0,
-              duplicate: replay.duplicate,
-              semanticDuplicate,
-            });
-            if (projected === false) {
-              reconciled = false;
-              projectionError = projectionFailure;
-            }
-          } catch {
-            reconciled = false;
-            projectionError = projectionFailure;
-          }
-        }
-
-        return {
-          ok: true,
+        return runProjection(pb, {
+          weekData,
+          operationId: normalizedOperation.operationId,
           applied: newTransactions.length > 0,
           duplicate: replay.duplicate,
           semanticDuplicate,
-          reconciled,
-          weekData,
-          operationId: normalizedOperation.operationId,
-          ...(projectionError === undefined ? {} : { projectionError }),
-        };
+        });
     });
   } catch (error) {
     if (error instanceof LedgerOperationAbort) {

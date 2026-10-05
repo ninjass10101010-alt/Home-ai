@@ -264,7 +264,20 @@ export async function verifyPinAgainstAnyMember(pin: string): Promise<any | null
   return withAdmin(async (pb) => {
     const records = await pb.collection("members").getFullList({ requestKey: null });
     const merged = withResolvedPins(mergeMemberFallbacks(records));
-    const member = merged.find((r: any) => memberPinMatches(r, pin));
+    // Deliberately NOT `merged.find(...)`. find() stops at the first match, so the
+    // time this took said WHICH member was verified and how far down the roster
+    // the match sat — a slower-and-slower oracle over the family. Every row is
+    // compared on every call and only the FIRST match is kept, so the returned
+    // member is the same one find() returned while the work no longer depends on
+    // the answer.
+    let member: any = null;
+    let matched = false;
+    for (const row of merged) {
+      if (memberPinMatches(row, pin) && !matched) {
+        member = row;
+        matched = true;
+      }
+    }
     if (!member) {
       recordPinFailure(key);
       return null;

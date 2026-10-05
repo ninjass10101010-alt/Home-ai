@@ -26,11 +26,18 @@ export interface ThemeConfig {
   reduceMotion: boolean;
 }
 
+// These must match the DARK palette the preset comparator holds
+// (`presetHexFor` in src/hooks/useTheme.tsx reads warmGlassAccentOptions, where
+// `hex` is the dark hex and `glow` the dark glow). The old light palette here
+// (`button: '#2563eb'`, `border: 'rgba(59,130,246,0.35)'`) never matched, so
+// `isPresetValue()` never fired on a fresh profile and `--color-accent-button`
+// / `--color-accent-border` were pinned inline on <html>, out-ranking every
+// `:root[data-theme]` rule in both themes and for all ten accents.
 export const defaultAccentHex: AccentHexByTarget = {
   selected: '#3b82f6',
   glow: 'rgba(59,130,246,0.25)',
-  button: '#2563eb',
-  border: 'rgba(59,130,246,0.35)',
+  button: '#3b82f6',
+  border: 'rgba(59,130,246,0.25)',
 };
 
 // Default theme configuration

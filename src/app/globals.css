@@ -209,11 +209,65 @@
    themes — 7.15:1 worst case in light, 4.58:1 in dark. It follows the same
    72%-black shape as `--color-nav-active-fill` above, one step deeper because
    white text needs 4.5:1 rather than 3:1. */
+:root[data-theme="light"],
+:root:not([data-theme="dark"]) {
+  /* The light half of the accent-as-INK family (see the dark block below for
+     why it exists). 60% toward primary, the deepest mix that still clears 4.5:1
+     on the worst real backdrop for every preset (4.60:1, sage on its own
+     22%-tinted active backdrop). Going deeper — 65% was the next step — fails
+     sage, and this family has to hold all ten or it is not a family. */
+  --color-accent-ink: color-mix(in srgb, var(--color-accent-selected) 60%, var(--color-text-primary));
+}
+
+/* The dark half. Keyed on `:not([data-theme="light"])` — NOT on
+   `prefers-color-scheme` — so the two branches have DISJOINT conditions and
+   neither can shadow the other regardless of source order. That is the same
+   reasoning the boost blocks above use, and it is why this pair is NOT wrapped
+   in a media query: `:root[data-theme="light"]` scores (0,2,0) and
+   `:root:not([data-theme="light"])` also scores (0,2,0) — `:not()` contributes
+   the specificity of its argument — so a tie would be broken by source order,
+   and a `prefers-color-scheme: light` wrapper would break it the wrong way on a
+   dark-family device whose OS says light.
+
+   55% toward primary: the deepest mix that clears 4.5:1 for all ten presets
+   (worst 4.75:1, rose). */
+:root:not([data-theme="light"]) {
+  --color-accent-ink: color-mix(in srgb, var(--color-accent-selected) 55%, var(--color-text-primary));
+}
+
 :root {
   --color-accent-glow: color-mix(in srgb, var(--color-accent-selected) 25%, transparent);
   --color-accent-border: color-mix(in srgb, var(--color-accent-selected) 35%, transparent);
   --color-accent-button: color-mix(in srgb, var(--color-accent-selected) 60%, black);
   --color-text-on-accent: #ffffff;
+
+  /* ─── Accent AS TEXT ─── (2026-10 visual critique, defect: an incomplete
+     token family — ten accents, six of them legible)
+
+     `--color-accent-ink-*` above exists, but it covers only the SIX member
+     colours (Avatar.tsx's legacy map keys). Nothing carried the accent used as
+     INK — a label, a weekday, a link, a selected filter — so every one of those
+     sites fell back to the raw `--color-accent-selected`, which is a FILL: it
+     is tuned for white text on top of it (that is what `--color-accent-button`
+     deepens for), not for being the text itself. Measured as ink, the raw fill
+     clears 4.5:1 for NONE of the ten presets in either theme: worst case 2.12:1
+     (light sage on its own 22%-tinted active backdrop), and even the friendliest
+     accent failed (light cyan 2.43:1, light mint 2.47:1, dark nori 3.18:1). A
+     ten-accent system where ten accents are illegible as text is not a token
+     system.
+
+     This is the missing family member: the accent walked toward the theme's
+     BODY INK rather than toward black/white, so it inverts with the theme and
+     gets *more* contrast under boost (where primary is pure #000/#fff) with no
+     second rule. Percentages are the deepest that still clear 4.5:1 on the worst
+     real backdrop for every preset — 55% toward primary in dark (worst 4.75:1,
+     rose) and 60% in light (worst 4.60:1, sage) — checked against each accent's
+     own 22%-tinted active backdrop AND bare surface-3/4, since an accent label
+     sits on both.
+
+     Reads `--color-accent-selected`, not a per-preset var, so it follows the
+     accent choice automatically and needs no ten rules per theme. */
+  --color-accent-ink: color-mix(in srgb, var(--color-accent-selected) 55%, var(--color-text-primary));
 
   /* Avatar member-initials ink (defect 2). The member colour is the backdrop at
      20% over the canvas, and the raw accent on top of it cleared 4.5:1 for
@@ -230,6 +284,35 @@
   --color-accent-ink-amber: color-mix(in srgb, var(--color-accent-amber) 55%, var(--color-text-primary));
   --color-accent-ink-cyan: color-mix(in srgb, var(--color-accent-cyan) 55%, var(--color-text-primary));
   --color-accent-ink-rose: color-mix(in srgb, var(--color-accent-rose) 55%, var(--color-text-primary));
+
+  /* ─── REPORTED GAP, deliberately not closed here ──────────────────────────
+     The six `--color-accent-ink-*` legs above are exactly the six `AVATAR_INKS`
+     (Avatar.tsx's legacy member-colour map keys). The accent-as-TEXT family is
+     therefore still incomplete: **coral, lavender, apricot and sage have no ink
+     leg at all.**
+
+     `--color-accent-ink` (the selected-relative token) cannot stand in for them,
+     because a site that means "this specific preset" — a semantic danger ✕, a
+     success ✓, one member's own chip — must not follow the family's current
+     selection. A site naming one of the four as ink therefore reads the raw
+     fill hex and is measurably under AA.
+
+     I did not add the four. Each is one line of the same 55%-to-primary shape,
+     but I measured that shape against the accent's OWN 22%-tinted backdrop —
+     which is what a selected chip actually sits on, and what the existing six
+     were never measured against — and **it does not hold**: at 55% toward
+     primary, dark rose lands at 4.48:1 and light sage at 4.40:1 on those
+     backdrops, and pushing the mix deeper makes it WORSE, not better (dark rose
+     falls to 4.20:1 at 60%, light sage to 3.96:1). The problem is the backdrop,
+     not the mix: a 22% wash of the accent over surface-3 is close to the accent
+     in luminance, so no single mix percentage separates them.
+
+     The real fix is to lower the active wash (the 22% in
+     `.calendar-member-chip.is-active` / `.member-tile.is-active`) or to give the
+     active state an ink that is not derived from the wash — both of which reach
+     into component-owned markup. That belongs to whoever owns the member chip,
+     not to a stylesheet token that would only look like the problem was solved.
+     See the report's "Defects I could not fix". */
 }
 
 /* ─── Light Mode Color Tokens ─── */
@@ -247,9 +330,22 @@
   --color-canvas: #f5f6fa;
 
   --color-text-primary: #1a1a1a;   /* Main body text */
+  /* The sub-primary ladder (2026-10 visual critique). The documented debt was
+     real and is now closed: LIGHT sat at 4.49:1 on surface-2 and 4.21:1 on
+     surface-3 for both muted and dim — under the 4.5 body floor. And the token
+     is not the whole story: the light warm-glass backdrop is painted by
+     absolutely-positioned gradient layers, so the composited surface behind real
+     text measured lighter AND tinted (#dfdae2, #dde7fb, #efe6e1 …), against
+     which #6f6f6f fell to 3.65:1. Measured on composited pixels, not from the
+     declared pair, because jsdom resolves neither `var()` nor `color-mix()` and
+     no ancestor chain can see those layers.
+     muted and dim are now DISTINCT levels (they were the same hex, so the
+     fourth rung of the ladder did not exist), and all three clear 4.5:1 on
+     surface-3 with room for the tint — still strictly descending
+     (14.57 > 5.77 > 5.43 > 4.81 on surface-3). */
   --color-text-secondary: #5a5a5a;   /* Hints, secondary text */
-  --color-text-muted: #6f6f6f;   /* AA-compliant (was #8a8a8a = 3.2:1) */
-  --color-text-dim: #6f6f6f;   /* AA-compliant (was #ababab = 2.1:1) */
+  --color-text-muted: #5c5c5c;   /* was #6f6f6f */
+  --color-text-dim: #606060;   /* was #6f6f6f (identical to muted) */
 
   /* ACCENT COLORS (Light mode variants - darker for better contrast) */
   --color-accent-nori: #2563eb;   /* Darker shade */
@@ -324,8 +420,12 @@
 
     --color-text-primary: #1a1a1a;
     --color-text-secondary: #5a5a5a;
-    --color-text-muted: #6f6f6f;   /* AA-compliant (was #8a8a8a = 3.2:1) */
-    --color-text-dim: #6f6f6f;   /* AA-compliant (was #ababab = 2.1:1) */
+    --color-text-muted: #5c5c5c;   /* must equal :root[data-theme="light"]
+                                       exactly: <html> carries no data-theme
+                                       until ThemeProvider mounts, so this block
+                                       paints the first frame, and drift here
+                                       repaints the whole ladder on hydration */
+    --color-text-dim: #606060;
 
     /* ACCENT COLORS */
     --color-accent-nori: #2563eb;
@@ -374,9 +474,18 @@
   --color-surface-7: #434e60;   /* Darkest for depth */
 
   --color-text-primary: #f0f4ff;   /* Main body text */
-  --color-text-secondary: #8892aa;   /* Hints, secondary text */
-  --color-text-muted: #8892aa;   /* AA-compliant: alias of secondary (was #4e5a72 = 2.7:1) */
-  --color-text-dim: #828da6;   /* AA on canvas+surface-2 (was #363e50 = 1.8:1) */
+  /* The sub-primary ladder (2026-10 visual critique, measured on composited
+     pixels — the light block below carries the full argument). DARK had
+     secondary = muted = #8892aa with dim = #828da6, clearing AA only as far as
+     surface-2: 4.49:1 on surface-3, 3.93:1 on surface-4. Worse, the warm-glass
+     backdrop is not the bare token — the atmosphere layer tints it several steps
+     lighter (measured #2d3e5c / #25414a / #383b4a behind real text) and against
+     those the old pair fell to 3.45:1. All four levels lift so the ladder clears
+     4.5:1 on surface-3 with margin for that tint, still strictly descending
+     (12.73 > 6.58 > 5.61 > 5.22 on surface-3). */
+  --color-text-secondary: #a8b2c8;   /* Hints, secondary text */
+  --color-text-muted: #a3adc4;   /* was #8892aa */
+  --color-text-dim: #a0aac2;   /* was #828da6 */
 
   /* ACCENT COLORS (Dark mode variants) */
   --color-accent-nori: #3b82f6;   /* Selected by default */
@@ -428,8 +537,32 @@
   }
 }
 
-/* High contrast mode: thicken borders and brighten text instead of dimming */
-[data-contrast="boost"] * {
+/* High contrast mode: brighten text and thicken the edges that ARE the
+   affordance — instead of dimming.
+
+   This used to be `[data-contrast="boost"] * { border-width: 2px !important }`.
+   That is the documented `className`-order trap in a different costume, and it
+   was not a cascade fight at all: Tailwind v4's preflight sets
+   `*, ::before, ::after { border: 0 solid }`, so **`border-style: solid` is
+   already universal** and a forced non-zero width CREATES a border on every
+   element rather than thickening an existing one. Measured on /tasks at 1920 in
+   both themes: 42 of 299 rendered elements painted a border with boost off, and
+   **299 of 299 with it on — 105 of them bare text nodes.** High Contrast rendered
+   as a wireframe: every label, every stat value and every chore row boxed
+   individually, which is not "more contrast", it is a debug overlay.
+
+   So the thickening is scoped to the surfaces whose hairline IS the affordance —
+   the same list the border-colour rule below already targets, plus the widget
+   card. Everything else keeps the 1px it always had, and gets its contrast from
+   the token boost, which is where it belongs. */
+[data-contrast="boost"] .material-thin,
+[data-contrast="boost"] .material-regular,
+[data-contrast="boost"] .material-thick,
+[data-contrast="boost"] .glass,
+[data-contrast="boost"] .glass-subtle,
+[data-contrast="boost"] .glass-strong,
+[data-contrast="boost"] .widget-card,
+[data-contrast="boost"] .liquid-glass {
   border-width: 2px !important;
 }
 
@@ -442,8 +575,22 @@
 [data-contrast="boost"] .material-thick,
 [data-contrast="boost"] .glass,
 [data-contrast="boost"] .glass-subtle,
-[data-contrast="boost"] .glass-strong {
-  border-color: rgba(255, 255, 255, 0.3) !important;
+[data-contrast="boost"] .glass-strong,
+[data-contrast="boost"] .widget-card,
+[data-contrast="boost"] .liquid-glass {
+  /* Thicker borders need more colour or the extra width buys nothing at boost:
+     a 2px edge at 0.06 alpha is still nearly invisible. */
+  border-color: color-mix(in srgb, var(--color-text-primary) 30%, transparent) !important;
+}
+:root[data-theme="light"][data-contrast="boost"] .material-thin,
+:root[data-theme="light"][data-contrast="boost"] .material-regular,
+:root[data-theme="light"][data-contrast="boost"] .material-thick,
+:root[data-theme="light"][data-contrast="boost"] .glass,
+:root[data-theme="light"][data-contrast="boost"] .glass-subtle,
+:root[data-theme="light"][data-contrast="boost"] .glass-strong,
+:root[data-theme="light"][data-contrast="boost"] .widget-card,
+:root[data-theme="light"][data-contrast="boost"] .liquid-glass {
+  border-color: color-mix(in srgb, var(--color-text-primary) 30%, transparent) !important;
 }
 
 /* ─── Editorial type ─── */
@@ -2493,8 +2640,13 @@ a.widget-accent-text {
   transition: all .25s ease; cursor: pointer;
 }
 .calendar-member-chip:hover, .member-chip:hover { color: var(--color-text-primary); background: rgba(255,255,255,.1); }
+/* Accent AS TEXT again: the chip's label wears `--chip-color`, which is the raw
+   accent fill. Measured 3.83:1 (dark) / 3.76:1 (light) on the chip's own
+   22%-tinted active background. Walked toward body ink like every other
+   accent-as-text site. Unlayered, and the only `color` declaration for these
+   two selectors in either stylesheet. */
 .calendar-member-chip.is-active, .member-chip.is-active {
-  color: var(--chip-color, var(--color-accent-selected));
+  color: color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 55%, var(--color-text-primary));
   background: linear-gradient(135deg, color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 22%, transparent), rgba(255,255,255,.06));
   border-color: color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 38%, transparent);
   box-shadow: 0 0 24px color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 12%, transparent);
@@ -2521,7 +2673,14 @@ a.widget-accent-text {
   border-color: color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 38%, transparent);
   box-shadow: 0 0 24px color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 12%, transparent);
 }
-.member-tile.is-active .member-tile-name { color: var(--chip-color, var(--color-accent-selected)); }
+/* The tile's own name, in the member's colour, ON that member's 22%-tinted
+   active background. The raw `--chip-color` failed here for every accent
+   (measured 2.12:1–4.10:1 in light, 2.47:1–5.47:1 in dark — and the members'
+   colours are the `--color-accent-*` family, so this is the accent-as-ink gap
+   again). `--color-accent-ink` walks the accent toward body ink; the chip-colour
+   leg keeps a per-member tile recognisable at a glance while clearing 4.5:1.
+   Unlayered, the only declaration of this property in either stylesheet. */
+.member-tile.is-active .member-tile-name { color: color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 55%, var(--color-text-primary)); }
 
 /* ─── Tabs ───
    DELETED. `.calendar-tabs` / `.calendar-tab` were a hand-rolled duplicate of
@@ -2572,7 +2731,11 @@ html .calendar-empty.calendar-empty-grow {
 .calendar-panel-kicker { font-size: .75rem; font-weight: 600; color: var(--color-text-muted); letter-spacing: .06em; text-transform: uppercase; }
 .calendar-panel-title { font-size: .82rem; font-weight: 700; color: var(--color-text-primary); }
 .calendar-panel-subtitle { font-size: .76rem; color: var(--color-text-muted); }
-.calendar-add-link { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 .6rem; border-radius: .85rem; font-size: .8rem; font-weight: 600; color: var(--color-accent-selected); background: none; border: none; cursor: pointer; transition: background .2s, opacity .2s; }
+/* `--color-accent-ink`, not the raw fill: this is accent AS TEXT, and the fill
+   accent measured 3.08:1 here in dark / 3.76:1 in light. Unlayered, and the only
+   declaration of this property in either stylesheet — see the className/unlayered
+   audit in the round log for the competing-rule check. */
+.calendar-add-link { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 .6rem; border-radius: .85rem; font-size: .8rem; font-weight: 600; color: var(--color-accent-ink); background: none; border: none; cursor: pointer; transition: background .2s, opacity .2s; }
 .calendar-add-link:hover { background: color-mix(in srgb, var(--color-accent-selected) 12%, transparent); }
 
 /* ─── Empty state ─── */
@@ -2671,7 +2834,7 @@ html .calendar-empty.calendar-empty-grow {
 }
 .calendar-event-content { flex: 1; min-width: 0; }
 .calendar-event-title { font-size: .82rem; font-weight: 600; color: var(--color-text-primary); transition: color .2s; line-height: 1.3; }
-.calendar-event-card:hover .calendar-event-title { color: var(--color-accent-selected); }
+.calendar-event-card:hover .calendar-event-title { color: var(--color-accent-ink); }
 .calendar-event-meta { display: flex; align-items: center; gap: .45rem; margin-top: .35rem; }
 
 .calendar-edit-btn {
@@ -2681,7 +2844,7 @@ html .calendar-empty.calendar-empty-grow {
   position: relative;
 }
 .calendar-edit-btn::after { content: ""; position: absolute; inset: -.5rem; }
-.calendar-edit-btn:hover { color: var(--color-accent-selected); background: color-mix(in srgb, var(--color-accent-selected) 14%, transparent); }
+.calendar-edit-btn:hover { color: var(--color-accent-ink); background: color-mix(in srgb, var(--color-accent-selected) 14%, transparent); }
 .calendar-edit-btn svg { width: .8rem; height: .8rem; }
 
 /* ─── Upcoming ─── */
@@ -2707,7 +2870,7 @@ html .calendar-empty.calendar-empty-grow {
 .calendar-upcoming-event-title { font-size: .75rem; font-weight: 500; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .2s; }
 .calendar-upcoming-card:hover .calendar-upcoming-event-title { color: var(--color-text-primary); }
 .calendar-upcoming-empty { font-size: .76rem; color: var(--color-text-muted); font-weight: 500; margin-top: .5rem; }
-.calendar-upcoming-more { font-size: .75rem; color: var(--color-accent-selected); font-weight: 600; margin-top: .2rem; }
+.calendar-upcoming-more { font-size: .75rem; color: var(--color-accent-ink); font-weight: 600; margin-top: .2rem; }
 
 /* ─── Schedule list ─── */
 .calendar-schedule-list { display: flex; flex-direction: column; gap: .45rem; }
@@ -2746,7 +2909,7 @@ html .calendar-empty.calendar-empty-grow {
   min-height: 2.75rem; padding: .4rem .9rem; border-radius: 999px;
   background: color-mix(in srgb, var(--color-accent-selected) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-accent-selected) 28%, transparent);
-  color: var(--color-accent-selected); font-size: .8rem; font-weight: 600;
+  color: var(--color-accent-ink); font-size: .8rem; font-weight: 600;
   cursor: pointer; transition: all .2s;
 }
 .calendar-sync-btn:hover { background: color-mix(in srgb, var(--color-accent-selected) 22%, transparent); }
@@ -2755,7 +2918,7 @@ html .calendar-empty.calendar-empty-grow {
 .calendar-today-btn {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 2.75rem; padding: .34rem 1rem; border-radius: 999px;
-  font-size: .8rem; font-weight: 700; color: var(--color-accent-selected);
+  font-size: .8rem; font-weight: 700; color: var(--color-accent-ink);
   background: color-mix(in srgb, var(--color-accent-selected) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-accent-selected) 26%, transparent);
   cursor: pointer; transition: all .2s;
@@ -2818,12 +2981,12 @@ html .calendar-empty.calendar-empty-grow {
   background: var(--color-accent-button, var(--color-accent-selected));
   color: #fff; box-shadow: 0 6px 18px color-mix(in srgb, var(--color-accent-selected) 34%, transparent);
 }
-.calendar-strip-day.is-selected .wd { color: var(--color-accent-selected); }
+.calendar-strip-day.is-selected .wd { color: var(--color-accent-ink); }
 :root[data-theme="light"] .calendar-strip-day.is-selected .wd,
-:root[data-theme="light"] .calendar-strip-day.is-selected:hover { color: var(--color-accent-selected); }
+:root[data-theme="light"] .calendar-strip-day.is-selected:hover { color: var(--color-accent-ink); }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .calendar-strip-day.is-selected .wd,
-  :root:not([data-theme="dark"]) .calendar-strip-day.is-selected:hover { color: var(--color-accent-selected); }
+  :root:not([data-theme="dark"]) .calendar-strip-day.is-selected:hover { color: var(--color-accent-ink); }
 }
 .calendar-month-nav { display: flex; align-items: center; gap: .3rem; }
 .calendar-month-nav .calendar-icon-btn {
@@ -3000,7 +3163,11 @@ html .calendar-empty.calendar-empty-grow {
 .calendar-secondary-btn:hover { background: rgba(255,255,255,.14); color: var(--color-text-primary); }
 .calendar-delete-btn {
   padding: .6rem .85rem; border-radius: .75rem; border: none;
-  background: rgba(244,63,94,.12); color: var(--color-accent-rose); font-size: .78rem; font-weight: 600;
+  /* Rose as INK on its own 12%-tinted danger chip: the raw accent measured
+   3.82:1 there in dark, so it walked toward body ink like every other
+   accent-as-text site (6.22:1). The rgba fill literal stays — it is the
+   BACKDROP, not ink, and an ink family has no business tinting a surface. */
+  background: rgba(244,63,94,.12); color: color-mix(in srgb, var(--color-accent-rose) 55%, var(--color-text-primary)); font-size: .78rem; font-weight: 600;
   cursor: pointer; transition: background .2s;
 }
 .calendar-delete-btn:hover { background: rgba(244,63,94,.22); }
@@ -3122,7 +3289,7 @@ html .calendar-empty.calendar-empty-grow {
   position: relative;
 }
 .calendar-routine-toggle::after { content: ""; position: absolute; inset: -.5rem; }
-.calendar-routine-toggle:hover { color: var(--color-accent-selected); background: color-mix(in srgb, var(--color-accent-selected) 14%, transparent); }
+.calendar-routine-toggle:hover { color: var(--color-accent-ink); background: color-mix(in srgb, var(--color-accent-selected) 14%, transparent); }
 .calendar-routine-toggle svg { width: .8rem; height: .8rem; }
 
 /* ─── Task / Leaderboard kid-friendly animations ─── */

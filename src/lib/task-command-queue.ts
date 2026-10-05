@@ -38,13 +38,23 @@ export type { TaskOutboxCredential };
 export function queueTaskCommand(input: QueueTaskCommandInput): TaskOutboxEntry {
   const operationId = input.operationId?.trim() || createTaskOperationId();
   rememberTaskCommandCredential(operationId, input.credential);
-  return enqueueTaskOperation({
-    operationId,
-    route: input.route,
-    action: input.action,
-    payload: input.payload,
-    displayTarget: input.displayTarget,
-  });
+  try {
+    return enqueueTaskOperation({
+      operationId,
+      route: input.route,
+      action: input.action,
+      payload: input.payload,
+      displayTarget: input.displayTarget,
+    });
+  } catch (error) {
+    // The entry never exists, so nothing would ever evict this credential and
+    // nothing would ever release it — a PIN in memory keyed to an id with no
+    // record, which is exactly the leak `releaseEvictedCredentials` exists to
+    // prevent. The remembered credential is only safe once the enqueue that
+    // justifies it has landed.
+    forgetTaskCommandCredential(operationId);
+    throw error;
+  }
 }
 
 // The persist-then-send seam for callers that do not mount the hook (the

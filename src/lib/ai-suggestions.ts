@@ -117,17 +117,35 @@ export function mapTaskIdeas(
   return out;
 }
 
+/** Reward identity is the NAME, so two ideas are the same idea however the
+ *  model typed them. Comparison ignores case and runs of whitespace: "Movie
+ *  night" and "  movie   NIGHT " are one reward, not two. */
+function normalizeRewardTitle(title: string): string {
+  return title.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 export function mapRewardIdeas(actions: ActionLike[] | undefined): Reward[] {
   const out: Reward[] = [];
   const list = actions || [];
+  // The model happily proposes the same reward twice. Ids were unique, titles
+  // were not, so "Movie night" rendered as two cards — and the page's adopt
+  // seam (`aiRewards.filter(rr => rr.name !== r.name)`) then removed BOTH on one
+  // tap, silently dropping an idea. Keep the FIRST occurrence (and its id) and
+  // drop the rest at the producer, where the fix belongs.
+  const seenTitles = new Set<string>();
   for (let i = 0; i < list.length; i++) {
     const a = list[i];
     // The old page accepted both shapes (the model sometimes typed chores as
     // rewards); the validator keeps that lenience harmless, so do the same.
     if (!a || (a.type !== "reward" && a.type !== "task") || !a.title) continue;
+    const name = a.title.trim();
+    if (name.length === 0) continue;
+    const key = normalizeRewardTitle(name);
+    if (seenTitles.has(key)) continue;
+    seenTitles.add(key);
     const n = Number(a.points);
     const cost = Number.isFinite(n) && n >= 1 ? Math.round(n) : 50;
-    out.push({ id: Date.now() + i, name: a.title, emoji: a.emoji || "🎁", cost });
+    out.push({ id: Date.now() + i, name, emoji: a.emoji || "🎁", cost });
   }
   return out;
 }

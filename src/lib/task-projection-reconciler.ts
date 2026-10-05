@@ -5,7 +5,7 @@ import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import { ensureCurrentTaskWeek } from "@/lib/task-week-rollover";
 import { repairApprovalOperation } from "@/lib/task-approval";
 import { normalizeOperationId } from "@/lib/task-operation-contract";
-import { mergeCanonicalTransactions, recomputeWeekPoints } from "@/lib/task-ledger";
+import { mergeCanonicalTransactionsWithReport, droppedDuplicateEarnTags, recomputeWeekPoints } from "@/lib/task-ledger";
 import {
   liveSnapshotTasks,
   getSnapshotOperationReceipts,
@@ -246,7 +246,14 @@ async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<Cano
   }
   currentRows.sort((left: Row, right: Row) => String(left.id).localeCompare(String(right.id)));
   const currentWeeks = normalizeCurrentWeekRows(currentRows, weekStart);
-  const history = mergeCanonicalTransactions(currentWeeks.map((week) => week.history));
+  const weekMerge = mergeCanonicalTransactionsWithReport(currentWeeks.map((week) => week.history));
+  // B3: this merge drops a duplicate `earn` when it finds one (the archived-
+  // replay hole that produced them is closed, but hand-edited and legacy rows
+  // still carry them). The drop used to be silent, so the family's points
+  // changed with no transaction and no record; it is now REPORTED through the
+  // existing warnings channel instead of being indistinguishable from a repair.
+  weekWarnings.push(...droppedDuplicateEarnTags("week", weekMerge.droppedDuplicateEarns));
+  const history = weekMerge.history;
   const points = recomputeWeekPoints(history);
   const streak = Object.assign({}, ...currentWeeks.map((week) => week.streak));
   const lastActive = Object.assign({}, ...currentWeeks.map((week) => week.lastActive));
@@ -261,10 +268,12 @@ async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<Cano
   if (!Array.isArray(archiveRows)) throw new Error("week_archive_read_failed");
   const archive = normalizeArchiveRows(archiveRows as Row[]);
   const archiveWeeks = archive.weeks;
-  const allTransactions = mergeCanonicalTransactions([
+  const allMerge = mergeCanonicalTransactionsWithReport([
     history,
     ...archiveWeeks.map((week) => week.history),
   ]);
+  weekWarnings.push(...droppedDuplicateEarnTags("archive", allMerge.droppedDuplicateEarns));
+  const allTransactions = allMerge.history;
   const approvalMetadata = approvalLedgerIntents(allTransactions);
   const needsWeekWrite = currentRows.length !== 1 || currentWeeks.some((week) => !sameStoredWeek(week, weekData));
   return {
@@ -357,6 +366,61 @@ function parseProjection(value: unknown): unknown {
   } catch {
     return value;
   }
+}
+
+/** The live task ids whose canonical `crew` cannot be projected onto PB. */
+function malformedCrewTaskIds(data: SnapshotData): number[] {
+  const ids: number[] = [];
+  for (const task of liveSnapshotTasks(data)) {
+    if (taskProjectionForPB(task) === null) {
+      const id = Number(task?.id);
+      if (Number.isSafeInteger(id) && id > 0) ids.push(id);
+    }
+  }
+  return [...new Set(ids)].sort((left, right) => left - right);
+}
+
+/**
+ * B2 — quarantine ONE malformed task instead of failing the whole pass.
+ *
+ * A PB-coerced `crew` string that fails `JSON.parse` used to make
+ * `taskProjectionForPB` return `null`, which `projectTask` turned into
+ * `ok: false` for the WHOLE family: the category went into `failed`, the pass
+ * returned `ok: false` on every subsequent run, the marker was never consumed
+ * (so `remainingMarkers` re-added `projection:pending` forever), and the client
+ * — which treats `projection_reconcile_unavailable` as retryable — retried
+ * forever. One chore with a corrupt field stopped every claim, approval and
+ * completion for the family, and those operations are uncancellable by design.
+ *
+ * The repair is deliberately minimal and local: the offending task's `crew`
+ * becomes `null` in the canonical snapshot (a crew nobody can read is shown as
+ * no crew), the ids come back on the warnings channel, and the pass continues
+ * with a projection every other task can be proven against. Nothing about the
+ * concurrency guard or the tombstone/duplicate-id rules changes.
+ */
+async function quarantineMalformedCrew(
+  pb: AdminPB,
+  data: SnapshotData,
+): Promise<{ quarantined: number[] }> {
+  const ids = malformedCrewTaskIds(data);
+  if (ids.length === 0) return { quarantined: [] };
+  const broken = new Set(ids);
+  const mutation = await mutateSnapshotWithMeta<{ ids: number[] }>((current) => {
+    const quarantined = malformedCrewTaskIds(current);
+    if (quarantined.length === 0) return { data: current, result: { ids: [] } };
+    const remove = new Set(quarantined);
+    return {
+      data: {
+        ...current,
+        tasks: (Array.isArray(current.tasks) ? current.tasks : []).map((task) =>
+          remove.has(Number(task?.id)) ? { ...task, crew: null } : task,
+        ),
+      },
+      result: { ids: quarantined },
+    };
+  }, pb);
+  const quarantined = Array.isArray(mutation.result?.ids) ? mutation.result.ids : [];
+  return { quarantined: [...new Set(quarantined.map(Number))].filter((id) => broken.has(id)) };
 }
 
 function projectionMatches(row: Row, expected: Record<string, unknown>): boolean {
@@ -810,6 +874,30 @@ export async function reconcileTaskProjectionLocked(
         else {
           repaired.push(`week:${weekStart}:fields`);
           snapshot = await snapshotRead(pb);
+        }
+      }
+
+      // B2, before ANY projection work: a task whose canonical `crew` cannot
+      // be projected is quarantined here so it cannot fail the whole pass. It
+      // runs after the `finalStateChanged` guard on purpose — that guard is the
+      // concurrency contract and the quarantine's own snapshot write must not
+      // be able to trip it.
+      if (malformedCrewTaskIds(snapshot.data).length > 0) {
+        try {
+          const { quarantined } = await quarantineMalformedCrew(pb, snapshot.data);
+          for (const taskId of quarantined) {
+            const category = `task:${taskId}:crew_quarantined`;
+            repaired.push(category);
+            warnings.push(category);
+          }
+          if (quarantined.length > 0) {
+            snapshot = await snapshotRead(pb);
+          }
+        } catch {
+          // Best-effort by design: an unwritable snapshot leaves this one task
+          // failing its own projection below (honest), while every other task
+          // still reconciles.
+          warnings.push("task:crew:quarantine_unavailable");
         }
       }
 

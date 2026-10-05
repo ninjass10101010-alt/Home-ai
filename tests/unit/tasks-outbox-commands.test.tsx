@@ -64,6 +64,7 @@ const server = vi.hoisted(() => ({
   verifyOk: true,
   redeemBody: null as null | any,
   ledgerBody: null as null | any,
+  ledgerStatus: 200,
   echoReceipt: false,
   approveSeen: false,
 }));
@@ -127,7 +128,7 @@ function installFetch() {
       }
       if (url === "/api/tasks/ledger") {
         server.requests.push({ route: url, body });
-        return { ok: true, status: 200, json: async () => server.ledgerBody ?? { success: true } };
+        return { ok: server.ledgerStatus < 400, status: server.ledgerStatus, json: async () => server.ledgerBody ?? { success: true } };
       }
       if (url === "/api/tasks/claim" || url === "/api/tasks/approve" || url === "/api/tasks/manage" || url === "/api/tasks/config") {
         server.requests.push({ route: url, body });
@@ -312,6 +313,7 @@ beforeEach(() => {
   server.approveBody = null;
   server.snapshot = { tasks: [], weekData: null };
   server.verifyOk = true;
+  server.ledgerStatus = 200;
   server.echoReceipt = false;
   server.approveSeen = false;
   mockAuth.currentUser = { name: "Rebecca", role: "parent", age: 40 };
@@ -786,6 +788,33 @@ describe("display-only optimism is visible but never persisted", () => {
 });
 
 describe("reward redemption, penalty and manual adjust are server commands", () => {
+  /**
+   * Drive the parent-PIN manual-adjust dialog for one member, end to end: the
+   * adjust control lives on a leaderboard row, so the Leaderboard tab is opened
+   * first, then the amount, direction and the parent PIN.
+   */
+  async function applyAdjustTo(member: string) {
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    const leaderboard = Array.from(document.querySelectorAll("button")).find((button) =>
+      (button.textContent || "").includes("Leaderboard"),
+    ) as HTMLButtonElement;
+    await act(async () => { leaderboard.click(); });
+    await settle();
+    await click(`Adjust points for ${member}`);
+    await setField("Adjustment amount", "20");
+    await click("Add points");
+    await act(async () => {
+      const pin = document.querySelector('input[aria-label="Parent PIN"]') as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(pin, PARENT_PIN);
+      pin.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { dialogButton("Apply").click(); });
+    await settle(150);
+    return el;
+  }
+
   it("queues a redemption with the member PIN and adopts the server weekData", async () => {
     const REDEEM = { id: 7, name: "Movie night", emoji: "🎬", cost: 25 };
     localStorage.setItem("consuela-rewards", JSON.stringify([REDEEM]));
@@ -941,36 +970,46 @@ describe("reward redemption, penalty and manual adjust are server commands", () 
       reconciled: true,
     };
     seed([], { points: { "Caspian Garcia": 5 }, streak: {}, lastActive: {}, history: [] });
-    const el = await renderAsync(<TasksPage />);
-    await settle();
-    // The adjust control lives on a leaderboard row, so switch to that tab.
-    const leaderboard = Array.from(document.querySelectorAll("button")).find((button) =>
-      (button.textContent || "").includes("Leaderboard"),
-    ) as HTMLButtonElement;
-    await act(async () => { leaderboard.click(); });
-    await settle();
-    await click("Adjust points for Caspian Garcia");
-    await setField("Adjustment amount", "20");
-    await click("Add points");
-    await act(async () => {
-      const pin = document.querySelector('input[aria-label="Parent PIN"]') as HTMLInputElement;
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
-      setter.call(pin, PARENT_PIN);
-      pin.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => { dialogButton("Apply").click(); });
-    await settle(150);
+    await applyAdjustTo("Caspian Garcia");
 
     const posted = requestsFor("/api/tasks/ledger");
     expect(posted).toHaveLength(1);
+    // ACTOR vs TARGET: `memberName` is the PIN-verified parent (and the route's
+    // live `role === "parent"` gate), `targetMemberName` is whose balance moves.
+    // One field could not carry both — a child-target adjust built a CHILD-PIN
+    // body that the parent gate refused 403, so the whole child path was dead.
     expect(posted[0].body).toMatchObject({
       action: "adjust",
-      memberName: "Caspian Garcia",
+      memberName: "Rebecca Mom",
+      targetMemberName: "Caspian Garcia",
       pin: PARENT_PIN,
     });
+    expect(posted[0].body.memberName).not.toBe(posted[0].body.targetMemberName);
     expect(typeof posted[0].body.amount).toBe("number");
     expect(posted[0].body.points).toBeUndefined();
     expect(storedWeek().points["Caspian Garcia"]).toBe(25);
+  });
+
+  it("a queued child-target adjust keeps BOTH identities in the durable entry", async () => {
+    // The outbox sanitizer used to strip `targetMemberName`, so a command that
+    // had to WAIT in the queue (a sleeping NAS, a dropped wifi) replayed with
+    // the actor's name only — a self-adjust that moved the PARENT's balance for
+    // a reason written about their child. The durable copy is what actually
+    // replays, so it is the copy that has to carry the target.
+    server.ledgerStatus = 503;
+    seed([], { points: { "Caspian Garcia": 5 }, streak: {}, lastActive: {}, history: [] });
+    const el = await applyAdjustTo("Caspian Garcia");
+
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(listTaskOutbox()[0]).toMatchObject({
+      route: "/api/tasks/ledger",
+      action: "adjust",
+      payload: { memberName: "Rebecca Mom", targetMemberName: "Caspian Garcia" },
+    });
+    // Nothing was adopted and nothing moved locally while the command waited,
+    // and the family can see (and cancel) the command that is still pending.
+    expect(storedWeek().points["Caspian Garcia"]).toBe(5);
+    expect(el.querySelector('[aria-label="Cancel queued Caspian Garcia"]')).not.toBeNull();
   });
 });
 

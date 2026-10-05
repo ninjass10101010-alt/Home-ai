@@ -55,14 +55,31 @@ const radiusMap: Record<SurfaceRadius, string> = {
   pill: "rounded-full",
 };
 
+/**
+ * The `glass*` prop values are KEPT (many call sites pass them) but they now
+ * emit the `material-*` TIER names. The two families are byte-identical in
+ * globals.css — `.material-thin, .glass-subtle`, `.material-regular, .glass`
+ * and `.material-thick, .glass-strong` share one declaration block each — so
+ * this is a pure rename with zero rendering change, and it stops the primitive
+ * from being the last thing in the app still reaching for a legacy alias.
+ */
 const variantMap: Record<SurfaceVariant, string> = {
-  glass: "glass",
-  "glass-strong": "glass-strong",
-  "glass-subtle": "glass-subtle",
+  glass: "material-regular",
+  "glass-strong": "material-thick",
+  "glass-subtle": "material-thin",
   "material-regular": "material-regular",
   "material-thick": "material-thick",
   warm: "warm-glass-card",
-  flat: "material-regular bg-[var(--color-surface-2)] border border-white/8",
+  /**
+   * `flat` used to list `material-regular` FIRST and `bg-[var(--color-surface-2)]`
+   * after it, which never did anything: `.material-*` is **unlayered** CSS, so
+   * its `background` out-ranks the Tailwind `bg-*` utility outright and the
+   * "flat" surface silently rendered as glass. The tier is dropped, not
+   * reordered. `border-white/8` also went: 8% white is invisible against the
+   * light theme's near-white canvas, which is the same reason
+   * `patterns/SectionCard.tsx` moved its internal rules to `border-border`.
+   */
+  flat: "border border-border bg-[var(--color-surface-2)]",
 };
 
 export default function Surface({

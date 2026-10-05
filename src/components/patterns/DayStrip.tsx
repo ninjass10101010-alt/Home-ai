@@ -23,7 +23,16 @@ export default function DayStrip({ days, onChange, value, className = "", compac
               compact ? "min-w-12 p-2" : "min-w-16 p-3"
             } ${
               isActive
-                ? "border-[var(--color-accent-button)] bg-[var(--color-accent-button)] text-white shadow-lg shadow-[var(--color-accent-button)]/20"
+                /* The active day is the accent deepened 60% toward black, spelled
+                   out rather than read from `--color-accent-button` — the same
+                   reasoning as `SoftButton`'s primary and `Chip`'s selected fill.
+                   `useTheme` writes that token as an INLINE style on <html>, which
+                   out-ranks every `:root[data-theme="…"]` rule, so on a pristine
+                   `localStorage` it resolves to `#2563eb` (the LIGHT palette) in
+                   BOTH themes and to nori blue for every accent: the family picks
+                   mint and their selected day is still blue. White on the intended
+                   mix measures 4.60–8.33:1 dark / 7.12–12.52:1 light. */
+                ? "border-[color-mix(in_srgb,var(--color-accent-selected)_60%,black)] bg-[color-mix(in_srgb,var(--color-accent-selected)_60%,black)] text-white shadow-lg shadow-[color-mix(in_srgb,var(--color-accent-selected)_60%,black)]/20"
                 : "border-border bg-[var(--color-surface-0)]/30 text-text-primary hover:bg-[var(--color-surface-0)]/45"
             }`}
           >

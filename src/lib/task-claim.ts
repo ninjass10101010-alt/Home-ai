@@ -3,7 +3,7 @@ import { withAdmin } from "@/lib/pb-auth";
 import { withTaskCommandLock } from "@/lib/task-command-lock";
 import { getLiveMembers, type LiveMember } from "@/lib/live-member";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
-import { applyWeekLedgerOperationLocked } from "@/lib/ledger-operations";
+import { applyWeekLedgerOperationLocked, normalizeWeekStart } from "@/lib/ledger-operations";
 import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import {
   crewAllCheckedIn,
@@ -16,6 +16,7 @@ import {
 import {
   findCanonicalTask,
   getSnapshotOperationReceipts,
+  describeSnapshotWriteError,
   mutateSnapshotWithMeta,
   normalizeWeekData,
   persistSnapshotWeek,
@@ -28,6 +29,7 @@ import {
   type SnapshotRevision,
   type SnapshotTask,
 } from "@/lib/snapshot-tasks";
+import { slimTaskEmoji } from "@/lib/task-emoji";
 import {
   isRecord,
   normalizeOperationId,
@@ -200,10 +202,18 @@ export function parseClaimCommand(value: unknown): ClaimParseResult {
   ) {
     return parseError("invalid_task_id");
   }
+  // The legacy assigneeEmoji key is validated and then DROPPED (the actor's
+  // emoji is re-resolved from the live roster), so this bound is body hygiene
+  // for a field that never reaches storage. The storage ceiling + fallback
+  // (TASK_SNAPSHOT_EMOJI_MAX -> 👤) is applied where claim actually persists
+  // emoji: the claim/complete builds, crew-join, and canonicalCrew — all via
+  // slimTaskEmoji. The live client still sends its stored (sometimes photo-
+  // sized) assigneeEmoji on the legacy key, so it must stay admitted.
   if (
     value.assigneeEmoji !== undefined &&
     (typeof value.assigneeEmoji !== "string" || value.assigneeEmoji.length > 400_000)
   ) return parseError("invalid_body");
+
   const canonicalName = optionalTrimmedText(value.memberName);
   const legacyName = optionalTrimmedText(value.claimantName);
   const canonicalPin = optionalTrimmedText(value.pin);
@@ -337,6 +347,31 @@ function sessionPolicyAllows(actor: ClaimActor, task: SnapshotTask, action: Clai
   if (!isUnderTenChild(actor)) return false;
   if (action === "crew-join" || action === "crew-checkin") return true;
   return action === "complete" && task.universal === false && !isCrewTask(task as unknown as Task);
+}
+
+/**
+ * Option B: chat never moves points. ONE predicate for the whole seam, so the
+ * queue-vs-pay decision has a single source of truth — it used to be written out
+ * inline once per branch, which is how the comment and the code drifted apart.
+ *
+ * A completion QUEUES for approval when EITHER
+ *
+ *   1. it did not come from the Tasks screen: `authentication` is `"internal"`
+ *      (the assistant, MUSE, or any server-side caller), or
+ *   2. the PIN-verified member is a child, whose points a grown-up approves.
+ *
+ * Clause 1 is what closes the roster-promotion race, and it is keyed off
+ * `authentication` alone because that value is fixed by the CALLER at the
+ * boundary: a member promoted child -> parent between two roster reads cannot
+ * flip it. Clause 2 is a property of WHO was verified, read once from the live
+ * roster — the same `role` every surrounding ownership rule uses. It can only
+ * make a queue MORE likely (never pay a child directly), so the two clauses
+ * cannot disagree about a grown-up. A parent PIN on the Tasks screen is the only
+ * caller that pays on the spot.
+ */
+function queuesForApproval(actor: ClaimActor): boolean {
+  return actor.authentication === "internal" ||
+    actor.role.trim().toLowerCase() === "child";
 }
 
 function doneThisWeek(task: SnapshotTask, weekStart: string): boolean {
@@ -604,8 +639,20 @@ async function repairReceiptProjection(
     try {
       week = await withAdmin((pb) => readWeek(pb, weekStart));
     } catch {
-      week = null;
+      week = undefined;
     }
+  }
+  if (shouldInspectLedger && week === undefined) {
+    // The ledger leg could not be read. Reporting `reconciled: true` here would
+    // confirm a command whose points were never checked, and a duplicate
+    // confirmation makes the outbox DELETE the entry — so the command is refused
+    // with the retryable `ledger_unavailable` instead.
+    return {
+      reconciled: false,
+      revision: lookup.revision,
+      task: lookup.task,
+      reason: "ledger_unavailable",
+    };
   }
   const transactions = ledgerReplayTransactions(week ?? null, command.operationId);
   let repairedTask: SnapshotTask | null = lookup.task;
@@ -719,15 +766,22 @@ async function replayReceipt(
   const actorRole = actor.role.trim().toLowerCase();
   const ledgerAction = actorRole === "parent" &&
     (command.action === "claim" || command.action === "complete" || command.action === "undo");
-  let week: WeekData | null = null;
+  let week: WeekData | null | undefined;
   if (ledgerAction) {
     try {
       week = await withAdmin((pb) => readWeek(pb, authorityWeekStart));
     } catch {
-      week = null;
+      week = undefined;
+    }
+    if (week === undefined) {
+      // "Could not read" must never be answered as a duplicate: the receipt says
+      // this command was already handled, but the ledger leg was never checked,
+      // and a duplicate acknowledgement makes the outbox delete the entry. The
+      // client retries instead.
+      return failure(command.operationId, "ledger_unavailable", command.action);
     }
   }
-  const transactions = ledgerReplayTransactions(week, command.operationId);
+  const transactions = ledgerReplayTransactions(week ?? null, command.operationId);
   if (!receipt.receipt && transactions.length === 0) return null;
   if (!currentLookup.task && !currentLookup.tombstoned) {
     return failure(command.operationId, "snapshot_write_failed", command.action);
@@ -854,7 +908,8 @@ async function writeCanonicalTask(
       revision: verified.revision,
       duplicate: mutation.result.duplicate || duplicate,
     };
-  } catch {
+  } catch (error) {
+    console.warn(`[task-claim] snapshot write failed: ${describeSnapshotWriteError(error)}`);
     return {
       ok: false,
       task: null,
@@ -907,7 +962,10 @@ function canonicalCrew(
     output.push({
       ...member,
       name: live.name,
-      emoji: typeof member.emoji === "string" ? member.emoji : live.emoji ?? "",
+      // The roster photo (a 100KB+ data URL) must never ride a snapshot row:
+      // slimTaskEmoji falls back to 👤 above TASK_SNAPSHOT_EMOJI_MAX, and
+      // rendering is roster-first so the real photo still shows.
+      emoji: slimTaskEmoji(typeof member.emoji === "string" ? member.emoji : live.emoji ?? ""),
     });
   }
   return { members: output, removed: normalizeCrewRemoved(task.crew) };
@@ -959,30 +1017,115 @@ function pendingApproval(task: SnapshotTask): {
   };
 }
 
+/**
+ * The week row could not be read — a thrown read, or two `week_data` rows for
+ * one week.
+ *
+ * This is deliberately its own failure and never collapses into "no week
+ * exists". The old bare `.find()` picked whichever duplicate sorted first (a
+ * stale copy missing the earn reported `nothing_to_undo`, which the outbox
+ * consumes as a confirmed duplicate and deletes), and a THROWN read was caught
+ * and coerced to `null` — indistinguishable from "no week exists", so a re-sent
+ * claim/complete/undo during a PocketBase blip was answered **200 duplicate**
+ * for a command whose ledger leg was never checked. Callers keep `undefined`
+ * for "could not read" and refuse with a retryable reason instead.
+ */
+class WeekLedgerReadError extends Error {
+  constructor(weekStart: string) {
+    super(`week_ledger_unreadable:${weekStart}`);
+    this.name = "WeekLedgerReadError";
+  }
+}
+
+/** Read the single `week_data` row for a week, the way the seam reads it. */
 async function readWeek(pb: AdminPB, weekStart: string): Promise<WeekData | null> {
   const rows = await pb.collection("week_data").getFullList({ requestKey: null });
-  const row = (Array.isArray(rows) ? rows : []).find(
-    (candidate: any) => candidate?.weekStart === weekStart,
+  const matching = (Array.isArray(rows) ? rows : []).filter(
+    (candidate: any) => normalizeWeekStart(candidate?.weekStart) === weekStart,
   );
+  // Ambiguity is REFUSED, exactly as `ledger-operations` refuses it: the write
+  // path must never be talking about a different row than the read path.
+  if (matching.length > 1) throw new WeekLedgerReadError(weekStart);
+  const row = matching[0];
   if (!row) return null;
   return normalizeWeekData(row);
 }
 
-function latestEarn(
-  history: Transaction[],
-  taskId: number,
-  member: string,
-): Transaction | null {
-  const earns = history.filter(
-    (transaction) =>
-      transaction.type === "earn" &&
-      transaction.taskId === taskId &&
-      transaction.member === member,
-  );
-  if (!earns.length) return null;
-  return earns.reduce((latest, transaction) =>
-    Date.parse(transaction.timestamp) >= Date.parse(latest.timestamp) ? transaction : latest
-  );
+interface WeekHistory {
+  weekStart: string;
+  history: Transaction[];
+}
+
+/** `week_archive` rows, or none when this client cannot name the collection. */
+async function readArchiveRows(pb: AdminPB): Promise<Record<string, unknown>[]> {
+  let handle: unknown;
+  try {
+    handle = pb.collection("week_archive");
+  } catch {
+    return [];
+  }
+  if (!handle || typeof (handle as { getFullList?: unknown }).getFullList !== "function") return [];
+  const rows = await (handle as { getFullList: (options?: unknown) => Promise<unknown> })
+    .getFullList({ requestKey: null });
+  return Array.isArray(rows) ? rows as Record<string, unknown>[] : [];
+}
+
+/**
+ * Every week the family has ledger history in — `week_data` first (it stays
+ * authoritative), then `week_archive` (the rollover's mirror, which is the ONLY
+ * copy once a row is gone from `week_data`).
+ *
+ * A paid undo needs this because the earn it reverses is not necessarily in the
+ * authority week: a chore done on Sunday is paid into the PREVIOUS week's row,
+ * and on Monday the new week's row may not even exist yet.
+ */
+async function readLedgerWeeks(pb: AdminPB, authorityWeekStart: string): Promise<WeekHistory[]> {
+  const rows = await pb.collection("week_data").getFullList({ requestKey: null });
+  const parsed: WeekHistory[] = [];
+  const seenWeeks = new Set<string>();
+  for (const candidate of Array.isArray(rows) ? rows : []) {
+    const weekStart = normalizeWeekStart((candidate as { weekStart?: unknown })?.weekStart);
+    if (!weekStart) continue;
+    if (seenWeeks.has(weekStart)) {
+      if (weekStart === authorityWeekStart) throw new WeekLedgerReadError(weekStart);
+      continue;
+    }
+    seenWeeks.add(weekStart);
+    const week = normalizeWeekData(candidate);
+    // A week whose stored history no longer parses is evidence for nobody in
+    // either direction (every balance computation runs the same parser), so it
+    // is skipped rather than allowed to freeze the undo.
+    if (week) parsed.push({ weekStart, history: week.history });
+  }
+  for (const row of await readArchiveRows(pb)) {
+    const week = normalizeWeekData(row);
+    if (week) parsed.push({ weekStart: week.weekStart, history: week.history });
+  }
+  // `week_archive` mirrors `week_data`, so the same transaction arrives twice.
+  // The first occurrence wins, which keeps the reversal pointed at the row the
+  // seam will actually write.
+  const seenIds = new Set<number>();
+  return parsed.map((week) => {
+    const history = week.history.filter((transaction) => {
+      if (seenIds.has(transaction.id)) return false;
+      seenIds.add(transaction.id);
+      return true;
+    });
+    return { weekStart: week.weekStart, history };
+  });
+}
+
+interface EarnCandidate {
+  earn: Transaction;
+  weekStart: string;
+  reversed: boolean;
+}
+
+function laterThan(left: Transaction, right: Transaction): boolean {
+  const leftAt = Date.parse(left.timestamp);
+  const rightAt = Date.parse(right.timestamp);
+  if (leftAt !== rightAt) return leftAt > rightAt;
+  return left.id > right.id;
 }
 
 function earnReversed(history: Transaction[], earn: Transaction): boolean {
@@ -994,6 +1137,49 @@ function earnReversed(history: Transaction[], earn: Transaction): boolean {
       transaction.member === earn.member &&
       Date.parse(transaction.timestamp) >= Date.parse(earn.timestamp),
   );
+}
+
+/**
+ * The LATEST earn per member for a task, across every week, each flagged with
+ * whether that member's payment has already been reversed.
+ *
+ * Per member, because a crew close pays N members: reversing the crew's
+ * payment means reversing EVERY earn row the crew was paid, each at its own
+ * amount. Per taskId only, because a crew close is owned by `completedBy:
+ * "Crew"` — a name that is not on the live roster, so no caller's own name can
+ * ever match it.
+ */
+function latestTaskEarns(weeks: readonly WeekHistory[], taskId: number): EarnCandidate[] {
+  const latest = new Map<string, EarnCandidate>();
+  for (const week of weeks) {
+    for (const transaction of week.history) {
+      if (transaction.type !== "earn" || transaction.taskId !== taskId) continue;
+      const existing = latest.get(transaction.member);
+      if (existing && !laterThan(transaction, existing.earn)) continue;
+      latest.set(transaction.member, {
+        earn: transaction,
+        weekStart: week.weekStart,
+        reversed: earnReversed(week.history, transaction),
+      });
+    }
+  }
+  return [...latest.values()];
+}
+
+/**
+ * Two allowed reversers, and no third: a parent may reverse anybody's payment,
+ * a member may reverse only their OWN. The earn's member is resolved against
+ * the live roster so a stored first name still matches the right person.
+ */
+function mayReverseEarn(
+  actor: ClaimActor,
+  paidMember: string,
+  roster: LiveMember[],
+): boolean {
+  if (actor.role.trim().toLowerCase() === "parent") return true;
+  const owner = resolveHumanMember(roster, paidMember);
+  if (owner) return owner.id === actor.memberId;
+  return paidMember === actor.name;
 }
 
 interface LedgerMutationContext {
@@ -1164,20 +1350,14 @@ async function executeClaimCommandUnlocked(
     const speedBonus = gate === "late" ? 0 : normalizeSpeedBonus(task.speedBonus);
     const amount = points + speedBonus;
     const label = gate === "late" ? "Snatched" : speedBonus > 0 ? "Fast grab" : "Completed";
-    // Option B, mirrored from the `complete` branch below: chat never moves
-    // points. A command authenticated as "internal" (the assistant, or any
-    // future server-side caller) QUEUES for approval whether the claimer is a
-    // child or a grown-up; only a real session/PIN caller — the Tasks screen —
-    // pays on the spot. Keying off `authentication` rather than `role` closes
-    // the roster-promotion race by construction, and it is the SEAM that
-    // enforces the rule, not the one caller that happens to be typed to
-    // "complete" | "undo" today.
-    const queueOnly = actorRole === "child" || baseActor.authentication === "internal";
+    // `queuesForApproval` is the ONE rule (see its doc comment); the `claim`
+    // branch and the `complete` branch below must not grow a second answer.
+    const queueOnly = queuesForApproval(baseActor);
     const build = (current: SnapshotTask): SnapshotTask => ({
       ...current,
       assignee: actor.name,
       assigned: actor.name,
-      assigneeEmoji: actor.emoji ?? current.assigneeEmoji ?? "",
+      assigneeEmoji: slimTaskEmoji(actor.emoji) || current.assigneeEmoji || "",
       ...completedFields(now, weekStart, baseActor),
       pendingApproval: queueOnly
         ? {
@@ -1224,15 +1404,11 @@ async function executeClaimCommandUnlocked(
     if (!owner) return failure(command.operationId, "unknown_task_owner", action);
     if (owner.id !== actor.id) return failure(command.operationId, "not_task_owner", action);
     if (points === null) return failure(command.operationId, "invalid_task_state", action);
-    // Option B: chat never moves points. A command authenticated as "internal"
-    // (the assistant) queues for approval whether the owner is a child or a
-    // grown-up; only a real session/PIN caller — the Tasks screen — pays now.
-    // Keying off `authentication` rather than `role` closes the roster race:
-    // a member promoted between two reads cannot flip this branch.
-    const queueOnly = actorRole === "child" || baseActor.authentication === "internal";
+    // The same ONE rule as the `claim` branch above.
+    const queueOnly = queuesForApproval(baseActor);
     const build = (current: SnapshotTask): SnapshotTask => ({
       ...current,
-      assigneeEmoji: actor.emoji ?? current.assigneeEmoji ?? "",
+      assigneeEmoji: slimTaskEmoji(actor.emoji) || current.assigneeEmoji || "",
       ...completedFields(now, weekStart, baseActor),
       pendingApproval: queueOnly
         ? {
@@ -1300,33 +1476,120 @@ async function executeClaimCommandUnlocked(
       ).then((outcome) => finishNonLedgerWrite(pb, command, baseActor, outcome)));
     }
 
-    if (actorRole === "child") return failure(command.operationId, "not_task_owner", action);
-    const week = await withAdmin((pb) => readWeek(pb, weekStart));
-    if (!week) return failure(command.operationId, "nothing_to_undo", action);
-    const earn = latestEarn(week.history, command.taskId, actor.name);
-    if (!earn) return failure(command.operationId, "nothing_to_undo", action);
-    if (earnReversed(week.history, earn)) {
-      return failure(command.operationId, "already_undone", action);
+    // Everything above this point was an UNPAID reopen (a queued tap that never
+    // moved points). From here the undo is a real ledger reversal, and
+    // `sessionPolicyAllows` has already established that a PIN (or an admin
+    // caller) is presenting it.
+    //
+    // The earn is NOT necessarily in the authority week, and it is NOT
+    // necessarily the caller's own: a chore paid on Sunday lives in the previous
+    // week's row, and a crew close pays N members under an owner name
+    // ("Crew") that is not on the roster. So the earn is resolved per member
+    // across every week, and each reversal is written into the week that HOLDS
+    // that earn.
+    let weeks: WeekHistory[];
+    try {
+      weeks = await withAdmin((pb) => readLedgerWeeks(pb, weekStart));
+    } catch {
+      // An unreadable / ambiguous ledger is not "nothing to undo": that reason is
+      // classified as a DUPLICATE by the outbox, which would delete the entry
+      // and leave the points wrong. `ledger_unavailable` is retryable.
+      return failure(command.operationId, "ledger_unavailable", action);
     }
-    if (!Number.isSafeInteger(earn.amount) || earn.amount < 0) {
-      return failure(command.operationId, "invalid_task_state", action);
+    const candidates = latestTaskEarns(weeks, command.taskId);
+    if (candidates.length === 0) return failure(command.operationId, "nothing_to_undo", action);
+    const unpaid = candidates.filter((candidate) => !candidate.reversed);
+    if (unpaid.length === 0) return failure(command.operationId, "already_undone", action);
+    const authorised = unpaid.filter((candidate) =>
+      mayReverseEarn(actor, candidate.earn.member, roster)
+    );
+    if (authorised.length === 0) return failure(command.operationId, "not_task_owner", action);
+    for (const candidate of authorised) {
+      if (!Number.isSafeInteger(candidate.earn.amount) || candidate.earn.amount < 0) {
+        return failure(command.operationId, "invalid_task_state", action);
+      }
     }
-    return applyLedgerMutation(command, {
-      authorityWeekStart: weekStart,
+
+    const title = task.title || "task";
+    const byWeek = new Map<string, NonNullable<LedgerMutationContext["entries"]>>();
+    for (const candidate of authorised) {
+      const amount = candidate.earn.amount;
+      const entries = byWeek.get(candidate.weekStart) ?? [];
+      entries.push({
+        type: "adjust",
+        // The EARN's member, never the actor's: a crew reversal pays back every
+        // member the crew was paid.
+        member: candidate.earn.member,
+        amount: amount === 0 ? 0 : -amount,
+        description: `Undo: ${title} (${amount === 0 ? "0" : `-${amount}`}pts)`,
+        taskId: command.taskId,
+      });
+      byWeek.set(candidate.weekStart, entries);
+    }
+    const groups = [...byWeek.entries()].sort((left, right) => left[0].localeCompare(right[0]));
+    // The primary group carries the snapshot leg (reopen the task + persist the
+    // week): the authority week when it holds any of the earn, else the earliest
+    // week that does.
+    const primaryIndex = Math.max(
+      0,
+      groups.findIndex(([groupWeek]) => groupWeek === weekStart),
+    );
+    const [primaryWeek, primaryEntries] = groups[primaryIndex];
+
+    const result = await applyLedgerMutation(command, {
+      authorityWeekStart: primaryWeek,
       lookup,
       actor,
       task,
       fingerprint,
       build: (current) => reopenTask(current, now),
       source: "task-undo",
-      entries: [{
-        type: "adjust",
-        member: actor.name,
-        amount: earn.amount === 0 ? 0 : -earn.amount,
-        description: `Undo: ${task.title || "task"} (${earn.amount === 0 ? "0" : `-${earn.amount}`}pts)`,
-        taskId: command.taskId,
-      }],
+      entries: primaryEntries,
     });
+    if (!result.ok) return result;
+
+    // Any other week holding a paid member's earn gets its own reversal through
+    // the SAME seam, under the SAME operationId, so a retry finds them already
+    // applied rather than reversing twice. No projection: the task was reopened
+    // once, by the primary.
+    //
+    // The LOCKED seam variant is deliberate: `executeClaimCommand` already holds
+    // the authority week's lock and the global order is
+    // week-ledger → task-command → snapshot, so taking a second week-ledger lock
+    // here would insert an acquisition between task-command and snapshot (and
+    // open an A-B-A window at a week boundary). The primary — the common case —
+    // is fully serialised, and a lost update on the rare extra week is caught by
+    // the seam's own post-write verification, which aborts with a retryable
+    // `ledger_unavailable` rather than losing points.
+    for (const [groupWeek, entries] of groups) {
+      if (groupWeek === primaryWeek) continue;
+      const extra = await applyWeekLedgerOperationLocked({
+        weekStart: groupWeek,
+        operation: {
+          operationId: command.operationId,
+          source: "task-undo",
+          fingerprint,
+          entries,
+        },
+      });
+      if (!extra.ok) {
+        return failure(
+          command.operationId,
+          extra.code === "operation_conflict" ? "operation_conflict" : "ledger_unavailable",
+          action,
+        );
+      }
+    }
+
+    if (primaryWeek === weekStart) return result;
+    // The reversal moved an OLDER week, so the authority week is unchanged. Say
+    // so: returning the older weekData here would hand the client a week it is
+    // not displaying as if it were this week's totals.
+    const authorityWeek = await withAdmin((pb) => readWeek(pb, weekStart)).catch(() => null);
+    const response: ClaimServiceResult = { ...result };
+    if (authorityWeek) response.weekData = authorityWeek;
+    else delete response.weekData;
+    return response;
   }
 
   if ((action === "crew-remove" || action === "crew-close") && actorRole !== "parent") {
@@ -1363,7 +1626,7 @@ async function executeClaimCommandUnlocked(
       ...crew.members,
       {
         name: actor.name,
-        emoji: actor.emoji ?? "",
+        emoji: slimTaskEmoji(actor.emoji) || "",
         joinedAt: now,
       },
     ], crew.removed);

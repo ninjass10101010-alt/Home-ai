@@ -1029,8 +1029,17 @@ export function writeTaskTemplatesStamp(stamp: string): void {
 
 // ─── Race gap — "You're 45 pts from 🥉" podium-gap math (pure) ─────────────
 export interface RaceGap {
+  /** Standard competition rank (1 + count of members strictly ahead), or null
+   *  when there is nothing to rank: an empty week, or a member who is not on
+   *  the board at all. A 0-point member DOES get a rank — their standing is
+   *  real even when their points are not. */
   rank: number | null;
+  /** True only when the member holds a prize rank WITH points — the same rule
+   *  the prize card's holder list and the podium ribbon use (`points > 0`), so
+   *  the two can never disagree about who is holding something. */
   onPodium: boolean;
+  /** Points still needed to reach the last prize rank, or null when there is
+   *  nothing left to chase (already holding one, or no prize ranks exist). */
   gapToPodium: number | null;
   leader: { name: string; points: number } | null;
 }
@@ -1040,14 +1049,22 @@ export function raceGap(memberName: string, pointsMap: Record<string, number>, m
   const ntp = sorted.filter((e) => e.points > 0);
   const leader = ntp[0] || null;
   const mine = entries.find((e) => e.name === memberName);
-  const myPoints = mine?.points || 0;
-  if (ntp.length === 0 || myPoints === 0)
-    return { rank: null, onPodium: false, gapToPodium: ntp.length ? ntp[Math.min(maxPrizeRank, ntp.length) - 1].points - myPoints : null, leader };
-  // competition rank: 1 + count of members with strictly more points
-  const rank = 1 + ntp.filter((e) => e.points > myPoints).length;
+  if (!mine || ntp.length === 0)
+    return { rank: null, onPodium: false, gapToPodium: ntp.length ? ntp[Math.min(maxPrizeRank, ntp.length) - 1].points - (mine?.points || 0) : null, leader };
+  const myPoints = mine.points || 0;
+  // Competition rank is a fact about the FIELD, not about whether I have scored:
+  // it is 1 + the count of members strictly ahead, computed over EVERY entry so
+  // a 0-point member's standing is never hidden. (The old short-circuit on
+  // `myPoints === 0` returned `rank: null` for exactly those members, so a
+  // card that lists their prize rank as "Up for grabs" still told them to
+  // "earn points to join the race".)
+  const rank = 1 + entries.filter((e) => e.points > myPoints).length;
   const cutoffRank = Math.min(maxPrizeRank, ntp.length);
   const podiumThresholdHolder = ntp.filter((e, i) => (1 + ntp.filter((o) => o.points > e.points).length) === cutoffRank)[0];
-  const onPodium = rank <= maxPrizeRank;
+  // Zero points holds no prize — same rule as `PrizeRaceCard.holdersForRank`
+  // and the `entry.points > 0` ribbon guard on the podium, so the race line and
+  // the prize list can never tell a member opposite stories.
+  const onPodium = myPoints > 0 && rank <= maxPrizeRank;
   return {
     rank, onPodium, leader,
     gapToPodium: onPodium ? null : (podiumThresholdHolder ? podiumThresholdHolder.points - myPoints : null),

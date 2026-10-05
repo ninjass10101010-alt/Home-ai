@@ -19,6 +19,21 @@ interface SegmentedControlProps {
    *  (the Calendar-tab treatment) instead of the quiet surface slide. */
   emphasize?: boolean;
   "aria-label"?: string;
+  /**
+   * Optional id for the `role="radiogroup"` track. It exists so a control that
+   * SWAPS a panel can point `aria-labelledby` at the group and `aria-controls`
+   * at the panel from the other end — a screen-reader user otherwise activates
+   * "Leaderboard" and hears nothing about the content that just replaced the
+   * page they were reading. Omitted, the track renders exactly as before.
+   */
+  id?: string;
+  /**
+   * Optional map from an option to the id of the region it reveals. Return
+   * `undefined` for an option that reveals nothing and that radio simply gets no
+   * `aria-controls` attribute — which is the correct value for every control in
+   * the app that is a plain segmented input rather than a view switch.
+   */
+  ariaControls?: (option: SegmentedOption) => string | undefined;
 }
 
 interface PillBox {
@@ -28,7 +43,20 @@ interface PillBox {
   height: number;
 }
 
-export default function SegmentedControl({ options, value, onChange, className = "", compact = false, emphasize = false, "aria-label": ariaLabel }: SegmentedControlProps) {
+/* The `emphasize` pill derives its gradient from `--color-accent-selected`
+   rather than `--color-accent-button`, for the same reason SoftButton's primary
+   does: `useTheme` writes that token INLINE on <html> and an inline declaration
+   out-ranks every `:root[data-theme="…"]` rule, so on a pristine localStorage it
+   is the LIGHT palette in both themes and nori blue for every accent — an
+   emphasized tab showed the wrong hue for the family that chose it. The two
+   stops are the accent at 60% and 46% toward black, which reproduces the old
+   `color-mix(… 76%, #111827)` second stop (the #111827 lift is imperceptible:
+   #1b3971 vs #1a3b70 on nori). White on the lighter stop measures
+   4.60–8.33:1 dark / 7.12–12.52:1 light across the ten accents. */
+const EMPHASIZE_PILL =
+  "bg-[linear-gradient(135deg,color-mix(in_srgb,var(--color-accent-selected)_60%,black),color-mix(in_srgb,var(--color-accent-selected)_46%,black))] shadow-[0_6px_18px_color-mix(in_srgb,var(--color-accent-selected)_35%,transparent),inset_0_1px_0_rgba(255,255,255,0.22)]";
+
+export default function SegmentedControl({ options, value, onChange, className = "", compact = false, emphasize = false, "aria-label": ariaLabel, id, ariaControls }: SegmentedControlProps) {
   const activeIndex = Math.max(options.findIndex((option) => option.id === value), 0);
   const densityClass = compact
     ? "min-w-0 basis-0 gap-1 rounded-xl px-1 py-2 text-xs"
@@ -77,6 +105,7 @@ export default function SegmentedControl({ options, value, onChange, className =
   return (
     <div
       ref={trackRef}
+      id={id}
       role="radiogroup"
       aria-label={ariaLabel}
       // The track caps its own width. It used to be a plain flex row, so on a
@@ -92,9 +121,7 @@ export default function SegmentedControl({ options, value, onChange, className =
       <span
         aria-hidden="true"
         className={`absolute inset-y-1 left-1 rounded-xl transition-all duration-200 ${
-          emphasize
-            ? "bg-[linear-gradient(135deg,var(--color-accent-button,var(--color-accent-selected)),color-mix(in_srgb,var(--color-accent-button,var(--color-accent-selected))_76%,#111827))] shadow-[0_6px_18px_color-mix(in_srgb,var(--color-accent-selected)_35%,transparent),inset_0_1px_0_rgba(255,255,255,0.22)]"
-            : "bg-[var(--color-surface-0)] shadow"
+          emphasize ? EMPHASIZE_PILL : "bg-[var(--color-surface-0)] shadow"
         }`}
         style={
           pill
@@ -114,6 +141,7 @@ export default function SegmentedControl({ options, value, onChange, className =
           type="button"
           role="radio"
           aria-checked={option.id === value}
+          aria-controls={ariaControls?.(option)}
           onClick={() => onChange(option.id)}
           className={`relative z-10 flex min-h-[44px] flex-1 items-center justify-center ${densityClass} font-semibold tap-sm ${
             compact ? "min-w-0" : "min-w-max sm:min-w-0"

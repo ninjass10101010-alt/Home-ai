@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/set-state-in-effect, react-hooks/purity */
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties } from "react";
@@ -24,7 +24,7 @@ import StatTile from "@/components/patterns/StatTile";
 import ProgressRing from "@/components/ui/ProgressRing";
 import Avatar from "@/components/ui/Avatar";
 import { textEmojiOrFallback } from "@/components/ui/EmojiText";
-import TasksStats from "@/components/tasks/TasksStats";
+import TasksStats, { TASKS_PANEL_IDS, TASKS_VIEW_SWITCH_ID } from "@/components/tasks/TasksStats";
 import CrewTasksCard from "@/components/tasks/CrewTasksCard";
 import DueDatePicker from "@/components/tasks/DueDatePicker";
 import TasksArchive from "@/components/tasks/TasksArchive";
@@ -60,6 +60,7 @@ import {
 } from "@/lib/task-utils";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import type { TaskOutboxAcknowledgedEvent } from "@/lib/task-operation-outbox";
+import { onTaskOutboxAdopted } from "@/lib/task-operation-outbox";
 import { writeTaskConfig } from "@/lib/task-config-client";
 import type { TaskConfigCommand, TaskTemplateConfigItem } from "@/lib/task-config";
 import {
@@ -153,7 +154,63 @@ function priorityColor(priority: Task["priority"]): string {
   return priority === "high" ? "var(--color-accent-rose)" : priority === "medium" ? "var(--color-accent-amber)" : "var(--color-accent-mint)";
 }
 
+/**
+ * THE row tint, as one formula instead of nine hand-written gradients.
+ *
+ * At 40%/20% every row's own metadata line measured 2.89–4.16:1 against the
+ * painted backdrop — the tint, not the ink, was the problem: `--color-text-
+ * secondary` clears 4.5:1 on glass but not on a 40% mint flood. Measured over
+ * the four accents in both themes, 10%→4% is the loudest wash that keeps
+ * `text-secondary` at or above 4.5:1 (dark worst case mint 4.69:1, light worst
+ * case rose 5.46:1).
+ *
+ * The priority SIGNAL did not weaken with it: the saturated 2px rail down the
+ * row's left edge and the points chip still carry full-strength accent, so the
+ * wash is now purely the material, which is what a wash is for.
+ */
+function rowTint(color: string): string {
+  return `linear-gradient(135deg, color-mix(in srgb, ${color} 10%, transparent) 0%, color-mix(in srgb, ${color} 4%, transparent) 100%)`;
+}
+
+/** The points chip's own fill, sized so `text-primary` on it clears AA in both themes. */
+function chipFill(color: string): string {
+  return `linear-gradient(135deg, color-mix(in srgb, ${color} 22%, transparent), color-mix(in srgb, ${color} 10%, transparent))`;
+}
+
 const initialTasks: Task[] = [];
+
+// The ONE "nobody owns this yet" assignee sentinel. `universal: true` is the
+// authoritative signal; this string is what the board prints, and two writers
+// that disagree ("Open" from the Add sheet, "All" from Repeat-last-week) made
+// one mode render under two names. "All" is the value the rollover snapshot and
+// the archived defs already carry.
+const OPEN_ASSIGNEE = "All";
+
+// The ledger route's refusal codes, said the way the family reads them. The
+// honest distinction the route itself draws: a 401 is "that PIN was wrong", a
+// 403 is "an adult has to do this", a 404 is "that name or item isn't on the
+// roster any more", and a 503 is "Consuela is asleep — try again" (the outbox
+// retries it, so nothing is lost). No 4xx is ever dressed as a confirmation.
+const LEDGER_REFUSAL_COPY: Record<string, string> = {
+  adult_only: "Only a grown-up can move points.",
+  unauthorized: "That PIN wasn't right.",
+  unknown_member: "That member isn't on the roster any more.",
+  unknown_penalty: "That penalty isn't in the list any more.",
+  pet_target: "A pet can't hold points.",
+  insufficient_balance: "Not enough points to take that off.",
+  operation_conflict: "That change was already applied once.",
+  invalid_task_state: "That amount wasn't accepted.",
+  invalid_body: "That change wasn't in the shape the server expects.",
+  member_roster_unavailable: "Consuela couldn't read the family list — it'll retry.",
+  ledger_unavailable: "Consuela is unreachable right now — it'll retry.",
+  snapshot_write_failed: "Consuela couldn't save that yet — it'll retry.",
+  outbox_evicted: "It was dropped from the pending list before it sent.",
+};
+
+function ledgerRefusalCopy(reason?: string): string {
+  if (!reason) return "";
+  return LEDGER_REFUSAL_COPY[reason] ?? "";
+}
 
 const categories = ["Chores", "Errands", "Admin", "Health", "Pets", "School"];
 
@@ -178,12 +235,15 @@ function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
 }
 
 function migrateAssigneeNames(tasks: Task[], members: any[]): Task[] {
+  // Through the SHARED resolver, not a prefix guess: `t.assignee.startsWith(m.name)`
+  // folded "Alexandra Garcia" into "Alex Garcia" (Alex is a prefix of Alexandra),
+  // so two family members became one row key at MOUNT — before any identity
+  // lookup on this page could compare exactly.
   return tasks.map((t) => {
-    const match = members.find((m: any) =>
-      m.fullName === t.assignee || m.name === t.assignee || m.fullName.startsWith(t.assignee) || t.assignee.startsWith(m.name)
-    );
-    if (match && t.assignee !== match.fullName) {
-      return { ...t, assignee: match.fullName, assigneeEmoji: match.emoji };
+    const fullName = resolveMemberName(members, t.assignee);
+    if (fullName && fullName !== t.assignee) {
+      const match = members.find((m: any) => (m.fullName || m.name) === fullName);
+      if (match) return { ...t, assignee: match.fullName, assigneeEmoji: match.emoji };
     }
     return t;
   });
@@ -354,11 +414,24 @@ export default function TasksPage() {
   // Prefill moves focus back to Title AFTER the state commit (token-keyed).
   const [focusTitleToken, setFocusTitleToken] = useState(0);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
-  const [pinTaskId, setPinTaskId] = useState<number | null>(null);
-  // Crew join / check-in is a PIN-gated action like a claim (self-join only).
-  const [pinCrewAction, setPinCrewAction] = useState<{ taskId: number; action: "crew-join" | "crew-checkin" } | null>(null);
-  const [pinReward, setPinReward] = useState<Reward | null>(null);
-  const [pinPenalty, setPinPenalty] = useState<Penalty | null>(null);
+  // ONE source of truth for the PIN dialog. `pinTaskId` / `pinCrewAction` /
+  // `pinReward` / `pinPenalty` were four independent fields written by three
+  // different openers and cleared by three different closers, so a crew dialog
+  // dismissed with Escape left its `crew-join` arm behind and the NEXT normal
+  // chore's Submit dispatched it against the previous crew task (variant B: a
+  // dead "Select who is joining" loop forever). The intent is discriminated by
+  // kind, so exactly one arm can be open and every writer goes through
+  // `openPin()`, which also resets the per-attempt input state.
+  type PinIntent =
+    | { kind: "task"; taskId: number }
+    | { kind: "crew"; taskId: number; action: "crew-join" | "crew-checkin" }
+    | { kind: "reward"; reward: Reward }
+    | { kind: "penalty"; penalty: Penalty };
+  const [pinIntent, setPinIntent] = useState<PinIntent | null>(null);
+  const pinTaskId = pinIntent && (pinIntent.kind === "task" || pinIntent.kind === "crew") ? pinIntent.taskId : null;
+  const pinCrewAction = pinIntent?.kind === "crew" ? { taskId: pinIntent.taskId, action: pinIntent.action } : null;
+  const pinReward = pinIntent?.kind === "reward" ? pinIntent.reward : null;
+  const pinPenalty = pinIntent?.kind === "penalty" ? pinIntent.penalty : null;
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const [pinSuccess, setPinSuccess] = useState("");
@@ -366,9 +439,42 @@ export default function TasksPage() {
   const [snatchForMember, setSnatchForMember] = useState("");
   const [redeemForMember, setRedeemForMember] = useState("");
   const [penaltyForMember, setPenaltyForMember] = useState("");
+  // The PIN-free completion branch has no `pinBusy` to guard it (it never opens
+  // a dialog), so a double-tap queued the command twice. Ref, not state: the
+  // guard has to be synchronous with the tap, before the next render lands.
+  const pinFreeInFlightRef = useRef<Set<number>>(new Set());
+  // The PAGE-identity every "is this me?" comparison runs against: the
+  // roster-resolved FULL name. The old `e.name === currentUser.name ||
+  // e.name.startsWith(currentUser.name)` lookups matched "Alex Garcia" to
+  // "Alexandra Garcia", so YourCard / the streak banner / the level-up effect
+  // could all read another person's points and record their level under the
+  // wrong key.
+  const myIdentity = useMemo(() => {
+    const name = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : null;
+    return {
+      name,
+      isMe: (raw?: string | null) => !!name && resolveMemberName(membersData, raw) === name,
+    };
+  }, [membersData, isLoggedIn, currentUser]);
+  const myRosterName = myIdentity.name;
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Task[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  // The tone is PASSED, never sniffed out of the message: the old
+  // `toast.includes("Failed")` test matched the literal "Failed" exactly once in
+  // the whole file — inside itself — so every failure rendered mint-on-mint as a
+  // success. An unknown is "neutral", not "success".
+  const [toastTone, setToastTone] = useState<"neutral" | "success" | "error">("neutral");
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Optimistic row ids. The counter used to be a `let` INSIDE the component, so
+  // it restarted at 0 on every render and `uid()` was `Date.now() + 1` almost
+  // every time — two AI suggestions adopted inside one millisecond minted the
+  // same id and rendered as a duplicate React key. Monotonic across renders.
+  const idCounterRef = useRef(0);
+  const uid = useCallback(() => {
+    idCounterRef.current += 1;
+    return Date.now() * 1000 + (idCounterRef.current % 1000);
+  }, []);
   const [rewards, setRewards] = useState<Reward[]>(() => loadFromStorage(REWARDS_KEY, []));
   const [editingRewardId, setEditingRewardId] = useState<number | null>(null);
   const [rewardForm, setRewardForm] = useState<Reward>({ id: 0, name: "", emoji: "🎁", cost: 50 });
@@ -445,9 +551,28 @@ export default function TasksPage() {
     | { kind: "pending"; taskId: number }
     | { kind: "cancelling"; taskId: number };
   const [optimisticRows, setOptimisticRows] = useState<Record<string, OptimisticRow>>({});
+  // Latest-state mirrors for the async snapshot restore: the fetch resolves long
+  // after commit, and these effects re-sync before any merge runs, so
+  // mergeTasksSnapshot always sees the CURRENT state (never a stale closure).
+  // Declared ABOVE `adoptStores` because that seam assigns them too.
+  const tasksRef = useRef<Task[]>(tasks);
+  const weekDataRef = useRef<WeekData>(weekData);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  useEffect(() => { weekDataRef.current = weekData; }, [weekData]);
   const adoptStores = useCallback(() => {
-    setTasks(loadTasks());
-    setWeekData(loadWeekData());
+    // The refs move with the state: `restoreFromSnapshot` merges from them
+    // immediately after calling this, and they used to be updated only by the
+    // render-commit effects above — so the merge read the PRE-adoption values
+    // and then overwrote what this had just adopted. The divergence is the
+    // normal case (`db.refreshCaches` writes localStorage via
+    // applyTasksSnapshotToStores and only THEN dispatches the event this page
+    // listens on), not an edge case.
+    const nextTasks = loadTasks();
+    const nextWeek = loadWeekData();
+    tasksRef.current = nextTasks;
+    weekDataRef.current = nextWeek;
+    setTasks(nextTasks);
+    setWeekData(nextWeek);
     setRewards(loadFromStorage(REWARDS_KEY, []));
     setPenalties(loadFromStorage(PENALTIES_KEY, []));
     setTemplates(loadTaskTemplates());
@@ -465,11 +590,42 @@ export default function TasksPage() {
   const addOptimisticRow = useCallback((operationId: string, row: OptimisticRow) => {
     setOptimisticRows((prev) => ({ ...prev, [operationId]: row }));
   }, []);
+  // Dialog auto-dismiss timers, in ONE registry. Every PIN dialog used to clear
+  // ITSELF from an uncancelled `setTimeout`, so a success that showed for 1500ms
+  // and was then dismissed with Escape would null the id of the chore the user
+  // had opened in the meantime and make the dialog they were typing into
+  // vanish. One registry is cleared at the top of every open handler, on every
+  // close, and on unmount — so no timer can ever outlive the attempt it belongs
+  // to.
+  const dialogTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const armDialogTimer = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(() => { dialogTimersRef.current.delete(id); fn(); }, ms);
+    dialogTimersRef.current.add(id);
+  }, []);
+  const clearDialogTimers = useCallback(() => {
+    for (const id of dialogTimersRef.current) clearTimeout(id);
+    dialogTimersRef.current.clear();
+  }, []);
+  useEffect(() => clearDialogTimers, [clearDialogTimers]);
   // Defined above the acknowledgment listener so that listener can raise the
-  // eligibility copy from the same stable callback.
-  const showToast = useCallback((msg: string) => {
+  // eligibility copy from the same stable callback. The TONE is passed: an
+  // earlier toast's timer used to cut a newer message short, and the tone used
+  // to be sniffed out of the text (which never matched "Failed" anywhere).
+  const showToast = useCallback((msg: string, tone: "neutral" | "success" | "error" = "neutral") => {
     setToast(msg);
-    setTimeout(() => setToast(null), 3000);
+    setToastTone(tone);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }, []);
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
+  // Queued ledger movements (redeem / penalty / manual adjust) are DURABLE
+  // COMMANDS: `queueCommand` only persists them and schedules a flush, so the
+  // acknowledgement — never the queue call — is what may say "done". The
+  // operation id is parked here with the copy that is true ONLY once the server
+  // has answered, plus the honest refusal line for a 4xx.
+  const ledgerOpsRef = useRef<Map<string, { done: string; refused: string }>>(new Map());
+  const trackLedgerOp = useCallback((operationId: string, done: string, refused: string) => {
+    ledgerOpsRef.current.set(operationId, { done, refused });
   }, []);
   const onAcknowledged = useCallback((acknowledged: TaskOutboxAcknowledgedEvent) => {
     // An approval ack carries how many award-list members the family server
@@ -481,10 +637,28 @@ export default function TasksPage() {
       typeof acknowledged.skipped === "number" &&
       acknowledged.skipped > 0
     ) {
-      showToast(`${acknowledged.skipped} not eligible`);
+      showToast(`${acknowledged.skipped} not eligible`, "neutral");
     }
     const operationId = acknowledged?.operationId;
     if (!operationId) return;
+    // A TERMINAL outcome without a landing: the command will never be applied,
+    // so the mark comes off exactly as it does on a success — and a family that
+    // was told "sending" is told why it stopped. A 4xx is never a confirmation.
+    const terminal = acknowledged.failed === true || acknowledged.evicted === true;
+    const tracked = ledgerOpsRef.current.get(operationId);
+    if (tracked) {
+      ledgerOpsRef.current.delete(operationId);
+      if (terminal) {
+        showToast(`${tracked.refused} ${ledgerRefusalCopy(acknowledged.reason)}`.trim(), "error");
+      } else {
+        showToast(tracked.done, "success");
+      }
+    } else if (terminal) {
+      showToast(`The family server refused that change. ${ledgerRefusalCopy(acknowledged.reason)}`.trim(), "error");
+    }
+    if (pinFreeInFlightRef.current.size > 0) {
+      for (const taskId of [...pinFreeInFlightRef.current]) pinFreeInFlightRef.current.delete(taskId);
+    }
     setOptimisticRows((prev) => {
       if (!(operationId in prev)) return prev;
       const next = { ...prev };
@@ -501,14 +675,29 @@ export default function TasksPage() {
   } = useTaskCommandQueue({ onAdopted: adoptStores });
   useEffect(() => {
     if (typeof onOutboxAcknowledged !== "function") return;
-    onOutboxAcknowledged(onAcknowledged);
+    // The unsubscribe matters: `onTaskOutboxAcknowledged` returns one and the
+    // listener set is MODULE-level, so five visits to /tasks used to leave five
+    // listeners calling setState on unmounted components.
+    return onOutboxAcknowledged(onAcknowledged);
   }, [onOutboxAcknowledged, onAcknowledged]);
+  // A refusal can carry the server's authoritative catalog and still
+  // acknowledge nothing (`stale_config`, `acknowledged: 0`), which meant the
+  // rendered reward/penalty list stayed stale until the next 60s pull. The
+  // sibling surfaces (RewardSection, WeeklyPrizesCard) already listen here.
+  useEffect(() => onTaskOutboxAdopted(adoptStores), [adoptStores]);
 
   // Restore tasks state from PocketBase snapshot on mount (bridges container restarts)
   const restoreAttempted = useRef(false);
-  // True when the snapshot read 401'd — a signed-out browser can't read the
-  // sessioned gateway, so an empty list here means "hidden", not "done".
-  const [guestSyncBlocked, setGuestSyncBlocked] = useState(false);
+  // The snapshot read is a TRI-STATE, never a boolean: a signed-out browser is
+  // 401'd ("hidden, not done"), but /api/tasks/sync also answers 503 when the
+  // rollover/projection is unavailable, and a network failure rejects outright.
+  // Both of those used to leave `guestSyncBlocked` false, so the family was told
+  // "All caught up. No pending tasks right now." about a board nobody read.
+  const [syncRead, setSyncRead] = useState<"unknown" | "blocked" | "failed">("unknown");
+  // The highest snapshot revision this page has adopted. A response that is not
+  // strictly newer is ignored, so the 60s refresh can never race the mount fetch
+  // into overwriting a fresher ledger with a staler snapshot.
+  const adoptedRevisionRef = useRef<string | null>(null);
   // Restore tasks state from a PocketBase snapshot (bridges container restarts
   // and merges another device's changes) via the SHARED pure merge — the same
   // guards the 60s refresh loop applies to the stores: adopt new tasks, and
@@ -521,16 +710,22 @@ export default function TasksPage() {
   // last-write-wins merge lives in exactly one place,
   // applyTaskConfigSnapshotToStores, which the outbox's snapshot proof and the
   // 60s refresh share. This page only re-reads what that seam adopted.
-  // Latest-state mirrors for the async snapshot restore: the fetch resolves
-  // long after commit, and these effects re-sync before any merge runs, so
-  // mergeTasksSnapshot always sees the CURRENT state (never a stale closure).
-  const tasksRef = useRef<Task[]>(tasks);
-  const weekDataRef = useRef<WeekData>(weekData);
-  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
-  useEffect(() => { weekDataRef.current = weekData; }, [weekData]);
   const restoreFromSnapshot = useCallback((data: any) => {
     if (!data?.snapshot) return;
     const snap = data.snapshot;
+    // Monotonic guard: the mount fetch and the 60s refresher both land here, and
+    // the server leg wins outright within one `weekStart` — so without this a
+    // STALE snapshot could overwrite a newer ledger. `revision` is a decimal
+    // string on the snapshot, which compares correctly as a string only when the
+    // length is equal, so compare as a number.
+    const revision = typeof snap.revision === "string" && /^\d+$/.test(snap.revision)
+      ? snap.revision
+      : null;
+    if (revision !== null) {
+      const last = adoptedRevisionRef.current;
+      if (last !== null && Number(revision) <= Number(last)) return;
+      adoptedRevisionRef.current = revision;
+    }
     if (snap.archivedTasks && typeof snap.archivedTasks === "object") setArchivedTasks(snap.archivedTasks);
     applyTaskConfigSnapshotToStores(snap);
     adoptStores();
@@ -550,34 +745,64 @@ export default function TasksPage() {
     }
   }, [adoptStores]);
 
+  // ONE read seam for both callers, so the tri-state, the abort and the
+  // monotonic guard cannot drift between the mount fetch and the 60s loop.
+  const pullSnapshot = useCallback((signal?: AbortSignal) => {
+    // The cross-device READ is not retired (contract:
+    // tests/unit/task-normal-writes-disabled.test.ts) — and it is a GET, so it
+    // carries no write body. The signal is optional so the abortable path and
+    // the plain one are the same call, not two seams.
+    const request = signal ? fetch("/api/tasks/sync", { signal }) : fetch("/api/tasks/sync");
+    return request
+    .then((r) => {
+      if (r.status === 401) {
+        setSyncRead("blocked");
+        return null;
+      }
+      if (!r.ok) {
+        // 503 = the rollover/projection could not be read. That is NOT an empty
+        // board, so it must not render one.
+        setSyncRead("failed");
+        return null;
+      }
+      setSyncRead("unknown");
+      return r.json();
+    })
+    .then((data) => restoreFromSnapshot(data))
+    .catch(() => {
+      // An ABORT is this component's own teardown, not a failed read.
+      if (signal?.aborted) return;
+      setSyncRead("failed");
+    });
+  }, [restoreFromSnapshot]);
+
   useEffect(() => {
     if (!mounted || restoreAttempted.current) return;
     restoreAttempted.current = true;
-    fetch("/api/tasks/sync")
-      .then((r) => {
-        setGuestSyncBlocked(r.status === 401);
-        return r.ok ? r.json() : null;
-      })
-      .then((data) => restoreFromSnapshot(data))
-      .catch(() => {});
-  }, [mounted, restoreFromSnapshot]);
+    const controller = new AbortController();
+    void pullSnapshot(controller.signal);
+    return () => controller.abort();
+  }, [mounted, pullSnapshot]);
 
   // Cross-device sync: re-pull the snapshot when the global refresher
   // finishes a cycle (60s tick, tab-wake, post-login) so a task added on
-  // another device appears without a manual reload.
+  // another device appears without a manual reload. The listener used to remove
+  // itself without aborting or guarding the in-flight fetch, so a response could
+  // land after unmount and race the mount fetch into the stores.
   useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
     const onRefreshed = () => {
-      fetch("/api/tasks/sync")
-        .then((r) => {
-          setGuestSyncBlocked(r.status === 401);
-          return r.ok ? r.json() : null;
-        })
-        .then((data) => restoreFromSnapshot(data))
-        .catch(() => {});
+      if (!active) return;
+      void pullSnapshot(controller.signal);
     };
     window.addEventListener("consuela-data-refreshed", onRefreshed);
-    return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
-  }, [restoreFromSnapshot]);
+    return () => {
+      active = false;
+      controller.abort();
+      window.removeEventListener("consuela-data-refreshed", onRefreshed);
+    };
+  }, [pullSnapshot]);
 
   const triggerConfetti = useCallback(() => {
     // ConfettiBurst also gates itself, so this is belt and braces: the burst
@@ -587,15 +812,35 @@ export default function TasksPage() {
     setTimeout(() => setConfettiActive(false), 2500);
   }, []);
 
+  // Escape / scrim-dismiss must not throw away a half-typed chore without
+  // saying so — Delete, far less destructive, gets a whole confirmation dialog.
+  // A pristine sheet closes straight away; a dirty one asks first.
+  const editFormPristineRef = useRef("");
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+  const closeEdit = () => {
+    setEditingId(null);
+    setIsAdding(false);
+    setConfirmDiscardOpen(false);
+  };
+  const formIsDirty = () => JSON.stringify(editForm) !== editFormPristineRef.current;
+  const cancelEdit = () => {
+    if (formIsDirty()) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    closeEdit();
+  };
+
   const startEdit = (task: Task) => {
     if (!isParent) return; // P0 gate — kids/guests can never edit family chores
     if (!tasks.some((row) => row.id === task.id)) {
-      showToast("That chore is still being saved — try again in a moment.");
+      showToast("That chore is still being saved — try again in a moment.", "neutral");
       return;
     }
     setEditingId(task.id);
     setEditForm({ ...task });
     setIsAdding(false);
+    editFormPristineRef.current = JSON.stringify({ ...task });
   };
 
   const startAdd = () => {
@@ -607,14 +852,15 @@ export default function TasksPage() {
     const defaultMember = isLoggedIn && currentUser
       ? { name: currentUser.name, emoji: currentUser.emoji }
       : { name: firstNonPet?.fullName || membersData[0]?.fullName || "", emoji: firstNonPet?.emoji || membersData[0]?.emoji || "👤" };
-    setEditForm(emptyTask(defaultMember));
+    const fresh = emptyTask(defaultMember);
+    editFormPristineRef.current = JSON.stringify(fresh);
+    setEditForm(fresh);
     setIsAdding(true);
   };
 
-  const cancelEdit = () => { setEditingId(null); setIsAdding(false); };
-
-  let _idCounter = 0;
-  const uid = () => Date.now() + ++_idCounter;
+  // Escape / scrim-dismiss must not throw away a half-typed chore without
+  // saying so — Delete, far less destructive, gets a whole confirmation dialog.
+  // A pristine sheet closes straight away; a dirty one asks first.
 
   const saveTask = () => {
     if (!editForm.title.trim()) return;
@@ -696,8 +942,7 @@ export default function TasksPage() {
       });
       addOptimisticRow(updated.operationId, { kind: "update", task: { ...normalized, id: editingId as number } });
     }
-    setEditingId(null);
-    setIsAdding(false);
+    closeEdit();
   };
 
   // A delete is only ever queued for a row the SERVER already has. A
@@ -706,7 +951,7 @@ export default function TasksPage() {
   const deleteTask = (id: number) => {
     const row = tasks.find((t) => t.id === id);
     if (!row) {
-      showToast("That chore is still being saved — try again in a moment.");
+      showToast("That chore is still being saved — try again in a moment.", "neutral");
       return;
     }
     const removed = queueCommand({
@@ -716,8 +961,7 @@ export default function TasksPage() {
       displayTarget: { kind: "task", taskId: id, title: row.title },
     });
     addOptimisticRow(removed.operationId, { kind: "remove", taskId: id });
-    setEditingId(null);
-    setIsAdding(false);
+    closeEdit();
   };
 
   const updateForm = (field: keyof Task, value: any) => {
@@ -738,14 +982,14 @@ export default function TasksPage() {
   const setTaskType = (type: "assigned" | "open" | "crew") => {
     setEditForm(prev => {
       if (type === "open") {
-        return { ...prev, universal: true, crewSize: null, crew: null, stealable: false, speedBonus: prev.speedBonus ?? 2, assignee: "Open", assigneeEmoji: "🤝" };
+        return { ...prev, universal: true, crewSize: null, crew: null, stealable: false, speedBonus: prev.speedBonus ?? 2, assignee: OPEN_ASSIGNEE, assigneeEmoji: "🤝" };
       }
       if (type === "crew") {
         const minSize = Math.max(2, crewMemberCount(prev));
         const size = typeof prev.crewSize === "number" && prev.crewSize >= minSize ? prev.crewSize : minSize;
         return { ...prev, universal: false, crewSize: size, crew: prev.crew ?? { members: [] }, stealable: false, speedBonus: undefined, assignee: "Crew", assigneeEmoji: "🤝" };
       }
-      return { ...prev, universal: false, crewSize: null, crew: null, speedBonus: undefined, assignee: prev.assignee === "Open" || prev.assignee === "Crew" ? "" : prev.assignee };
+      return { ...prev, universal: false, crewSize: null, crew: null, speedBonus: undefined, assignee: prev.assignee === OPEN_ASSIGNEE || prev.assignee === "Crew" ? "" : prev.assignee };
     });
   };
 
@@ -776,7 +1020,7 @@ export default function TasksPage() {
         next.crew = null;
         next.stealable = false;
         next.speedBonus = template.speedBonus ?? 2;
-        next.assignee = "Open";
+        next.assignee = OPEN_ASSIGNEE;
         next.assigneeEmoji = "🤝";
       } else {
         next.universal = false;
@@ -836,7 +1080,7 @@ export default function TasksPage() {
         title: def.title, points: def.points, category: def.category, priority: def.priority,
         due: getISO.today, recurring: null,
         universal: mode === "open",
-        ...(mode === "open" ? { assignee: "All", assigneeEmoji: "🤝", speedBonus: 0 } : {}),
+        ...(mode === "open" ? { assignee: OPEN_ASSIGNEE, assigneeEmoji: "🤝", speedBonus: 0 } : {}),
         ...(mode === "assigned" ? { assignee: def.assigneeName ?? "", assigneeEmoji: roster?.emoji ?? "👤" } : {}),
         ...(mode === "crew" ? { crewSize: def.crewSize, crew: { members: [] }, ...(def.crewCloseMode ? { crewCloseMode: def.crewCloseMode } : {}) } : {}),
       };
@@ -862,10 +1106,10 @@ export default function TasksPage() {
       if (suggestions.length > 0) {
         setAiSuggestions(suggestions);
       } else {
-        showToast("Consuela couldn't come up with ideas right now — try again in a bit.");
+        showToast("Consuela couldn't come up with ideas right now — try again in a bit.", "error");
       }
     } catch {
-      showToast("Consuela couldn't come up with ideas right now — try again in a bit.");
+      showToast("Consuela couldn't come up with ideas right now — try again in a bit.", "error");
     }
     setAiSuggesting(false);
   };
@@ -887,11 +1131,15 @@ export default function TasksPage() {
   };
 
   const openPinEntry = (taskId: number) => {
+    // Every attempt starts from a clean slate: no leftover PIN/error/success, no
+    // leftover claim-for selection, no leftover success timer. A timer armed by
+    // the PREVIOUS attempt can no longer close this one.
+    clearDialogTimers();
     // A temporary row is not a task yet: there is nothing on the server to
     // complete, so this can only be a stale click on a queued add.
     const task = tasks.find((x) => x.id === taskId);
     if (!task) {
-      showToast("That chore is still being saved — try again in a moment.");
+      showToast("That chore is still being saved — try again in a moment.", "neutral");
       return;
     }
     if (task.completed) {
@@ -910,7 +1158,7 @@ export default function TasksPage() {
           displayTarget: { kind: "undo", taskId, title: task.title },
         });
         addOptimisticRow(undo.operationId, { kind: "cancelling", taskId });
-        showToast("Taking it back — asking the family server to reopen it.");
+        showToast("Taking it back — asking the family server to reopen it.", "neutral");
         return;
       }
       setUndoTaskId(taskId);
@@ -921,20 +1169,17 @@ export default function TasksPage() {
     // Crew tasks are joined + checked in, never single-completed. Decide the
     // member's next step from live membership and open the PIN step (self-join).
     if (isCrewTask(task)) {
-      const me = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : "";
+      const me = myRosterName || "";
       const joined = me ? crewHasMember(task, me) : false;
       const checkedIn = me ? crewMemberCheckedIn(task, me) : false;
       const action: "crew-join" | "crew-checkin" | null =
         joined && !checkedIn ? "crew-checkin" : !joined && !crewFull(task) ? "crew-join" : null;
       if (!action) {
-        showToast(joined ? "You've already checked in — waiting on the rest of the crew." : "This crew is full.");
+        showToast(joined ? "You've already checked in — waiting on the rest of the crew." : "This crew is full.", "neutral");
         return;
       }
-      setPinTaskId(taskId);
-      setPinCrewAction({ taskId, action });
-      setPinReward(null);
-      setPinPenalty(null);
       setUndoTaskId(null);
+      setPinIntent({ kind: "crew", taskId, action });
       setPinInput("");
       setPinError("");
       setPinSuccess("");
@@ -946,7 +1191,17 @@ export default function TasksPage() {
       // assigned chore is a durable PIN-free completion command — queued FIRST,
       // with no credential at all, because the session IS the identity. Points
       // move only when a parent approves, and only through the outbox.
-      if (task.completedInWeek === localWeekStartISO()) return;
+      if (task.completedInWeek === localWeekStartISO()) {
+        showToast("That chore was already completed on another device.", "neutral");
+        return;
+      }
+      // This branch has no `pinBusy` to guard it — a double-tap queued the same
+      // command twice, and its only dedupe read a row the just-queued command
+      // has not stamped yet. The guard is synchronous with the tap.
+      if (pinFreeInFlightRef.current.has(taskId)) {
+        showToast("That tap is already on its way.", "neutral");
+        return;
+      }
       const me = resolveMemberName(membersData, currentUser!.name);
       const complete = queueCommand({
         route: "/api/tasks/claim",
@@ -954,18 +1209,17 @@ export default function TasksPage() {
         payload: { taskId, memberName: me, assigneeEmoji: task.assigneeEmoji },
         displayTarget: { kind: "claim", taskId, title: task.title },
       });
+      pinFreeInFlightRef.current.add(taskId);
       addOptimisticRow(complete.operationId, { kind: "pending", taskId });
       triggerConfetti();
-      showToast(`Done! +${task.points}pts on the way — a parent approves.`);
+      showToast(`Done! +${task.points}pts on the way — a parent approves.`, "success");
       return;
     }
     // 10+ kids and anyone else hit a PIN step; child rows then wait for
     // approval (decided in submitPin from the VERIFIED member record, not
     // the session).
-    setPinTaskId(taskId);
-    setPinReward(null);
-    setPinPenalty(null);
     setUndoTaskId(null);
+    setPinIntent({ kind: "task", taskId });
     setPinInput("");
     setPinError("");
     setPinSuccess("");
@@ -980,10 +1234,14 @@ export default function TasksPage() {
   };
 
   const openRewardPin = (reward: Reward, memberName?: string) => {
-    const member = memberName || (membersData.find((m: any) => m.role !== "pet")?.fullName ?? "");
+    clearDialogTimers();
+    // Default to the SIGNED-IN member, not the first roster entry: a kid
+    // redeeming was told "Caspian needs 850 more pts" — a number computed
+    // against a parent's balance. Same trap the claim select documents.
+    const member = memberName || pickDefaultClaimMember(membersData, currentUser?.name);
     const balance = weekData.points[member] || 0;
     if (balance < reward.cost) {
-      showToast(`${member.split(" ")[0]} needs ${reward.cost - balance} more pts for ${reward.emoji} ${reward.name}`);
+      showToast(`${member.split(" ")[0]} needs ${reward.cost - balance} more pts for ${reward.emoji} ${reward.name}`, "neutral");
       return;
     }
     if (reward.cost > 100) {
@@ -993,9 +1251,7 @@ export default function TasksPage() {
       setRedeemForMember(member);
       return;
     }
-    setPinReward(reward);
-    setPinTaskId(null);
-    setPinPenalty(null);
+    setPinIntent({ kind: "reward", reward });
     setPinInput("");
     setPinError("");
     setPinSuccess("");
@@ -1016,18 +1272,18 @@ export default function TasksPage() {
       if (unreachable) {
         setParentApprovalError(unreachableCopy());
         setParentApprovalPin("");
-        setTimeout(() => setParentApprovalError(""), 2500);
+        armDialogTimer(() => setParentApprovalError(""), 2500);
         return;
       }
       if (!parent) {
         setParentApprovalError("Parent PIN required to approve large rewards.");
         setParentApprovalPin("");
-        setTimeout(() => setParentApprovalError(""), 2500);
+        armDialogTimer(() => setParentApprovalError(""), 2500);
         return;
       }
       parentApprovalPinRef.current = parentApprovalPin;
       parentApprovalNameRef.current = parent.fullName;
-      setPinReward(parentApprovalReward);
+      setPinIntent({ kind: "reward", reward: parentApprovalReward });
       setParentApprovalReward(null);
       setParentApprovalPin("");
       setParentApprovalError("");
@@ -1053,13 +1309,13 @@ export default function TasksPage() {
       if (unreachable) {
         setApprovalError(unreachableCopy());
         setApprovalPin("");
-        setTimeout(() => setApprovalError(""), 2500);
+        armDialogTimer(() => setApprovalError(""), 2500);
         return;
       }
       if (!parent) {
         setApprovalError("Parent PIN required to review tapped tasks.");
         setApprovalPin("");
-        setTimeout(() => setApprovalError(""), 2500);
+        armDialogTimer(() => setApprovalError(""), 2500);
         return;
       }
       const parentName: string = parent.fullName;
@@ -1136,13 +1392,13 @@ export default function TasksPage() {
       if (unreachable) {
         setCrewRemoveError(unreachableCopy());
         setCrewRemovePin("");
-        setTimeout(() => setCrewRemoveError(""), 2500);
+        armDialogTimer(() => setCrewRemoveError(""), 2500);
         return;
       }
       if (!parent) {
         setCrewRemoveError("Parent PIN required.");
         setCrewRemovePin("");
-        setTimeout(() => setCrewRemoveError(""), 2500);
+        armDialogTimer(() => setCrewRemoveError(""), 2500);
         return;
       }
       queueCommand({
@@ -1185,13 +1441,13 @@ export default function TasksPage() {
       if (unreachable) {
         setCrewCloseError(unreachableCopy());
         setCrewClosePin("");
-        setTimeout(() => setCrewCloseError(""), 2500);
+        armDialogTimer(() => setCrewCloseError(""), 2500);
         return;
       }
       if (!parent) {
         setCrewCloseError("Parent PIN required to close the crew.");
         setCrewClosePin("");
-        setTimeout(() => setCrewCloseError(""), 2500);
+        armDialogTimer(() => setCrewCloseError(""), 2500);
         return;
       }
       const target = tasks.find((x) => x.id === crewCloseTarget.taskId);
@@ -1215,39 +1471,69 @@ export default function TasksPage() {
   };
 
   const openPenaltyPin = (penalty: Penalty) => {
-    setPinPenalty(penalty);
-    setPinTaskId(null);
-    setPinReward(null);
+    clearDialogTimers();
+    setPinIntent({ kind: "penalty", penalty });
     setPinInput("");
     setPinError("");
     setPinSuccess("");
-    const defaultMember = membersData.find((m: any) => m.role !== "pet")?.fullName ?? "";
-    setPenaltyForMember(defaultMember);
+    // The signed-in member is the default, not the first roster entry.
+    setPenaltyForMember(pickDefaultClaimMember(membersData, currentUser?.name));
   };
 
-  const normalizeName = (rawName: string): string => {
-    const member = membersData.find((m: any) => m.fullName === rawName || m.name === rawName || rawName.startsWith(m.name) || m.fullName.startsWith(rawName));
-    return member ? member.fullName : rawName;
-  };
+  // The ONE close. Every exit (Escape, scrim, Cancel, a success timer) funnels
+  // through here, which is what makes a half-open dialog impossible: no arm of
+  // the intent, no per-attempt input, no claim-for selection and no verified
+  // parent-approval credential can survive a dismissal.
+  const closePinDialog = useCallback(() => {
+    clearDialogTimers();
+    setPinIntent(null);
+    setPinInput("");
+    setPinError("");
+    setPinSuccess("");
+    setSnatchForMember("");
+    setRedeemForMember("");
+    setPenaltyForMember("");
+    setParentApprovalReward(null);
+    setParentApprovalPin("");
+    setParentApprovalError("");
+    // A verified parent PIN is a live credential: it must not survive a
+    // cancelled redemption and ride the NEXT unrelated one's wire body.
+    parentApprovalPinRef.current = "";
+    parentApprovalNameRef.current = "";
+  }, [clearDialogTimers]);
+
+  // The SHARED resolver, so the wire body names the member the page means.
+  // The hand-rolled version here did `rawName.startsWith(m.name)`, which
+  // resolved "Alexandra Garcia" to "Alex Garcia" (Alex is a prefix of
+  // Alexandra) — the same identity bug as the tile lookups, one layer down,
+  // where it silently moved a child's points to their parent.
+  const normalizeName = (rawName: string): string => resolveMemberName(membersData, rawName);
 
   const submitUndo = async () => {
     if (!undoTaskId || !undoPin || pinBusy) return;
     setPinBusy(true);
     try {
       const task = tasks.find(t => t.id === undoTaskId);
-      if (!task || !task.completed) return;
+      if (!task || !task.completed) {
+        // A dead Submit button: the footer's only state is `loading`, cleared by
+        // the `finally`, so it re-enabled with no message and no change.
+        setUndoError("That chore isn't completed any more — nothing to undo.");
+        setUndoPin("");
+        armDialogTimer(() => setUndoError(""), 4000);
+        return;
+      }
       const memberName = task.completedBy || task.assignee;
       const result = await verifyPinRemote(memberName, undoPin);
       if (result.status === "unreachable") {
         setUndoError(unreachableCopy());
         setUndoPin("");
-        setTimeout(() => setUndoError(""), 2000);
+        armDialogTimer(() => setUndoError(""), 2000);
         return;
       }
       if (result.status === "wrongPin") {
         setUndoError("Wrong PIN. Try again.");
         setUndoPin("");
-        setTimeout(() => setUndoError(""), 2000);
+        armDialogTimer(() => setUndoError(""), 2000);
         return;
       }
       const verified = result.member;
@@ -1285,7 +1571,7 @@ export default function TasksPage() {
       if (!memberName) {
         setPinError("Select who is redeeming the reward.");
         setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
+        armDialogTimer(() => setPinError(""), 2000);
         return;
       }
       const result = await verifyPinRemote(memberName, pinInput);
@@ -1297,14 +1583,14 @@ export default function TasksPage() {
         if (balance < cost) {
           setPinError(`Not enough points — ${pinReward.name} costs ${cost}pts, ${normalizedName.split(" ")[0]} has ${balance}pts.`);
           setPinInput("");
-          setTimeout(() => setPinError(""), 2500);
+          armDialogTimer(() => setPinError(""), 2500);
           return;
         }
         // The redemption is a durable command against the server-authoritative
         // route: the stored reward row decides the cost, the ledger entry is
         // written under the week lock, and a reward over 100pts carries the
         // parent's PIN so the server can gate it. Nothing is deducted locally.
-        queueCommand({
+        const queued = queueCommand({
           route: "/api/rewards/redeem",
           action: "redeem",
           payload: {
@@ -1318,56 +1604,80 @@ export default function TasksPage() {
             ...(parentApprovalPinRef.current ? { parentPin: parentApprovalPinRef.current } : {}),
           },
         });
+        // Nothing has been confirmed yet — `queueCommand` only persists the
+        // command — so the dialog says SENDING and the acknowledgment says done
+        // (or names the refusal).
+        trackLedgerOp(
+          queued.operationId,
+          `${pinReward.emoji} ${normalizedName.split(" ")[0]} redeemed ${pinReward.name} — ${cost}pts.`,
+          `${pinReward.name} wasn't redeemed.`,
+        );
         parentApprovalPinRef.current = "";
         parentApprovalNameRef.current = "";
         setPinInput("");
-        setPinSuccess(
-          `${pinReward.emoji} ${normalizedName.split(" ")[0]} redeeming ${pinReward.name} — the family server confirms the ${cost}pts.`,
-        );
-        setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1800);
+        setPinSuccess(`${pinReward.emoji} Sending ${pinReward.name} to the family server…`);
+        armDialogTimer(closePinDialog, 1800);
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
         setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
+        armDialogTimer(() => setPinError(""), 2000);
       }
       return;
     }
 
     if (pinPenalty) {
-      const memberName = penaltyForMember;
-      if (!memberName) {
+      // The TARGET is whose points move; the ACTOR is whoever's PIN this
+      // verifies. They are not the same person: a grown-up applying a penalty
+      // to a child used to build a body whose `memberName` was the CHILD, so the
+      // route's live-role gate read the child's PIN and answered 403 adult_only
+      // — the whole penalty catalog was unreachable for a kid.
+      const targetName = normalizeName(penaltyForMember);
+      if (!targetName) {
         setPinError("Select a member.");
         setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
+        armDialogTimer(() => setPinError(""), 2000);
         return;
       }
-      let result = await verifyPinRemote(memberName, pinInput);
+      // Capture the identity that verified from the loop itself rather than
+      // re-deriving it afterwards.
+      let actorName = "";
+      let result = await verifyPinRemote(targetName, pinInput);
+      if (result.status === "ok") actorName = targetName;
       if (result.status === "wrongPin") {
         for (const m of membersData.filter((m: any) => m.role === "parent")) {
-          result = await verifyPinRemote(m.fullName, pinInput);
-          if (result.status !== "wrongPin") break;
+          const parentResult = await verifyPinRemote(m.fullName, pinInput);
+          if (parentResult.status === "ok") { actorName = m.fullName; result = parentResult; break; }
+          if (parentResult.status === "unreachable") { result = parentResult; break; }
         }
       }
-      if (result.status === "ok") {
-        const normalizedName = membersData.find((m: any) => m.fullName === penaltyForMember)?.fullName || penaltyForMember;
-        const penaltyPoints = pinPenalty?.points ?? 0;
+      if (result.status === "ok" && actorName) {
+        const penaltyPoints = pinPenalty.points ?? 0;
         // The catalog penalty id travels, never a client-chosen point value:
         // the server reads the canonical penalty and refuses a body that tries
         // to set its own amount.
-        queueCommand({
+        const queued = queueCommand({
           route: "/api/tasks/ledger",
           action: "penalty",
-          payload: { memberName: normalizedName, itemId: pinPenalty.id },
+          payload: {
+            memberName: actorName,
+            ...(actorName !== targetName ? { targetMemberName: targetName } : {}),
+            itemId: pinPenalty.id,
+          },
           displayTarget: { kind: "config", title: pinPenalty.name },
           credential: { pin: pinInput },
         });
+        trackLedgerOp(
+          queued.operationId,
+          `-${penaltyPoints}pts from ${targetName.split(" ")[0]}.`,
+          `${pinPenalty.name} wasn't applied.`,
+        );
         setPinInput("");
-        setPinSuccess(`-${penaltyPoints}pts from ${normalizedName.split(" ")[0]} — the family server confirms.`);
-        setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1800);
+        setPinSuccess(`Sending ${pinPenalty.name} (−${penaltyPoints}pts) to the family server…`);
+        armDialogTimer(closePinDialog, 1800);
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
         setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
+        armDialogTimer(() => setPinError(""), 2000);
       }
       return;
     }
@@ -1378,7 +1688,7 @@ export default function TasksPage() {
       if (!memberName) {
         setPinError("Select who is joining.");
         setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
+        armDialogTimer(() => setPinError(""), 2000);
         return;
       }
       const result = await verifyPinRemote(memberName, pinInput);
@@ -1399,26 +1709,39 @@ export default function TasksPage() {
             ? `🤝 ${first} joining the crew — the family server confirms.`
             : `✓ ${first} checking in.`,
         );
-        setTimeout(() => { setPinTaskId(null); setPinCrewAction(null); setPinSuccess(""); setSnatchForMember(""); }, 1800);
+        armDialogTimer(closePinDialog, 1800);
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
         setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
+        armDialogTimer(() => setPinError(""), 2000);
       }
       return;
     }
 
     if (pinTaskId === null) return;
     const task = tasks.find(t => t.id === pinTaskId);
-    if (!task || task.completed) return;
-    if (task.completedInWeek === localWeekStartISO()) return;
+    // Neither of these may be silent: the footer's only state is `loading`,
+    // cleared by the `finally`, so a bare `return` re-enabled Submit with no
+    // message and no state change — a button that flashes and reports nothing.
+    if (!task || task.completed) {
+      setPinError("That chore was already completed on another device.");
+      setPinInput("");
+      armDialogTimer(() => setPinError(""), 4000);
+      return;
+    }
+    if (task.completedInWeek === localWeekStartISO()) {
+      setPinError("That chore was already completed on another device.");
+      setPinInput("");
+      armDialogTimer(() => setPinError(""), 4000);
+      return;
+    }
 
     if (task.universal || isSnatchable(task)) {
       const claimant = snatchForMember;
       if (!claimant) {
         setPinError("Select who is claiming this task.");
         setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
+        armDialogTimer(() => setPinError(""), 2000);
         return;
       }
       const result = await verifyPinRemote(claimant, pinInput);
@@ -1451,11 +1774,11 @@ export default function TasksPage() {
           ? `🎯 ${normalizedName.split(" ")[0]} — grabbed! +${earnAmount}pts on the way (parent approves).`
           : `🎯 ${normalizedName.split(" ")[0]} ${wasSnatch ? "snatched" : "completed"} ${task.title}! ${pointsMsg}`);
         triggerConfetti();
-        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
+        armDialogTimer(closePinDialog, 1500);
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
         setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
+        armDialogTimer(() => setPinError(""), 2000);
       }
       return;
     }
@@ -1480,18 +1803,18 @@ export default function TasksPage() {
         triggerConfetti();
         setPinInput("");
         setPinSuccess(`⏳ ${normalizedName.split(" ")[0]} — done! +${task.points}pts on the way.`);
-        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
+        armDialogTimer(closePinDialog, 1500);
         return;
       }
       const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
       setPinInput("");
       setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
       triggerConfetti();
-      setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
+      armDialogTimer(closePinDialog, 1500);
     } else {
       setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
       setPinInput("");
-      setTimeout(() => setPinError(""), 2000);
+      armDialogTimer(() => setPinError(""), 2000);
     }
     } finally {
       setPinBusy(false);
@@ -1569,7 +1892,20 @@ export default function TasksPage() {
     showToast(`\u2705 "${r.name}" \u2014 saving to the family server\u2026`);
   };
 
+  // The ONE close for the adjust sheet. A VERIFIED parent PIN is a live
+  // credential: leaving it in React state after the sheet closes contradicts
+  // the stated contract in `src/modes/kid/kid-store.ts` and would ride the next
+  // adjust's wire body.
+  const closeAdjust = useCallback(() => {
+    clearDialogTimers();
+    setAdjustMember(null);
+    setAdjustPin("");
+    setAdjustError("");
+    setAdjustSuccess("");
+  }, [clearDialogTimers]);
+  const adjustAmountValue = Math.abs(parseInt(adjustAmount, 10) || 0);
   const openAdjust = (name: string) => {
+    clearDialogTimers();
     setAdjustMember(name);
     setAdjustAmount("10");
     setAdjustDir("-");
@@ -1593,30 +1929,53 @@ export default function TasksPage() {
       if (unreachable) {
         setAdjustError(unreachableCopy());
         setAdjustPin("");
-        setTimeout(() => setAdjustError(""), 2500);
+        armDialogTimer(() => setAdjustError(""), 2500);
         return;
       }
       if (!parent) {
         setAdjustError("Parent PIN required. Try again.");
         setAdjustPin("");
-        setTimeout(() => setAdjustError(""), 2500);
+        armDialogTimer(() => setAdjustError(""), 2500);
         return;
       }
-      const delta = parseInt(adjustAmount) || 0;
+      // The DIRECTION is chosen by the Add/Remove toggle, so the amount is
+      // always a magnitude: `Math.abs` stops a typed "-50" from INVERTING a
+      // deduction into a credit, and zero is refused rather than reported as a
+      // confirmed no-op.
+      const delta = Math.abs(parseInt(adjustAmount, 10) || 0);
+      if (delta <= 0) {
+        setAdjustError("Enter how many points to move.");
+        setAdjustPin("");
+        armDialogTimer(() => setAdjustError(""), 2500);
+        return;
+      }
       const change = adjustDir === "+" ? delta : -delta;
       // A manual adjust is a parent-PIN ledger command like any other: the
       // amount and reason travel, the balance never does, and the server writes
       // the entry under the week lock with a non-negative floor.
-      queueCommand({
+      // `memberName` is the VERIFIED PARENT (the PIN subject and the live-role
+      // gate); the CHILD whose balance moves rides as `targetMemberName`.
+      // Sending the child's name under the parent's PIN was 403 adult_only.
+      const queued = queueCommand({
         route: "/api/tasks/ledger",
         action: "adjust",
-        payload: { memberName: adjustMember, amount: change, reason: adjustReason },
+        payload: {
+          memberName: parent.fullName,
+          ...(parent.fullName !== adjustMember ? { targetMemberName: adjustMember } : {}),
+          amount: change,
+          reason: adjustReason,
+        },
         displayTarget: { kind: "config", title: adjustMember },
         credential: { pin: adjustPin },
       });
       const label = adjustDir === "+" ? `+${delta}` : `-${delta}`;
-      setAdjustSuccess(`${label} pts for ${adjustMember.split(" ")[0]} — the family server confirms.`);
-      setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1800);
+      trackLedgerOp(
+        queued.operationId,
+        `${label} pts for ${adjustMember.split(" ")[0]}.`,
+        `The ${label} pts adjust for ${adjustMember.split(" ")[0]} didn't go through.`,
+      );
+      setAdjustSuccess(`Sending ${label} pts for ${adjustMember.split(" ")[0]}…`);
+      armDialogTimer(closeAdjust, 1800);
     } finally {
       setPinBusy(false);
     }
@@ -1667,7 +2026,11 @@ export default function TasksPage() {
     }
     return [...byId.values()];
   }, [optimisticRowsList]);
-  const optimisticUpdatedIds = optimisticUpdates.map((task) => task.id);
+  // Memoised: an unmemoised array here sat in the dependency chain of
+  // `interactiveRows` -> `dynamicLeaderboard` (streaks, ranks, badges, all-time
+  // levels for EVERY member) -> five downstream memos -> the level-up effect, so
+  // all of it recomputed on every render and defeated the memo eight lines up.
+  const optimisticUpdatedIds = useMemo(() => optimisticUpdates.map((task) => task.id), [optimisticUpdates]);
   // A queued ADD is a TEMPORARY row: it never reaches an interactive list (so
   // complete/edit/delete cannot send an id the server has never assigned) and
   // renders inert below instead.
@@ -1703,22 +2066,25 @@ export default function TasksPage() {
     [optimisticPending, optimisticRemoved],
   );
 
-  const filtered = interactiveRows.filter((t) => {
+  // The MEMBER predicate only. `showCompleted` is the Completed card's OWN
+  // toggle, so it used to sit in this filter: the expanded list was empty until
+  // you expanded it, which meant the card could not be gated on the array it
+  // maps over and a Friday completion vanished on Monday morning.
+  const memberScoped = interactiveRows.filter((t) => {
     if (filterMember === "Open") {
       // Open + late-stealable rows and crew tasks with space.
-      return ((t.universal || isSnatchable(t)) || (isCrewTask(t) && !crewFull(t))) && (showCompleted ? true : !t.completed);
+      return (t.universal || isSnatchable(t)) || (isCrewTask(t) && !crewFull(t));
     }
     if (filterMember === "My Tasks" && currentUser) {
       // Ownership in the resolved-ledger space: assignees are migrated to
       // roster fullNames at mount, while the session may carry a first name.
-      const mine = resolveMemberName(membersData, t.assignee) === resolveMemberName(membersData, currentUser.name);
+      const mine = myIdentity.isMe(t.assignee);
       const claimable = ((t.universal || isSnatchable(t)) || (isCrewTask(t) && !crewFull(t))) && !t.completed;
-      return (mine || claimable) && (showCompleted ? true : !t.completed);
+      return mine || claimable;
     }
-    const memberMatch = filterMember === "All" || t.assignee === filterMember;
-    const completedMatch = showCompleted ? true : !t.completed;
-    return memberMatch && completedMatch;
+    return filterMember === "All" || t.assignee === filterMember;
   });
+  const filtered = showCompleted ? memberScoped : memberScoped.filter((t) => !t.completed);
 
   const pending = filtered.filter((t) => !t.completed && !hiddenByQueuedCommand.has(t.id));
   const pendingApprovals = tasks.filter(isPendingApproval);
@@ -1743,7 +2109,10 @@ export default function TasksPage() {
       })
       .sort((a, b) => b.points - a.points);
   })();
-  const completed = filtered.filter((t) => t.completed);
+  // Every completion the filter can show, regardless of whether the card is
+  // expanded — this is the array the card gates on AND maps over, so nothing on
+  // screen reconciles against anything else.
+  const completed = memberScoped.filter((t) => t.completed);
   // Everything that reads "the family's chores" reads the SUBSTITUTED copy, so
   // a queued edit is reflected on the completed list, the streaks, the leaderboard
   // and the member sheet until the acknowledgment replaces it with the real row.
@@ -1797,12 +2166,27 @@ export default function TasksPage() {
       })
       .sort((a, b) => b.points - a.points);
 
-    // Tied points share a rank (standard competition ranking) so equal scores
-    // don't read as 1st vs 2nd or flicker between the two on every recompute.
-    return entries.map((e, i) => ({
-      ...e,
-      rank: i > 0 && e.points === entries[i - 1].points ? entries[i - 1].rank : i + 1,
-    }));
+    // Standard competition ranking — the SAME convention the Home/wall/KidHome
+    // hook documents (src/components/leaderboard/hooks/useLeaderboardData.ts):
+    // a tie SHARES the previous rank and the next rank is SKIPPED, so
+    // 100/100/60/60/10 ranks 1, 1, 3, 3, 5.
+    //
+    // The repeated rank is carried in a LOCAL, never read back off
+    // `entries[i - 1]`: `entries` is the array being mapped, so that element
+    // still carries the `rank: 0` placeholder the roster mapping wrote ten lines
+    // above. Every tied row therefore printed `#0` — 100/100/60/60/10 rendered
+    // 1, #0, 3, #0, 5 while Home, the wall and KidHome read the same week as
+    // 1, 1, 3, 3, 5.
+    // The carry is a single object rather than two `let` bindings: the React
+    // Compiler's `react-hooks/immutability` rule rejects reassigning a captured
+    // variable inside a component's memo, and the semantics are identical.
+    const carried: { points: number | null; rank: number } = { points: null, rank: 0 };
+    return entries.map((e, i) => {
+      const rank = carried.points !== null && e.points === carried.points ? carried.rank : i + 1;
+      carried.points = e.points;
+      carried.rank = rank;
+      return { ...e, rank };
+    });
   }, [weekData, membersData, visibleTasks, hallOfFame, allTime.totals]);
 
   const topScorer = dynamicLeaderboard[0];
@@ -1813,27 +2197,30 @@ export default function TasksPage() {
   // Everything the user can still take back: a `reconciling` entry has already
   // been applied server-side, so cancelling it would be a lie.
   const cancellableEntries = outboxEntries.filter((entry) => entry.status !== "reconciling");
+  // The long waits, counted apart from the imminent sends. `queued` folds them in
+  // by design; this is what lets the banner say which is which.
+  const retryingCount = outboxEntries.filter((entry) => entry.status === "retrying").length;
 
   // The three StatTiles all follow the member filter: a parent tapping a kid's
   // tile reads that kid's open chores / this-week completions / this week's
   // points. "All" and "Open" stay family-wide.
   const scopedMember = useMemo(() => {
     if (filterMember === "All" || filterMember === "Open") return null;
-    const target = filterMember === "My Tasks" ? currentUser?.name : filterMember;
+    const target = filterMember === "My Tasks" ? myRosterName : filterMember;
     if (!target) return null;
-    return dynamicLeaderboard.find((e) => e.name === target || e.name.startsWith(target)) ?? null;
-  }, [filterMember, currentUser, dynamicLeaderboard]);
+    // EXACT, in the resolved-ledger space. `e.name.startsWith(target)` matched
+    // "Alex Garcia" onto "Alexandra Garcia", so the tile could show the wrong
+    // person's points.
+    return dynamicLeaderboard.find((e) => e.name === target) ?? null;
+  }, [filterMember, myRosterName, dynamicLeaderboard]);
 
   const scopedCompletedCount = useMemo(() => {
     // Only universal tasks survive the Up-for-grabs filter once completed
     // (isSnatchable turns false) — count what the list can actually show.
     if (filterMember === "Open") return thisWeeksCompleted.filter((t) => t.universal).length;
     if (!scopedMember) return thisWeeksCompletedCount;
-    return thisWeeksCompleted.filter((t) =>
-      t.completedBy === scopedMember.name || t.completedBy?.startsWith(scopedMember.name) ||
-      t.assignee === scopedMember.name || t.assignee.startsWith(scopedMember.name)
-    ).length;
-  }, [filterMember, scopedMember, thisWeeksCompleted, thisWeeksCompletedCount]);
+    return thisWeeksCompleted.filter((t) => myIdentity.isMe(t.completedBy) || myIdentity.isMe(t.assignee)).length;
+  }, [filterMember, scopedMember, thisWeeksCompleted, thisWeeksCompletedCount, myIdentity]);
 
   const scopedEarned = scopedMember ? scopedMember.points : weeklyEarned;
   // Earned tile detail: all-time context next to the weekly number — the
@@ -1847,38 +2234,48 @@ export default function TasksPage() {
 
   useEffect(() => {
     if (!mounted || !isLoggedIn || !currentUser) return;
-    const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
+    const myEntry = dynamicLeaderboard.find(e => e.name === myIdentity.name);
     if (!myEntry) return;
     // An unknown level is not level 0: recording it would make the real level
     // look like a promotion the moment the read lands, so nothing is compared
     // and nothing is recorded until the level is actually known.
     if (!myEntry.levelKnown) return;
-    const prev = prevLevelsRef.current[currentUser.name];
+    // Recorded under the RESOLVED name, so "Alex" could never file Alexandra's
+    // level under Alex's key.
+    if (!myIdentity.name) return;
+    const prev = prevLevelsRef.current[myIdentity.name];
     if (prev !== undefined && myEntry.level > prev) {
-      setLevelUpInfo({ name: currentUser.name, emoji: myEntry.emoji, oldLevel: prev, newLevel: myEntry.level });
+      setLevelUpInfo({ name: myIdentity.name, emoji: myEntry.emoji, oldLevel: prev, newLevel: myEntry.level });
     }
-    prevLevelsRef.current[currentUser.name] = myEntry.level;
-  }, [dynamicLeaderboard, mounted, isLoggedIn, currentUser]);
+    prevLevelsRef.current[myIdentity.name] = myEntry.level;
+  }, [dynamicLeaderboard, mounted, isLoggedIn, currentUser, myIdentity]);
 
   const myPendingQuests = useMemo(() => {
     if (!isLoggedIn || !currentUser) return [];
     return visibleTasks
-      .filter(t => !t.completed && (t.assignee === currentUser.name || t.assignee.startsWith(currentUser.name) || t.universal))
+      .filter(t => !t.completed && (myIdentity.isMe(t.assignee) || t.universal))
       .sort((a, b) => a.points - b.points)
       .slice(0, 3);
-  }, [visibleTasks, isLoggedIn, currentUser]);
+  }, [visibleTasks, isLoggedIn, currentUser, myIdentity]);
 
   const needsStreakSave = useMemo(() => {
     if (!isLoggedIn || !currentUser) return false;
-    const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
-    if (!myEntry || myEntry.streak < 2) return false;
+    const entry = dynamicLeaderboard.find(e => e.name === myIdentity.name);
+    if (!entry || entry.streak < 2) return false;
     const today = localTodayISO();
-    return !visibleTasks.some(t => t.completed && t.completedBy === currentUser.name && t.completedAt && t.completedAt.split("T")[0] === today);
-  }, [dynamicLeaderboard, visibleTasks, isLoggedIn, currentUser]);
+    return !visibleTasks.some(t => t.completed && myIdentity.isMe(t.completedBy) && t.completedAt && t.completedAt.split("T")[0] === today);
+  }, [dynamicLeaderboard, visibleTasks, isLoggedIn, currentUser, myIdentity]);
 
-  const myEntry = isLoggedIn && currentUser ? dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name)) : null;
-  const aheadEntry = myEntry && myEntry.rank > 1 ? dynamicLeaderboard[myEntry.rank - 2] : undefined;
-  const behindEntry = myEntry && myEntry.rank < dynamicLeaderboard.length ? dynamicLeaderboard[myEntry.rank] : undefined;
+  // The neighbour is a POSITION in the sorted board, never `rank ± 1`. Under
+  // competition ranking `rank` skips: 100/100/60/60/10 makes the fourth row
+  // rank 3, so `dynamicLeaderboard[myEntry.rank - 2]` read the row TWO places
+  // above and `dynamicLeaderboard[myEntry.rank]` read the row TWO places below —
+  // or, on a tied row carrying the old `#0` placeholder, the champion. Both
+  // edges fall off the array and resolve to `undefined` on their own.
+  const myIndex = myIdentity.name ? dynamicLeaderboard.findIndex((e) => e.name === myIdentity.name) : -1;
+  const myEntry = myIndex >= 0 ? dynamicLeaderboard[myIndex] : null;
+  const aheadEntry = myIndex > 0 ? dynamicLeaderboard[myIndex - 1] : undefined;
+  const behindEntry = myIndex >= 0 && myIndex < dynamicLeaderboard.length - 1 ? dynamicLeaderboard[myIndex + 1] : undefined;
   // Roster-resolved FULL name for the prize-race personal line — raceGap
   // matches exact weekData keys and currentUser.name can be a first name.
   const raceName = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : null;
@@ -1903,7 +2300,7 @@ export default function TasksPage() {
       {/* Weekly prize ceremony — raceName is the roster-resolved FULL name
           (hall entries are keyed by full name); null for guests = no render. */}
       <WeeklyWinModal memberName={raceName} />
-      <Toast open={Boolean(toast)} tone={toast?.includes("Failed") ? "error" : toast?.includes("grabbed") || toast?.includes("not connected") || toast?.includes("not granted") ? "neutral" : "success"}>{toast}</Toast>
+      <Toast open={Boolean(toast)} tone={toastTone}>{toast}</Toast>
 
       <div className="mx-auto w-full">
       <PageHeader
@@ -1930,15 +2327,17 @@ export default function TasksPage() {
         icon="✅"
       />
 
-      {/* Phone keeps the stacked column (space-y); md+ uses Home's two-column
-          grid idiom — stats span both columns, then the view switch sits left
-          of the active panel (task board / leaderboard). */}
-      {/* Phone keeps the stacked column (space-y); md+ uses Home's two-column
-          grid idiom — stats span both columns, then the view switch and the
-          roster rail sit left of the active panel. At 1536px+ the left column
-          stops being an even half and becomes a real 26rem rail, because a panel
-          of chore rows wants the width and the filters want the height. */}
-      <div className="px-4 pb-8 space-y-6 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0 2xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] 2xl:grid-rows-[auto_1fr]">
+{/* Phone keeps the stacked column (space-y). md+ uses Home's two-column
+          grid idiom, and BOTH the rail and the active panel span the full two
+          columns below 1536px: the rail is one `md:col-span-2` cell (stats,
+          switch, roster) and the panel is another. Without that span the panel
+          auto-placed into column 1 alone, so at 768 and 1280 the chore board
+          was 360px wide beside an entirely empty column — half the tablet and
+          the whole right side of the laptop wasted, and every chore row
+          truncating for it. At 1536px+ the left column stops being an even half
+          and becomes a real 26rem rail, because a panel of chore rows wants the
+          width and the filters want the height. */}
+      <div className="px-4 pb-8 2xl:pb-28 [html[data-wall='true']_&]:pb-28 space-y-6 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0 2xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] 2xl:grid-rows-[auto_1fr]">
         {/* ── The rail ────────────────────────────────────────────────────
             Stats, view switch and the roster filter are ONE grid cell, not
             three. Auto-placement is row-major, so as separate cells the view
@@ -1964,17 +2363,26 @@ export default function TasksPage() {
           {/* The roster filter, reflowed from a sideways snap-scroller into a
               two-column rail grid by `.wall-board-member-strip`. */}
           {activeTab === "tasks" && (
-            <div className="member-strip member-strip-tiles wall-board-member-strip snap-x snap-mandatory overscroll-contain pb-2">
+            <div
+              role="group"
+              aria-label="Filter chores by family member"
+              className="member-strip member-strip-tiles wall-board-member-strip snap-x snap-mandatory overscroll-contain pb-2"
+            >
               {allMembers.map((member) => (
                 <button
                   key={member}
                   type="button"
                   aria-pressed={filterMember === member}
+                  aria-label={`Show ${member}'s chores`}
                   onClick={() => setFilterMember(member)}
                   className={`member-tile shrink-0 snap-start tap-sm ${filterMember === member ? "is-active" : ""}`}
                   style={{ "--chip-color": memberChipColor(memberColors[member]) } as CSSProperties}
                 >
                   <Avatar name={member} color={memberColors[member] || "green"} emoji={memberEmojis[member]} size="sm" variant="emoji" />
+                  {/* The visible tile is still first-name-only (that is the scan
+                      affordance); the accessible name above is the FULL name, so
+                      two members sharing a first name are no longer two
+                      identically-named tiles. */}
                   <span className="member-tile-name">{["All", "My Tasks", "Open"].includes(member) ? member : member.split(" ")[0]}</span>
                 </button>
               ))}
@@ -1985,38 +2393,58 @@ export default function TasksPage() {
         {outboxCounts.pending > 0 && (
           <div
             data-testid="task-command-queue"
-            className="rounded-xl px-3 py-2 2xl:col-start-2"
+            role="status"
+            aria-live="polite"
+            className="rounded-xl px-3 py-2 md:col-span-2 2xl:col-span-1 2xl:col-start-2"
             style={{
               background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)",
               border: "1px solid color-mix(in srgb, var(--color-accent-amber) 25%, transparent)",
             }}
           >
-            <p className="text-xs font-semibold text-[var(--color-accent-amber)]">
+            {/* `--color-accent-ink-amber` walks toward body ink: the bare
+                accent is ~2.7:1 on this tint in light mode, against a 4.5:1
+                floor for 12px semibold. */}
+            <p className="text-xs font-semibold text-[var(--color-accent-ink-amber)]">
               {outboxCounts.queued > 0
                 ? `⏳ Sending ${outboxCounts.queued} change${outboxCounts.queued !== 1 ? "s" : ""} to the family server…`
                 : ""}
+              {/* `queued` deliberately folds the backoff in, so "Sending" alone
+                  promises an imminent attempt. The hook exposes the split, so
+                  the long waits are named rather than smuggled in under it. */}
+              {retryingCount > 0
+                ? `${outboxCounts.queued > 0 ? " " : ""}↻ ${retryingCount} ${retryingCount === 1 ? "is" : "are"} waiting to retry (up to 5 min).`
+                : ""}
               {outboxCounts.authRequired > 0
-                ? `${outboxCounts.queued > 0 ? " " : ""}🔒 ${outboxCounts.authRequired} waiting on a PIN.`
+                ? `${outboxCounts.queued > 0 || retryingCount > 0 ? " " : ""}🔒 ${outboxCounts.authRequired} waiting on a PIN.`
                 : ""}
               {outboxCounts.reconciling > 0
-                ? `${outboxCounts.queued > 0 || outboxCounts.authRequired > 0 ? " " : ""}⏳ ${outboxCounts.reconciling} finishing up.`
-                : ""}
-              {outboxCounts.failed > 0
-                ? `${outboxCounts.queued > 0 || outboxCounts.authRequired > 0 || outboxCounts.reconciling > 0 ? " " : ""}⚠️ ${outboxCounts.failed} couldn't be sent.`
+                ? `${outboxCounts.queued > 0 || retryingCount > 0 || outboxCounts.authRequired > 0 ? " " : ""}⏳ ${outboxCounts.reconciling} finishing up.`
                 : ""}
             </p>
+            {/* The failure is its OWN element and its own ink: painted in the same
+                amber as "Sending", it read as still-sending. */}
+            {outboxCounts.failed > 0 && (
+              <p className="mt-1 text-xs font-semibold text-[var(--color-accent-ink-rose)]">
+                {`⚠️ ${outboxCounts.failed} couldn't be sent.`}
+              </p>
+            )}
             {cancellableEntries.length > 0 && (
               <ul className="mt-1 space-y-1">
                 {cancellableEntries.map((entry) => (
                   <li key={entry.operationId} className="flex items-center gap-2">
-                    <span className="text-xs text-text-secondary">
+                    <span className="min-w-0 flex-1 text-xs text-text-secondary">
                       {entry.displayTarget.title || entry.action}
+                      {entry.status === "failed" && entry.lastErrorReason && (
+                        <span className="block text-[var(--color-accent-ink-rose)]">
+                          {ledgerRefusalCopy(entry.lastErrorReason) || entry.lastErrorReason}
+                        </span>
+                      )}
                     </span>
                     <button
                       type="button"
                       aria-label={`Cancel queued ${entry.displayTarget.title || entry.action}`}
                       onClick={() => cancelQueuedOperation(entry.operationId)}
-                      className="tap-sm text-xs font-semibold text-[var(--color-accent-rose)]"
+                      className="tap-sm hit-44 inline-flex items-center px-2 text-xs font-semibold text-[var(--color-accent-ink-rose)]"
                     >
                       Cancel
                     </button>
@@ -2028,7 +2456,14 @@ export default function TasksPage() {
         )}
 
         {activeTab === "tasks" && (
-          <div key="tasks" className="panel-swap space-y-6 2xl:col-start-2">
+          <div
+            key="tasks"
+            id={TASKS_PANEL_IDS.tasks}
+            role="tabpanel"
+            aria-label="Chore board"
+            aria-labelledby={TASKS_VIEW_SWITCH_ID}
+            className="panel-swap space-y-6 md:col-span-2 2xl:col-span-1 2xl:col-start-2"
+          >
           <>
 
             {(isAdding || editingId !== null) && (
@@ -2241,8 +2676,13 @@ export default function TasksPage() {
 
             <TaskLedgerQuarantineNotice localWeekData={weekData} isParent={isParent} />
 
-            {openBoard.length > 0 && (
-              <SectionCard title="🫳 Open" description="Nobody's claimed these — fastest fingers earn the bonus." icon="⚡">
+            <SectionCard headingLevel="h2" title="🫳 Open" description="Nobody's claimed these — fastest fingers earn the bonus." icon="⚡">
+              {/* The card used to cease to exist when nothing was claimable,
+                  which reads as "this section is broken", not "nothing is up for
+                  grabs". */}
+              {openBoard.length === 0 ? (
+                <EmptyState title="Nothing up for grabs" description="Nothing is open right now — chores show up here once they're late." icon="🤝" />
+              ) : (
                 <div className="space-y-2">
                   {openBoard.map((task) => {
                     const speed = normalizeSpeedBonus(task.speedBonus);
@@ -2254,16 +2694,19 @@ export default function TasksPage() {
                         key={task.id}
                         className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
                         style={{
-                          backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-cyan) 40%, transparent) 0%, color-mix(in srgb, var(--color-accent-cyan) 20%, transparent) 100%)`,
+                          backgroundImage: rowTint("var(--color-accent-cyan)"),
                         }}
                       >
                         <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={crew ? "🤝" : "🫳"} size="sm" variant="emoji" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-text-primary">{task.title}</div>
-                          <div className="truncate text-xs text-text-secondary">
+                          <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                          <div className="line-clamp-2 text-xs leading-snug text-text-secondary">
                             {crew
                               ? `🤝 Crew ${joined}/${task.crewSize} joined${full ? " — full" : ""} · +${task.points} pts each`
-                              : `Open — nobody's yet${speed > 0 ? ` · first grab +${speed}` : ""}`}
+                              /* "Open — nobody's yet" was not a sentence, and the
+                                 board's own heading already says "Open". Say who
+                                 the row is waiting for instead. */
+                              : `Unclaimed${speed > 0 ? ` · first grab earns +${speed}` : ""}`}
                           </div>
                         </div>
                         <button
@@ -2279,8 +2722,8 @@ export default function TasksPage() {
                     );
                   })}
                 </div>
-              </SectionCard>
-            )}
+              )}
+            </SectionCard>
 
             <CrewTasksCard
               tasks={visibleTasks}
@@ -2297,7 +2740,7 @@ export default function TasksPage() {
               }}
             />
 
-            <SectionCard title="Pending" description={`${pending.length} open tasks`} icon="📋">
+            <SectionCard headingLevel="h2" title="Pending" description={`${pending.length} open tasks`} icon="📋">
               {optimisticTasks.length > 0 && (
                 <div className="mb-2 space-y-2">
                   {optimisticTasks.map((row) => (
@@ -2312,12 +2755,12 @@ export default function TasksPage() {
                     >
                       <span className="text-sm">⏳</span>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm text-text-primary">{row.title}</div>
+                        <div className="truncate text-sm text-text-primary" title={row.title}>{row.title}</div>
                         <div className="truncate text-xs text-text-secondary">
                           adding — {row.assignee}
                         </div>
                       </div>
-                      <span className="shrink-0 text-xs font-semibold text-[var(--color-accent-amber)]">
+                      <span className="shrink-0 text-xs font-semibold text-[var(--color-accent-ink-amber)]">
                         Saving
                       </span>
                     </div>
@@ -2342,12 +2785,12 @@ export default function TasksPage() {
                       >
                         <span className="text-sm">⏳</span>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-text-primary">{row.title}</div>
+                          <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={row.title}>{row.title}</div>
                           <div className="truncate text-xs text-text-secondary">
                             {cancelling ? "asking the family server to reopen it" : `${row.points}pts on the way`}
                           </div>
                         </div>
-                        <span className="shrink-0 text-xs font-semibold text-[var(--color-accent-amber)]">
+                        <span className="shrink-0 text-xs font-semibold text-[var(--color-accent-ink-amber)]">
                           {cancelling ? "Taking it back" : "On the way"}
                         </span>
                       </div>
@@ -2356,7 +2799,12 @@ export default function TasksPage() {
                 </div>
               )}
               {pending.length === 0 ? (
-                !isLoggedIn && guestSyncBlocked && tasks.length === 0 ? (
+                // The read's own state decides what an empty board MEANS. A 401
+                // means "hidden"; a 503 or a dead network is an UNKNOWN, never a
+                // zero — and an unknown must never render as "All caught up".
+                syncRead === "failed" && tasks.length === 0 ? (
+                  <EmptyState title="Couldn't reach the family server" description="We couldn't read the chore list, so this board may be out of date — it refreshes on its own, or check the NAS is awake." icon="📡" />
+                ) : !isLoggedIn && syncRead === "blocked" && tasks.length === 0 ? (
                   <EmptyState title="Tasks are synced to the family account" description="Sign in with your PIN to see everyone's tasks. Your chores aren't gone — they're waiting on the family server." icon="🔐" />
                 ) : filterMember === "Open" ? (
                   <EmptyState title="All quiet" description="Nothing is up for grabs right now." icon="🤝" />
@@ -2387,7 +2835,7 @@ export default function TasksPage() {
                         className="schedule-row liquid-glass flex cursor-pointer items-center gap-3 px-3 py-2.5 animate-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
                         style={{
                           animationDelay: `${Math.min(idx, 8) * 0.05}s`,
-                          backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${rowColor} 40%, transparent) 0%, color-mix(in srgb, ${rowColor} 20%, transparent) 100%)`,
+                          backgroundImage: rowTint(rowColor),
                         }}
                       >
                         <div
@@ -2396,21 +2844,41 @@ export default function TasksPage() {
                         />
                         <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-text-primary">{task.title}</div>
-                          <div className="truncate text-xs text-text-secondary">
+                          <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                          <div className="line-clamp-2 text-xs leading-snug text-text-secondary">
                             {isCrewTask(task)
                               ? `🤝 Crew ${crewCheckinProgress(task).checkedIn}/${task.crewSize} checked in · ${crewMemberCount(task)} joined · +${task.points} pts each`
-                              : `${task.assignee.split(" ")[0]} · ${isSnatchable(task) ? `was due ${formatDueLabel(task.due)}` : formatDueLabel(task.due)} · ${task.category}`}
+                              /* `formatDueLabel` is "" for an unset due, and an
+                                 unconditional separator rendered "Alex ·  · Chores"
+                                 — the double dot read as a rendering bug. */
+                              : [
+                                task.assignee.split(" ")[0],
+                                isSnatchable(task) ? `was due ${formatDueLabel(task.due)}` : formatDueLabel(task.due),
+                                task.category,
+                              ].filter(Boolean).join(" · ")}
                           </div>
                         </div>
                         <span
                           className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
                           style={{
-                            background: `linear-gradient(135deg, color-mix(in srgb, ${rowColor} 55%, transparent), color-mix(in srgb, ${rowColor} 30%, transparent))`,
+                            background: chipFill(rowColor),
                           }}
                         >
                           +{task.points}pts
                         </span>
+                        {/* Swipe-left was pointer-only, so a keyboard parent could
+                            complete a chore but never edit one. A visible,
+                            row-named control for the same action. */}
+                        {isParent && (
+                          <button
+                            type="button"
+                            aria-label={`Edit ${task.title}`}
+                            onClick={(e) => { e.stopPropagation(); startEdit(task); }}
+                            className="tap-sm hit-44 shrink-0 rounded-full px-2 py-1 text-xs font-semibold text-text-secondary glass-subtle"
+                          >
+                            ✎
+                          </button>
+                        )}
                       </div>
                       {wall && wallConfirmId === task.id && (
                         <button
@@ -2429,7 +2897,7 @@ export default function TasksPage() {
             </SectionCard>
 
             {isLoggedIn && currentUser?.role === "parent" && pendingApprovals.length > 0 && (
-              <SectionCard title="Needs approval" description={`${pendingApprovals.length} tapped — review to award points`} icon="⏳">
+              <SectionCard headingLevel="h2" title="Needs approval" description={`${pendingApprovals.length} tapped — review to award points`} icon="⏳">
                 {/* One PIN pays the whole queue — the per-row grind was the
                     biggest parent complaint in the evaluation. */}
                 <div className="mb-3">
@@ -2443,27 +2911,39 @@ export default function TasksPage() {
                     const isCrew = crew.length > 0;
                     const joined = isCrewTask(task) ? crewMemberCount(task) : 0;
                     return (
-                    <div
+<div
                       key={task.id}
-                      className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                      className="schedule-row liquid-glass flex flex-wrap items-center gap-3 px-3 py-2.5"
                       style={{
-                        backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 40%, transparent) 0%, color-mix(in srgb, var(--color-accent-amber) 20%, transparent) 100%)`,
+                        backgroundImage: rowTint("var(--color-accent-amber)"),
                       }}
                     >
                       <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={isCrew ? "🤝" : assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm text-text-primary">{task.title}</div>
-                        <div className="truncate text-xs text-text-secondary">
+                      {/* `basis-56` is the whole point of the wrap: "Approve" +
+                          "Send back" are ~170px of `shrink-0` buttons, which at
+                          390px left this text column 90px — the title broke to
+                          two words and the meta truncated to "Jasmine ·", so the
+                          one row a parent is about to pay points on was the one
+                          row they could not read. The text now claims a line and
+                          the two actions take the next one, full width. */}
+                      <div className="min-w-0 flex-1 basis-56">
+                        <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                        <div className="line-clamp-2 text-xs leading-snug text-text-secondary">
                           {isCrew
                             ? `🤝 Crew ${crew.length}/${task.crewSize ?? crew.length} · ${task.points}pts each · ${crew.map((n) => n.split(" ")[0]).join(", ")}`
-                            : `${task.pendingApproval!.byName.split(" ")[0]} · tapped ${task.pendingApproval!.at.split("T")[0]} · ${task.points}pts`}
+                            /* The raw `at` is an ISO instant; `split("T")[0]`
+                               printed "2026-10-05" where every other date on this
+                               page reads "Oct 5". Same formatDueLabel contract. */
+                            : `${task.pendingApproval!.byName.split(" ")[0]} · tapped ${formatDueLabel(task.pendingApproval!.at.split("T")[0])} · ${task.points}pts`}
                           {isCrew && crew.length !== joined && (
                             <span className="text-xs text-text-secondary"> · {crew.length} of {joined} checked in</span>
                           )}
                         </div>
                       </div>
-                      <button type="button" aria-label={`Approve ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("approve"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle">Approve</button>
-                      <button type="button" aria-label={`Send back ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("sendback"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-semibold text-text-secondary">Send back</button>
+                      <div className="flex w-full shrink-0 gap-2 sm:ml-auto sm:w-auto">
+                        <button type="button" aria-label={`Approve ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("approve"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle sm:flex-none">Approve</button>
+                        <button type="button" aria-label={`Send back ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("sendback"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-semibold text-text-secondary sm:flex-none">Send back</button>
+                      </div>
                     </div>
                     );
                   })}
@@ -2471,18 +2951,19 @@ export default function TasksPage() {
               </SectionCard>
             )}
 
-            {thisWeeksCompletedCount > 0 && (
-              <SectionCard title="Completed" description={`${thisWeeksCompletedCount} done this week`} icon="✅">
+            {/* Gated on the array the expanded list actually maps over, not on a
+                this-week count: `openPinEntry` is the only setter of `undoTaskId`
+                and is reachable only from a rendered row, so gating on the week
+                count made the whole undo path dead on a Monday morning. */}
+            {completed.length > 0 && (
+              <SectionCard headingLevel="h2" title="Completed" description={`${completed.length} done`} icon="✅">
                 <button type="button" onClick={() => setShowCompleted(!showCompleted)} aria-expanded={showCompleted} className="mb-3 flex min-h-[44px] w-full items-center justify-between rounded-xl px-1 text-sm font-semibold text-text-secondary">
                   <span>{showCompleted ? "Hide completed" : "Show completed"}</span>
                   <span>{showCompleted ? "↑" : "↓"}</span>
                 </button>
                 {showCompleted && (
                   <div className="space-y-2">
-                    {completed.length === 0 ? (
-                      <p className="py-2 text-center text-xs text-text-muted">No completed tasks for this filter yet.</p>
-                    ) : (
-                      completed.map((task) => {
+                    {completed.map((task) => {
                         if (isPendingApproval(task)) {
                           const owner = task.pendingApproval!;
                           // Same-kid check in the resolved-ledger space (a
@@ -2498,7 +2979,7 @@ export default function TasksPage() {
                             onKeyDown={mine ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPinEntry(task.id); } } : undefined}
                             className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
                             style={{
-                              backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 40%, transparent) 0%, color-mix(in srgb, var(--color-accent-amber) 20%, transparent) 100%)`,
+                              backgroundImage: rowTint("var(--color-accent-amber)"),
                             }}
                           >
                             <div
@@ -2507,13 +2988,13 @@ export default function TasksPage() {
                             />
                             <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                             <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm text-text-primary">{task.title}</div>
-                              <div className="truncate text-xs text-text-secondary">{owner.byName.split(" ")[0]} · tapped {owner.at.split("T")[0]} · {task.points}pts on the way</div>
+                              <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                              <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{owner.byName.split(" ")[0]} · tapped {formatDueLabel(owner.at.split("T")[0])} · {task.points}pts on the way</div>
                             </div>
                             <span
                               className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
                               style={{
-                                background: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 55%, transparent), color-mix(in srgb, var(--color-accent-amber) 30%, transparent))`,
+                                background: chipFill("var(--color-accent-amber)"),
                               }}
                             >
                               ⏳ On the way
@@ -2523,21 +3004,15 @@ export default function TasksPage() {
                         }
                         const rowColor = "var(--color-accent-mint)";
                         return (
+                        // INERT row: the undo `<button>` below is the single
+                        // affordance. A `role="button"` row with a button inside
+                        // it is two controls with two names doing one action, and
+                        // a nested-interactive ARIA violation.
                         <div
                           key={task.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`Undo completion of ${task.title}`}
-                          onClick={() => openPinEntry(task.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openPinEntry(task.id);
-                            }
-                          }}
-                          className="schedule-row liquid-glass flex cursor-pointer items-center gap-3 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
+                          className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
                           style={{
-                            backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${rowColor} 40%, transparent) 0%, color-mix(in srgb, ${rowColor} 20%, transparent) 100%)`,
+                            backgroundImage: rowTint(rowColor),
                           }}
                         >
                           <div
@@ -2546,22 +3021,21 @@ export default function TasksPage() {
                           />
                           <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm text-text-primary">{task.title}</div>
+                            <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
                             <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]} · {task.completedInWeek === weekData.weekStart ? "This week" : "Past"}</div>
                           </div>
                           <span
                             className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
                             style={{
-                              background: `linear-gradient(135deg, color-mix(in srgb, ${rowColor} 55%, transparent), color-mix(in srgb, ${rowColor} 30%, transparent))`,
+                              background: chipFill(rowColor),
                             }}
                           >
                             Done
                           </span>
-                          <IconButton size="sm" variant="ghost" aria-label="Undo complete" className="hit-44" onClick={() => openPinEntry(task.id)}>↩</IconButton>
+                          <IconButton size="sm" variant="ghost" aria-label={`Undo completion of ${task.title}`} className="hit-44" onClick={() => openPinEntry(task.id)}>↩</IconButton>
                         </div>
                         );
-                      })
-                    )}
+                      })}
                   </div>
                 )}
               </SectionCard>
@@ -2571,7 +3045,7 @@ export default function TasksPage() {
                 empty generator used to sit above Pending as a full card,
                 pushing the real list ~2 viewports down the phone. */}
             {isParent && (aiSuggestions.length > 0 ? (
-              <SectionCard title="Consuela suggests" description="Fresh ideas for the family." icon="✨">
+              <SectionCard headingLevel="h2" title="Consuela suggests" description="Fresh ideas for the family." icon="✨">
                 <div className="grid gap-3 sm:grid-cols-2">
                   {aiSuggestions.map((suggestion) => (
                     <Surface key={suggestion.title} variant="glass-subtle" radius="xl" padding="sm">
@@ -2589,7 +3063,7 @@ export default function TasksPage() {
                         </div>
                         <div className="flex gap-1">
                           <SoftButton size="sm" onClick={() => adoptSuggestion(suggestion)}>Add</SoftButton>
-                          <IconButton size="sm" variant="ghost" aria-label="Dismiss" className="hit-44" onClick={() => dismissSuggestion(suggestion.title)}>×</IconButton>
+                          <IconButton size="sm" variant="ghost" aria-label={`Dismiss ${suggestion.title}`} className="hit-44" onClick={() => dismissSuggestion(suggestion.title)}>×</IconButton>
                         </div>
                       </div>
                     </Surface>
@@ -2617,13 +3091,20 @@ export default function TasksPage() {
           dynamicLeaderboard.length === 0 ? (
             <EmptyState title="No champions yet" description="Add family members in Settings, then complete tasks to fill the board." icon="🏆" />
           ) : (
-          <div key="leaderboard" className="panel-swap space-y-6 2xl:col-start-2">
+          <div
+            key="leaderboard"
+            id={TASKS_PANEL_IDS.leaderboard}
+            role="tabpanel"
+            aria-label="Leaderboard"
+            aria-labelledby={TASKS_VIEW_SWITCH_ID}
+            className="panel-swap space-y-6 md:col-span-2 2xl:col-span-1 2xl:col-start-2"
+          >
           <>
             <Surface variant="warm" radius="2xl" padding="lg" glow>
               {familyTotal === 0 ? (
                 <div className="py-2 text-center">
                   <span className="text-2xl animate-crown-glow">👑</span>
-                  <h3 className="mt-1 text-xl font-bold text-text-primary">The crown is up for grabs</h3>
+                  <h2 className="mt-1 text-xl font-bold text-text-primary">The crown is up for grabs</h2>
                   <p className="mt-1 text-sm text-text-secondary">Everyone starts at zero — the first completed task takes the crown.</p>
                 </div>
               ) : (
@@ -2647,16 +3128,16 @@ export default function TasksPage() {
                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">This week&apos;s champion</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-2xl animate-crown-glow">👑</span>
-                      <h3 className="text-xl font-bold text-text-primary">{topScorer.name.split(" ")[0]}</h3>
+                      <h2 className="text-xl font-bold text-text-primary">{topScorer.name.split(" ")[0]}</h2>
                     </div>
                     <div className="flex items-center gap-3 mt-1">
                       <p className="text-sm text-text-secondary">
-                        <span className="font-semibold text-[var(--color-accent-selected)]">{topScorer.points}</span> pts
+                        <span className="font-semibold text-[var(--color-accent-ink-nori)]">{topScorer.points}</span> pts
                       </p>
                       {topScorer.streak > 0 && (
                         <span
-                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
-                          style={{ background: "color-mix(in srgb, var(--color-accent-amber) 12%, transparent)", color: "var(--color-accent-amber)" }}
+                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold text-[var(--color-accent-ink-amber)]"
+                          style={{ background: "color-mix(in srgb, var(--color-accent-amber) 12%, transparent)" }}
                         >
                           🔥 {topScorer.streak}d
                         </span>
@@ -2672,7 +3153,7 @@ export default function TasksPage() {
                 <div className="mt-5 grid gap-3 sm:grid-cols-3">
                   <ProgressRing value={championShare} max={1} label="Champion share" detail={`${topScorer.name.split(" ")[0]} leads`} size={96} stroke={8} />
                   <StatTile label="Rewards" value={rewards.length} detail="Available" icon="🎁" tone="accent" />
-                  <StatTile label="Penalties" value={penalties.length} detail="Configured" icon="⚠️" tone="warning" />
+                  <StatTile label="Penalties" value={penalties.length} detail="Configured" tone="accent" />
                 </div>
                 {topScorer.badges.length > 0 && (
                   <div className="mt-3">
@@ -2685,12 +3166,12 @@ export default function TasksPage() {
 
             {/* The tab leads with the live race — podium + prizes — so the
                 first screen IS the competition, not a wall of cards. */}
-            <SectionCard title="Leaderboard" description="This week's race — resets Monday" icon="🏆">
+            <SectionCard headingLevel="h2" title="Leaderboard" description="This week's race — resets Monday" icon="🏆">
               <Podium
                 entries={dynamicLeaderboard.slice(0, 3)}
                 prizes={weeklyPrizes}
                 previousRanks={previousRanks}
-                isYou={(name: string) => !!(isLoggedIn && currentUser && (name === currentUser.name || name.startsWith(currentUser.name)))}
+                isYou={(name: string) => name === myIdentity.name}
                 getMemberColor={(name: string) => memberColors[name] || "green"}
                 onOpenSheet={setSheetMember}
                 onAdjust={openAdjust}
@@ -2698,13 +3179,12 @@ export default function TasksPage() {
                 allTimeRead={allTimeRead}
               />
               <div className="mt-3 space-y-3">
-                {dynamicLeaderboard.slice(3).map((entry, index) => (
+                {dynamicLeaderboard.slice(3).map((entry) => (
                   <LeaderboardRow
                     key={entry.name}
                     entry={entry}
-                    index={index + 3}
                     previousRank={previousRanks[entry.name]}
-                    isYou={!!(isLoggedIn && currentUser && (entry.name === currentUser.name || entry.name.startsWith(currentUser.name)))}
+                    isYou={entry.name === myIdentity.name}
                     getMemberColor={(name: string) => memberColors[name] || "green"}
                     onAdjust={openAdjust}
                     onOpenSheet={setSheetMember}
@@ -2722,9 +3202,12 @@ export default function TasksPage() {
             />
 
             {isLoggedIn && currentUser && (() => {
-              const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
-              const myRank = myEntry?.rank ?? 0;
-              const aheadEntry = myRank > 1 ? dynamicLeaderboard[myRank - 2] : undefined;
+              // Same POSITION rule as the CatchUpNudge pair above: the row
+              // directly above, found by index, so a tied rank cannot point the
+              // card at the wrong member.
+              const myIndex = dynamicLeaderboard.findIndex((e) => e.name === myIdentity.name);
+              const myEntry = myIndex >= 0 ? dynamicLeaderboard[myIndex] : null;
+              const aheadEntry = myIndex > 0 ? dynamicLeaderboard[myIndex - 1] : undefined;
               return myEntry ? <YourCard entry={myEntry} aheadEntry={aheadEntry} getMemberColor={(n: string) => memberColors[n] || "green"} allTimeRead={allTimeRead} /> : null;
             })()}
 
@@ -2776,12 +3259,21 @@ export default function TasksPage() {
               isLoggedIn={isLoggedIn}
               leaderboard={dynamicLeaderboard}
               memberColors={memberColors}
-              isParent={!!membersData.find((m: any) => m.role === "parent")}
+              // The VIEWER's role, not "a parent exists": that is what offered a
+              // signed-out guest "Set a Family Goal".
+              isParent={isParent}
               allTimePoints={raceName ? allTime.totals[raceName]?.points : undefined}
               allTimeCompletions={raceName ? allTime.totals[raceName]?.completions : undefined}
             />
 
+            {/* The admin affordances (Suggest/Add/Edit reward, Add/Apply/Edit
+                penalty) are parent-only, and every one of them is already
+                server-gated — the client was throwing the rejection away and
+                showing a success toast first, so a signed-out guest saw controls
+                that could never work. Redemption stays open to every member: it
+                is the one action here that legitimately belongs to them. */}
             <TasksRewardsPanel
+              canManage={isParent}
               rewards={rewards}
               aiRewards={aiRewards}
               aiRewardSuggesting={aiRewardSuggesting}
@@ -2868,10 +3360,10 @@ export default function TasksPage() {
         </Modal>
       )}
 
-      {(pinTaskId !== null || pinReward !== null || pinPenalty !== null) && (
+      {pinIntent !== null && (
         <Modal
           open
-          onClose={() => { setPinTaskId(null); setPinReward(null); setPinPenalty(null); }}
+          onClose={closePinDialog}
           title="Enter your PIN"
           description={
             pinReward
@@ -2887,7 +3379,7 @@ export default function TasksPage() {
           footer={
             <>
               <SoftButton onClick={submitPin} loading={pinBusy} disabled={pinInput.length < 4 || pinBusy} className="flex-1">{pinPenalty ? "Deduct" : "Submit"}</SoftButton>
-              <SoftButton variant="secondary" onClick={() => { setPinTaskId(null); setPinCrewAction(null); setPinReward(null); setPinPenalty(null); }} className="flex-1">Cancel</SoftButton>
+              <SoftButton variant="secondary" onClick={closePinDialog} className="flex-1">Cancel</SoftButton>
             </>
           }
         >
@@ -2928,7 +3420,7 @@ export default function TasksPage() {
               inputMode="numeric"
               maxLength={4}
               value={pinInput}
-              onChange={(e) => { setPinInput(e.target.value.replace(/[^0-9]/g, "")); setPinError(""); }}
+aria-describedby="pin-dialog-error pin-dialog-status"               onChange={(e) => { setPinInput(e.target.value.replace(/[^0-9]/g, "")); setPinError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") submitPin(); }}
               placeholder="4-digit PIN"
 
@@ -2936,8 +3428,12 @@ export default function TasksPage() {
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
-            {pinError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{pinError}</p>}
-            {pinSuccess && <p className="text-center text-sm text-[var(--color-accent-selected)]">{pinSuccess}</p>}
+            {pinError && (
+              <p id="pin-dialog-error" role="alert" className="text-center text-sm text-[var(--color-accent-ink-rose)]">{pinError}</p>
+            )}
+            {pinSuccess && (
+              <p id="pin-dialog-status" role="status" className="text-center text-sm text-[var(--color-text-primary)]">{pinSuccess}</p>
+            )}
           </div>
         </Modal>
       )}
@@ -2962,7 +3458,7 @@ export default function TasksPage() {
               inputMode="numeric"
               maxLength={4}
               value={undoPin}
-              onChange={(e) => { setUndoPin(e.target.value.replace(/[^0-9]/g, "")); setUndoError(""); }}
+aria-describedby="undo-dialog-error"               onChange={(e) => { setUndoPin(e.target.value.replace(/[^0-9]/g, "")); setUndoError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") submitUndo(); }}
               placeholder="4-digit PIN"
 
@@ -2970,7 +3466,9 @@ export default function TasksPage() {
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
-            {undoError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{undoError}</p>}
+            {undoError && (
+              <p id="undo-dialog-error" role="alert" className="text-center text-sm text-[var(--color-accent-ink-rose)]">{undoError}</p>
+            )}
           </div>
         </Modal>
       )}
@@ -2978,20 +3476,24 @@ export default function TasksPage() {
       {adjustMember && (
         <Modal
           open
-          onClose={() => setAdjustMember(null)}
+          onClose={closeAdjust}
           title="Manual point adjust"
           description={`Adjust points for ${adjustMember.split(" ")[0]}`}
           footer={
             <>
-              <SoftButton onClick={submitAdjust} loading={pinBusy} disabled={!adjustPin || pinBusy} className="flex-1">Apply</SoftButton>
-              <SoftButton variant="secondary" onClick={() => setAdjustMember(null)} className="flex-1">Cancel</SoftButton>
+              <SoftButton onClick={submitAdjust} loading={pinBusy} disabled={!adjustPin || pinBusy || adjustAmountValue <= 0} className="flex-1">Apply</SoftButton>
+              <SoftButton variant="secondary" onClick={closeAdjust} className="flex-1">Cancel</SoftButton>
             </>
           }
         >
           <div className="space-y-4">
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Amount</span>
-              <input type="number" aria-label="Adjustment amount" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" />
+              {/* `min` matters as much as the coercion: the direction is chosen by the
+                  Add/Remove toggle, so a typed "-50" would otherwise INVERT a
+                  deduction into a credit (`delta = -50` -> `change = +50`) and
+                  confirm `--50 pts`. */}
+              <input type="number" inputMode="numeric" min={1} aria-label="Adjustment amount" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" />
             </label>
             <div className="grid gap-2 sm:grid-cols-2">
               <SoftButton aria-label="Add points" variant={adjustDir === "+" ? "success" : "secondary"} onClick={() => setAdjustDir("+")}>Add points</SoftButton>
@@ -3003,10 +3505,14 @@ export default function TasksPage() {
             </label>
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Parent PIN</span>
-              <input type="password" aria-label="Parent PIN" inputMode="numeric" maxLength={4} value={adjustPin} onChange={(e) => { setAdjustPin(e.target.value.replace(/[^0-9]/g, "")); setAdjustError(""); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
+              <input type="password" aria-label="Parent PIN" inputMode="numeric" maxLength={4} value={adjustPin} aria-describedby="adjust-dialog-error adjust-dialog-status" onChange={(e) => { setAdjustPin(e.target.value.replace(/[^0-9]/g, "")); setAdjustError(""); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
             </label>
-            {adjustError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{adjustError}</p>}
-            {adjustSuccess && <p className="text-center text-sm text-[var(--color-accent-selected)]">{adjustSuccess}</p>}
+            {adjustError && (
+              <p id="adjust-dialog-error" role="alert" className="text-center text-sm text-[var(--color-accent-ink-rose)]">{adjustError}</p>
+            )}
+            {adjustSuccess && (
+              <p id="adjust-dialog-status" role="status" className="text-center text-sm text-[var(--color-text-primary)]">{adjustSuccess}</p>
+            )}
           </div>
         </Modal>
       )}
@@ -3031,7 +3537,7 @@ export default function TasksPage() {
               inputMode="numeric"
               maxLength={4}
               value={parentApprovalPin}
-              onChange={(e) => { setParentApprovalPin(e.target.value.replace(/[^0-9]/g, "")); setParentApprovalError(""); }}
+aria-describedby="parent-approval-dialog-error"               onChange={(e) => { setParentApprovalPin(e.target.value.replace(/[^0-9]/g, "")); setParentApprovalError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") approveParentReward(); }}
               placeholder="Parent PIN"
 
@@ -3039,7 +3545,9 @@ export default function TasksPage() {
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
-            {parentApprovalError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{parentApprovalError}</p>}
+            {parentApprovalError && (
+              <p id="parent-approval-dialog-error" role="alert" className="text-center text-sm text-[var(--color-accent-ink-rose)]">{parentApprovalError}</p>
+            )}
           </div>
         </Modal>
       )}
@@ -3072,7 +3580,7 @@ export default function TasksPage() {
               inputMode="numeric"
               maxLength={4}
               value={approvalPin}
-              onChange={(e) => { setApprovalPin(e.target.value.replace(/[^0-9]/g, "")); setApprovalError(""); }}
+aria-describedby="approval-dialog-error"               onChange={(e) => { setApprovalPin(e.target.value.replace(/[^0-9]/g, "")); setApprovalError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") submitApproval(); }}
               placeholder="Parent PIN"
 
@@ -3080,7 +3588,9 @@ export default function TasksPage() {
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
-            {approvalError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{approvalError}</p>}
+            {approvalError && (
+              <p id="approval-dialog-error" role="alert" className="text-center text-sm text-[var(--color-accent-ink-rose)]">{approvalError}</p>
+            )}
           </div>
         </Modal>
       )}
@@ -3105,7 +3615,7 @@ export default function TasksPage() {
               inputMode="numeric"
               maxLength={4}
               value={crewRemovePin}
-              onChange={(e) => { setCrewRemovePin(e.target.value.replace(/[^0-9]/g, "")); setCrewRemoveError(""); }}
+aria-describedby="crew-remove-dialog-error"               onChange={(e) => { setCrewRemovePin(e.target.value.replace(/[^0-9]/g, "")); setCrewRemoveError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") submitCrewRemove(); }}
               placeholder="Parent PIN"
 
@@ -3113,7 +3623,9 @@ export default function TasksPage() {
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
-            {crewRemoveError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{crewRemoveError}</p>}
+            {crewRemoveError && (
+              <p id="crew-remove-dialog-error" role="alert" className="text-center text-sm text-[var(--color-accent-ink-rose)]">{crewRemoveError}</p>
+            )}
           </div>
         </Modal>
       )}
@@ -3146,7 +3658,7 @@ export default function TasksPage() {
               inputMode="numeric"
               maxLength={4}
               value={crewClosePin}
-              onChange={(e) => { setCrewClosePin(e.target.value.replace(/[^0-9]/g, "")); setCrewCloseError(""); }}
+aria-describedby="crew-close-dialog-error"               onChange={(e) => { setCrewClosePin(e.target.value.replace(/[^0-9]/g, "")); setCrewCloseError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") submitCrewClose(); }}
               placeholder="Parent PIN"
 
@@ -3154,8 +3666,27 @@ export default function TasksPage() {
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
-            {crewCloseError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{crewCloseError}</p>}
+            {crewCloseError && (
+              <p id="crew-close-dialog-error" role="alert" className="text-center text-sm text-[var(--color-accent-ink-rose)]">{crewCloseError}</p>
+            )}
           </div>
+        </Modal>
+      )}
+
+      {confirmDiscardOpen && (
+        <Modal
+          open
+          onClose={() => setConfirmDiscardOpen(false)}
+          title="Discard these changes?"
+          description={isAdding ? "This chore hasn't been added yet." : "Your edits to this chore haven't been saved."}
+          footer={
+            <>
+              <SoftButton variant="danger" onClick={closeEdit} className="flex-1">Discard</SoftButton>
+              <SoftButton variant="secondary" onClick={() => setConfirmDiscardOpen(false)} className="flex-1">Keep editing</SoftButton>
+            </>
+          }
+        >
+          <p className="text-sm text-text-secondary">Nothing was written — the chore is exactly as it was.</p>
         </Modal>
       )}
 
@@ -3167,7 +3698,7 @@ export default function TasksPage() {
           description={`"${editForm.title}" goes away for the whole family. This can't be undone.`}
           footer={
             <>
-              <SoftButton variant="danger" onClick={() => { deleteTask(editForm.id); setConfirmDeleteOpen(false); cancelEdit(); }} className="flex-1">Delete</SoftButton>
+              <SoftButton variant="danger" onClick={() => { deleteTask(editForm.id); setConfirmDeleteOpen(false); closeEdit(); }} className="flex-1">Delete</SoftButton>
               <SoftButton variant="secondary" onClick={() => setConfirmDeleteOpen(false)} className="flex-1">Cancel</SoftButton>
             </>
           }
@@ -3189,6 +3720,9 @@ export default function TasksPage() {
             </>
           }
         >
+          {repeatRows.length === 0 ? (
+            <EmptyState title="Nothing left to repeat" description="You removed every chore from last week. Nothing was added." icon="↻" />
+          ) : (
           <div className="space-y-2">
             {repeatRows.map((def, idx) => {
               const modeLabel =
@@ -3203,7 +3737,7 @@ export default function TasksPage() {
                   className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm text-text-primary">{def.title}</div>
+                    <div className="truncate text-sm text-text-primary" title={def.title}>{def.title}</div>
                     <div className="truncate text-xs text-text-secondary">+{def.points} pts · {modeLabel}</div>
                   </div>
                   <IconButton
@@ -3219,6 +3753,7 @@ export default function TasksPage() {
               );
             })}
           </div>
+          )}
         </Modal>
       )}
 

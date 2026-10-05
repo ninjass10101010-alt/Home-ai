@@ -429,10 +429,12 @@ export default function KidHome() {
     return kidRaceLine(myRaceName, pointsMap, prizes);
   })();
   // Reset countdown in kid words — the weekly number leaving must be as
-  // explicit as its arrival ("Resets tonight!" is the Sunday-night case).
+  // explicit as its arrival, which is why 1 gets its own line. `daysToReset` is
+  // getDaysUntilWeekReset()'s 1..7 by construction (Monday maps to 7, not 0 —
+  // see the helper), so there is NO "tonight" state to render: the week never
+  // ends at midnight, and an arm for it could only ever print a lie.
   const daysToReset = getDaysUntilWeekReset();
   const resetLine =
-    daysToReset <= 0 ? "Resets tonight!" :
     daysToReset === 1 ? "Resets tomorrow" :
     `Resets in ${daysToReset} days`;
 

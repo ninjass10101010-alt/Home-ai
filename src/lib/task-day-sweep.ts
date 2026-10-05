@@ -8,8 +8,12 @@ import {
   readSnapshotWithRevision,
   type SnapshotTask,
 } from "@/lib/snapshot-tasks";
-import { isDailyRecurrence, isWeekdayRecurrence, recurringClone, recurringLineage } from "@/lib/task-recurrence";
-import { issueServerTaskId } from "@/lib/task-week-rollover";
+import { isDailyRecurrence, isWeekdayRecurrence } from "@/lib/task-recurrence";
+import {
+  issueServerTaskId,
+  recurringCloneWithOrigin,
+  recurringLineageKey,
+} from "@/lib/task-week-rollover";
 import { crewCloseModeOf } from "@/lib/task-utils";
 
 /**
@@ -89,7 +93,12 @@ export function closeDeadlineCrewsOnTasks(
  *  the unit), then spawn exactly one clone due today. Pending-approval rows are
  *  immune; a lineage that already has a row due today never spawns twice.
  *  Weekday lineages freeze over the weekend: on Sat/Sun no consume and no
- *  spawn, so Friday's row stays visible until Monday's sweep replaces it. */
+ *  spawn, so Friday's row stays visible until Monday's sweep replaces it.
+ *
+ *  Lineage keys on the ORIGIN row id (see `recurringLineageKey`), not on the
+ *  title: two chores that share a title but differ in points/category are two
+ *  chores, and consuming both into one clone silently deleted one of them —
+ *  a tombstone is not an undo. */
 export function regenerateRecurringOnTasks(
   tasks: SnapshotTask[],
   today: string,
@@ -102,7 +111,7 @@ export function regenerateRecurringOnTasks(
     const id = Number(task?.id);
     if (!Number.isSafeInteger(id) || id <= 0) continue;
     if (!isDailyRecurrence(task.recurring) && !isWeekdayRecurrence(task.recurring)) continue;
-    const key = recurringLineage(task);
+    const key = recurringLineageKey(task);
     groups.set(key, [...(groups.get(key) ?? []), task]);
   }
   const deletedIds: number[] = [];
@@ -129,7 +138,7 @@ export function regenerateRecurringOnTasks(
     if (!source) continue;
     const id = issueId(existing);
     existing.add(id);
-    added.push(recurringClone(source, id, today));
+    added.push(recurringCloneWithOrigin(source, id, today));
   }
   return {
     tasks: [...tasks.filter((task) => !removed.has(Number(task.id))), ...added],
@@ -167,7 +176,20 @@ export function cullExpiredTasksOnTasks(
   return { tasks: kept, deletedIds };
 }
 
-/** All sweep stages, in order. Plan 2 prepends recurrence + expiry here. */
+/** All sweep stages, in order. Plan 2 prepends recurrence + expiry here.
+ *
+ *  ORDER MATTERS (B1): the deadline-crew close runs BEFORE the expiry cull,
+ *  never after. `closeDeadlineCrewsOnTasks` is the only thing that stages a
+ *  crew's `pendingApproval.crew`, and `cullExpiredTasksOnTasks` tombstones a
+ *  row whose local day is past due + `expiresAfterDays`. Culling first removed
+ *  the row from the array before the close could see it, so a crew that DID
+ *  check in — just after its expiry, on the very sweep that expired it — was
+ *  paid nothing, with no pendingApproval and no error anywhere.
+ *
+ *  The cull stays safe afterwards: it skips `completed === true` and any row
+ *  holding a `pendingApproval`, both of which the close sets, and the close
+ *  only ever touches `crewCloseMode === "deadline"` rows with `crewSize >= 2`.
+ *  Each stage takes and returns its own copy, so nothing is aliased. */
 function runDaySweepStages(
   tasks: SnapshotTask[],
   today: string,
@@ -176,10 +198,10 @@ function runDaySweepStages(
   issueId: (existing: ReadonlySet<number>) => number,
 ): { tasks: SnapshotTask[]; closedIds: number[]; deletedIds: number[] } {
   const regenerated = regenerateRecurringOnTasks(tasks, today, weekStart, nowIso, issueId);
-  const culled = cullExpiredTasksOnTasks(regenerated.tasks, today);
-  const closed = closeDeadlineCrewsOnTasks(culled.tasks, today, weekStart, nowIso);
+  const closed = closeDeadlineCrewsOnTasks(regenerated.tasks, today, weekStart, nowIso);
+  const culled = cullExpiredTasksOnTasks(closed.tasks, today);
   return {
-    tasks: closed.tasks,
+    tasks: culled.tasks,
     closedIds: closed.closedIds,
     deletedIds: [...regenerated.deletedIds, ...culled.deletedIds],
   };

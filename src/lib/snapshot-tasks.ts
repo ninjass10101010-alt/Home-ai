@@ -1,6 +1,6 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { withKeyedLock } from "@/lib/keyed-lock";
-import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
+import { persistedTaskEmoji, persistedCrewEmoji, slimTaskEmojis } from "@/lib/task-emoji";
 import { parseCanonicalTransactions, recomputeWeekPoints } from "@/lib/task-ledger";
 import { normalizeOperationId, normalizeTimestamp } from "@/lib/task-operation-contract";
 import {
@@ -36,6 +36,70 @@ import type { WeekData, Transaction } from "@/types/tasks";
 
 export const SNAPSHOT_KEY = "tasks-snapshot";
 export const SNAPSHOT_COLLECTION = "consuela_data_snapshots";
+
+function redactLogText(text: string): string {
+  let redacted = text;
+  redacted = redacted.replace(/data:[^"'\s]*?,[A-Za-z0-9+/=_-]{20,}/gi, "data:<redacted>");
+  redacted = redacted.replace(/[A-Za-z0-9+/]{64,}={0,2}/g, "<base64-redacted>");
+  return redacted.slice(0, 200);
+}
+
+/**
+ * One shared pattern for the snapshot-write catches (task-manage, task-claim,
+ * task-approval, and the persist helpers here). Logs the PB error's status
+ * and a clamped, redacted view of the response body — never a full data URL
+ * or a long base64 run. Returns "" for anything that is not an error object.
+ */
+export function describeSnapshotWriteError(error: unknown): string {
+  const err = error as {
+    status?: number;
+    data?: unknown;
+    response?: { status?: number; data?: unknown };
+    message?: string;
+  } | null | undefined;
+  if (!err || typeof err !== "object") return "unknown error";
+  const status =
+    typeof err.status === "number"
+      ? err.status
+      : typeof err.response?.status === "number"
+        ? err.response.status
+        : undefined;
+  const rawBody = err.data ?? err.response?.data;
+  let body = "";
+  if (rawBody && typeof rawBody === "object") {
+    const record = rawBody as Record<string, unknown>;
+    const nested =
+      record.data && typeof record.data === "object"
+        ? (record.data as Record<string, unknown>)
+        : null;
+    // Prefer the nested validation detail (PB wraps the field-level message —
+    // e.g. validation_json_size_limit — inside data.data), then the outer
+    // message, then the error code.
+    body =
+      nested && typeof nested.message === "string"
+        ? nested.message
+        : nested && typeof nested.code === "string"
+          ? nested.code
+          : typeof record.message === "string"
+            ? record.message
+            : "";
+    if (!body) {
+      try {
+        body = JSON.stringify(rawBody);
+      } catch {
+        body = "";
+      }
+    }
+  } else if (typeof rawBody === "string") {
+    body = rawBody;
+  } else if (typeof err.message === "string") {
+    body = err.message;
+  }
+  const redacted = redactLogText(body);
+  return [status !== undefined ? `status=${status}` : "", redacted ? `body=${redacted}` : ""]
+    .filter(Boolean)
+    .join(" ");
+}
 
 export type SnapshotTask = Record<string, any> & {
   id: number;
@@ -291,7 +355,25 @@ function parseJSON<T>(value: unknown, fallback: T): T {
 
 function parseSnapshotData(value: unknown): SnapshotData {
   const parsed = parseJSON<unknown>(value, {});
-  return isObjectRecord(parsed) ? (parsed as SnapshotData) : {};
+  if (!isObjectRecord(parsed)) return {} as SnapshotData;
+  const data = parsed as SnapshotData;
+  if (!Array.isArray(data.tasks)) return data;
+  // Slim-on-read heal (2026-10-05 incident): the live blob still holds
+  // 105-246KB photo data URLs inside tasks[].assigneeEmoji / crew[].emoji
+  // (~800KB of the ~960KB row). Slimming on READ means every snapshot write
+  // that goes through this funnel (claim/approve/manage/config/rollover/day
+  // sweep) persists the slimmed blob, while the read-side slim alone never
+  // bumps the revision — so the reconciler's finalStateChanged guard and the
+  // sync route's expectedRevision CAS stay byte-stable. Idempotent: a settled
+  // slim is a no-op that returns the same task objects.
+  let changed = false;
+  const tasks = data.tasks.map((task) => {
+    if (!isObjectRecord(task)) return task;
+    const slimmed = slimTaskEmojis(task);
+    if (slimmed !== task) changed = true;
+    return slimmed;
+  });
+  return changed ? { ...data, tasks } : data;
 }
 
 function decimalRevision(value: unknown): string {
@@ -1250,8 +1332,8 @@ export async function persistSnapshotWeek(
         revision: { revision, updatedAt },
       };
     });
-  } catch {
-    console.warn("[persistSnapshotWeek] snapshot persist failed");
+  } catch (error) {
+    console.warn(`[persistSnapshotWeek] snapshot persist failed: ${describeSnapshotWriteError(error)}`);
     return {
       ok: false,
       revision: { revision: currentRevision, updatedAt: currentUpdatedAt },
@@ -1336,7 +1418,8 @@ export async function replaceSnapshotWeekData(
         revision: { revision, updatedAt },
       };
     });
-  } catch {
+  } catch (error) {
+    console.warn(`[replaceSnapshotWeekData] snapshot persist failed: ${describeSnapshotWriteError(error)}`);
     return {
       ok: false,
       revision: { revision: currentRevision, updatedAt: currentUpdatedAt },

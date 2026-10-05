@@ -15,7 +15,13 @@ interface YourCardProps {
 export default function YourCard({ entry, aheadEntry, getMemberColor, allTimeRead }: YourCardProps) {
   if (!entry) return null;
   const color = getMemberColor(entry.name);
-  const gap = aheadEntry ? aheadEntry.points - entry.points : 0;
+  // A tie means the member AHEAD is level, never behind them.
+  const gap = aheadEntry ? Math.max(0, aheadEntry.points - entry.points) : 0;
+  // Rank 1 on ZERO points is only possible when the whole family is at zero
+  // (nobody can be strictly above you), so this single test IS the "the week
+  // has points" question — no new prop, and the crown cannot be claimed on a
+  // Monday-morning week the page calls "up for grabs".
+  const leadsOnPoints = entry.rank === 1 && entry.points > 0;
 
   return (
     <div
@@ -29,16 +35,18 @@ export default function YourCard({ entry, aheadEntry, getMemberColor, allTimeRea
       <div className="flex items-center gap-3">
         <Avatar name={entry.name} color={color} emoji={entry.emoji} size="sm" variant="emoji" />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-bold text-text-primary">#{entry.rank}</span>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="text-lg font-bold text-text-primary display-numeral">#{entry.rank}</span>
             <span className="text-sm text-text-secondary">—</span>
-            <span className="font-bold text-[var(--color-accent-selected)]">{entry.points} pts</span>
-            <span className="text-xs text-text-muted">· <AllTimeValue points={entry.allTimePoints} read={allTimeRead.state} updatedAt={allTimeRead.updatedAt} /></span>
+            <span className="font-bold text-[var(--color-accent-selected)] display-numeral">{entry.points} pts</span>
+            <span className="text-xs text-text-muted">
+              · <AllTimeValue points={entry.allTimePoints} read={allTimeRead.state} updatedAt={allTimeRead.updatedAt} />
+            </span>
             <span className="text-xs text-text-muted">{entryLevelLabel(entry)}</span>
           </div>
           <div className="mt-1 text-xs">
-            {entry.rank === 1 ? (
-              <span className="text-[var(--color-accent-amber)] font-semibold">👑 You&apos;re in the lead!</span>
+            {leadsOnPoints ? (
+              <span className="text-[var(--color-accent-ink-amber)] font-semibold">👑 You&apos;re in the lead!</span>
             ) : gap > 0 ? (
               <span className="text-text-secondary">
                 {gap} pts behind {aheadEntry?.name?.split(" ")[0]} — you can catch up!
@@ -47,12 +55,12 @@ export default function YourCard({ entry, aheadEntry, getMemberColor, allTimeRea
               <span className="text-text-muted">Complete tasks to climb the board!</span>
             )}
             {entry.streak > 0 && (
-              <span className="ml-2 text-[var(--color-accent-amber)] font-semibold">🔥{entry.streak}d streak</span>
+              <span className="ml-2 text-[var(--color-accent-ink-amber)] font-semibold">🔥 {entry.streak}d streak</span>
             )}
           </div>
         </div>
-        <div className="h-12 w-12 rounded-2xl flex items-center justify-center text-2xl"
-          style={{ background: `${color}15` }}>
+        <div className="h-12 w-12 shrink-0 rounded-2xl flex items-center justify-center text-2xl"
+          style={{ background: `color-mix(in srgb, ${color} 16%, transparent)` }}>
           {entry.levelKnown ? entry.levelEmoji : "❔"}
         </div>
       </div>

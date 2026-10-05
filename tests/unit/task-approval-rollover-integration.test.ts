@@ -12,7 +12,14 @@ vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
-vi.mock("@/lib/server-auth", () => ({
+// Only the PIN verifier is stubbed. `requireLiveSession` must stay REAL: the
+// sync GET authorizes itself with it before any of its write legs, and this
+// suite's whole point is that the REAL rollover and reconciler run behind it —
+// so the gate is driven against the harness's live member row rather than
+// replaced. Spreading the original module is the same idiom
+// `task-route-auth-and-honesty.test.ts` uses for its other seams.
+vi.mock("@/lib/server-auth", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   verifyPinFromPB: mocks.verifyPinFromPB,
 }));
 
@@ -21,6 +28,7 @@ import { POST } from "@/app/api/tasks/approve/route";
 import { approvalCommandFingerprint } from "@/lib/task-approval";
 import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
 import { __resetWeekLedgerLockForTests } from "@/lib/week-ledger-lock";
+import { SESSION_COOKIE, signSession } from "@/lib/session";
 
 type Row = Record<string, any>;
 
@@ -28,6 +36,13 @@ const PRIOR = "2026-09-21";
 const CURRENT = "2026-09-28";
 const NOW = new Date("2026-09-28T12:00:00-04:00");
 const OPERATION_ID = "op-real-rollover-replay";
+
+// The sync GET takes the request and authorizes itself with `requireLiveSession`
+// as its first statement, so it needs a genuinely signed session cookie — the
+// same HMAC shape `tasks-sync-legs.test.ts` builds. The signed role has to
+// match the harness's LIVE `parent-rebecca` row, because the real gate
+// re-reads it and refuses 403 on drift.
+const LIVE_MEMBER = { id: "parent-rebecca", name: "Rebecca (Mom)", role: "parent", emoji: "👩" };
 
 function createHarness() {
   const state: Record<string, Row[]> = {
@@ -165,9 +180,23 @@ function request() {
   });
 }
 
+async function syncRequest() {
+  const token = await signSession({
+    memberId: LIVE_MEMBER.id,
+    name: LIVE_MEMBER.name,
+    role: LIVE_MEMBER.role,
+  });
+  return new NextRequest("http://localhost/api/tasks/sync", {
+    headers: { cookie: `${SESSION_COOKIE}=${token}` },
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
+  // The sync GET's route-level gate verifies a real HMAC cookie; with no secret
+  // every token is refused and the leg is unreachable.
+  vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
   __resetKeyedLockForTests();
   __resetWeekLedgerLockForTests();
   mocks.verifyPinFromPB.mockResolvedValue({
@@ -180,6 +209,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   __resetKeyedLockForTests();
   __resetWeekLedgerLockForTests();
 });
@@ -258,7 +288,7 @@ describe("approval with the real task-week rollover", () => {
     });
     mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
 
-    const response = await GET();
+    const response = await GET(await syncRequest());
     const body = await response.json();
 
     expect(response.status).toBe(200);

@@ -237,7 +237,7 @@ export default function PlanTab({
           onClick={() => setMealFilter(null)}
           className={`shrink-0 cursor-pointer rounded-full min-h-11 px-3.5 py-1.5 text-xs font-bold tap-sm ${
             !mealFilter
-              ? "bg-[var(--color-accent-selected)] text-white"
+              ? "bg-[color-mix(in_srgb,var(--color-accent-selected)_60%,black)] text-white"
               : "glass-subtle text-text-secondary hover:text-text-primary"
           }`}
         >
@@ -254,7 +254,7 @@ export default function PlanTab({
                   : "glass-subtle text-text-secondary hover:text-text-primary"
               }`}
               style={mealFilter === type.id ? {
-                backgroundColor: slotColorVar(type.id),
+                backgroundColor: `color-mix(in srgb, ${slotColorVar(type.id)} 60%, black)`,
               } : undefined}
             >
               <span className="text-sm">{type.icon}</span>
@@ -449,7 +449,7 @@ export default function PlanTab({
                               </div>
                             </div>
                           )}
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs font-semibold text-text-muted">
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs font-semibold text-text-secondary">
                             {display.calories > 0 && (
                               <span className="glass-subtle rounded-full px-2 py-0.5">🔥 {display.calories} kcal</span>
                             )}
@@ -498,7 +498,7 @@ export default function PlanTab({
                     }`}
                     style={isPickerOpen ? { borderLeftColor: slotColorVar(type.id), borderLeftWidth: "4px" } : undefined}
                   >
-                    <span className={`text-lg transition-colors ${isPickerOpen ? "opacity-100" : "opacity-50 group-hover:opacity-100"}`}>
+                    <span className="text-lg transition-colors">
                       {type.icon}
                     </span>
                     {isPickerOpen ? `Hide ${type.label} ideas ↑` : `Plan ${type.label}`}

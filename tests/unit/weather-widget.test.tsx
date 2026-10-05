@@ -1350,7 +1350,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
       delete document.documentElement.dataset.theme;
     }
   });
-  it.each(["light", "dark"] as const)("keeps storm header chrome readable over the actual glass composite in the %s theme", async (theme) => {
+  it.each(["light", "dark"] as const)("keeps storm header chrome readable over the dark wash in the %s theme", async (theme) => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "day", season: "summer", holidayOverride: "christmas" }));
     try {
@@ -1366,7 +1366,12 @@ describe("WeatherWidget — Not Boring redesign", () => {
       const holiday = Array.from(el.querySelectorAll<HTMLElement>("span")).find(
         (node) => node.className.includes("uppercase") && node.textContent?.includes("Christmas")
       );
-      const surfaces = stormHeaderSurfaces();
+      // The 2026-10-05 visual-critic wave: the storm pill's white-glass model
+      // (`stormHeaderSurfaces()`) let chromeInk measure 2.50:1 on the real
+      // painted canvas, because no ink can clear both the raw stop and the
+      // white-glass lift at once. The pill now carries a DARK glass wash
+      // (deterministic backdrop) and the ink walks over the RAW stops.
+      const surfaces = ["#656399", "#5F5D93", "#58568E"];
       const holidaySurfaces = surfaces.map((surface) => compositeHex("#ef4444", surface, 0x22 / 255));
 
       expect(hero.style.color).toBe("rgb(255, 255, 255)");
@@ -1378,6 +1383,8 @@ describe("WeatherWidget — Not Boring redesign", () => {
       expect(holiday).toBeTruthy();
       if (!location || !details || !holiday) return;
 
+      expect(locationChip?.getAttribute("style") ?? "").toContain("linear-gradient(135deg, rgba(10,");
+      expect(details?.getAttribute("style") ?? "").toContain("linear-gradient(135deg, rgba(10,");
       expect(location.style.color).not.toBe(hero.style.color);
       expect(Math.min(...surfaces.map((surface) => contrastRatio(location.style.color, surface)))).toBeGreaterThanOrEqual(4.5);
       expect(Math.min(...surfaces.map((surface) => contrastRatio(details.style.color, surface)))).toBeGreaterThanOrEqual(4.5);

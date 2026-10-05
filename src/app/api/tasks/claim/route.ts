@@ -14,9 +14,36 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// B6: this route is in the middleware's API_EXEMPT list, so no gate runs ahead
+// of it and it must bound the body ITSELF, and do so BEFORE it reads —
+// otherwise an unauthenticated caller on the LAN can make the server buffer an
+// arbitrarily large JSON body before deciding the caller has no PIN, which is a
+// memory-exhaustion primitive against a single-container NAS. The declared
+// Content-Length is checked first (the cheap, pre-read case) and the ACTUAL byte
+// length after the read, because a chunked body may omit or understate the
+// header. The reason code is `payload_too_large`, the same as
+// `/api/tasks/ledger`, so all three middleware-exempt PIN routes agree.
+//
+// The VALUE is not the ledger route's 4 KiB, and cannot be: `parseClaimCommand`
+// admits an `assigneeEmoji` of up to 400,000 characters (`src/lib/task-claim.ts`
+// ) — a base64 photo data-URL for a photo-assignee chore, a real supported
+// completion body. A 4 KiB bound would 413 a value the parser documents as
+// valid. 1 MiB admits that ceiling with room for astral characters (400,000
+// UTF-16 units can be ~800 KB of UTF-8) plus JSON overhead, and is still a hard
+// ceiling rather than "whatever the caller sends".
+const MAX_BODY_BYTES = 1024 * 1024;
+
 type AuthResult =
   | { ok: true; actor: ClaimActor }
-  | { ok: false; status: 400 | 401 | 403 | 503; reason: string };
+  | { ok: false; status: 400 | 401 | 403 | 413 | 503; reason: string };
+
+// B7: `member_roster_unavailable` is a 503 the client MUST be able to tell from
+// a wrong PIN, so the retryable flag is stated explicitly rather than left to
+// the status code alone.
+const RETRYABLE_REASONS = new Set([
+  "member_roster_unavailable",
+  "task_store_unavailable",
+]);
 
 function errorResponse(
   operationId: string,
@@ -25,16 +52,25 @@ function errorResponse(
   action?: string,
   claimedBy?: string,
 ) {
+  // B7: `error` is the DISPLAY channel the outbox reads through
+  // `serverMessageOf`, and this route was the only PIN command route that left
+  // it empty — so a queued claim always rendered a bare reason slug. `code`
+  // mirrors the machine reason so a caller reading only that channel is not
+  // guessing either. Neither ever carries a PocketBase error string.
   return NextResponse.json({
     success: false,
     operationId,
     ...(action ? { action } : {}),
     reason,
+    error: reason,
+    code: reason,
+    ...(RETRYABLE_REASONS.has(reason) ? { retryable: true } : {}),
     ...(claimedBy ? { claimedBy } : {}),
   }, { status });
 }
 
 function statusForReason(reason: ClaimFailureReason | string): number {
+  if (reason === "payload_too_large") return 413;
   if (reason === "unknown_task") return 404;
   if (
     reason === "unauthorized" ||
@@ -163,9 +199,22 @@ function successResponse(result: ClaimServiceResult) {
 }
 
 export async function POST(request: NextRequest) {
+  // Size guard, BEFORE any credential work.
+  const oversized = () => errorResponse("", "payload_too_large", 413);
+  const declared = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return oversized();
+
+  let text: string;
+  try {
+    text = await request.text();
+  } catch {
+    return errorResponse("", "invalid_body", 400);
+  }
+  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) return oversized();
+
   let rawBody: unknown;
   try {
-    rawBody = await request.json();
+    rawBody = JSON.parse(text);
   } catch {
     return errorResponse("", "invalid_body", 400);
   }

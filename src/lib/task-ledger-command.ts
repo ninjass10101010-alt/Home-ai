@@ -22,7 +22,19 @@ export type LedgerCommandAction = "penalty" | "adjust";
 export interface LedgerCommand {
   operationId: string;
   action: LedgerCommandAction;
+  /**
+   * The ACTOR: the member whose PIN this command presents. It is authenticated
+   * and its live role is required to be `parent` before anything is written. It
+   * is NOT who the points move.
+   */
   memberName: string;
+  /**
+   * The TARGET: the member whose balance actually moves. Optional, and it
+   * defaults to the actor, so a same-member command is unchanged — but a parent
+   * moving a child's points is the ordinary case and needs the two identities
+   * kept apart.
+   */
+  targetMemberName?: string;
   memberId: string;
   pin: string;
   itemId?: string | number;
@@ -35,6 +47,7 @@ export type LedgerFailureReason =
   | "invalid_body"
   | "invalid_action"
   | "unknown_member"
+  | "pet_target"
   | "unauthorized"
   | "adult_only"
   | "unknown_penalty"
@@ -42,6 +55,7 @@ export type LedgerFailureReason =
   | "insufficient_balance"
   | "operation_conflict"
   | "ledger_unavailable"
+  | "member_roster_unavailable"
   | "snapshot_write_failed";
 
 export interface LedgerCommandResult {
@@ -97,6 +111,12 @@ function optionalId(value: unknown): string | undefined {
  * penalty from the config snapshot); an `adjust` carries an explicit amount and
  * an optional reason. Authority fields (`points` on a penalty, the balance, the
  * resulting week) are refused rather than ignored.
+ *
+ * `memberName` is the PIN-VERIFIED ACTOR and `targetMemberName` is the member
+ * whose balance moves; the target is OPTIONAL and defaults to the actor, so a
+ * same-member call parses to exactly the command it always did. A target that is
+ * present but names nobody is refused outright — silently falling back to the
+ * actor would move a real family's points to the wrong person.
  */
 export function parseLedgerCommand(value: unknown): ParseLedgerCommandResult | ParseLedgerCommandError {
   if (!isRecord(value)) {
@@ -118,6 +138,18 @@ export function parseLedgerCommand(value: unknown): ParseLedgerCommandResult | P
   if (!pin) {
     return { ok: false, reason: "unauthorized", operationId };
   }
+  // Absent or null target = "the actor is the target" (the pre-split shape, so
+  // the key never appears on the command). Anything else must name somebody.
+  let targetMemberName: string | undefined;
+  if (value.targetMemberName !== undefined && value.targetMemberName !== null) {
+    const requested = typeof value.targetMemberName === "string"
+      ? value.targetMemberName.trim()
+      : "";
+    if (!requested) {
+      return { ok: false, reason: "invalid_body", operationId };
+    }
+    targetMemberName = requested;
+  }
   // A penalty's POINTS are never a client input: the catalog leg decides them.
   // An adjust's amount may be signed (a deduction is an adjust too); the
   // non-negative BALANCE is the ledger helper's job, not the parser's.
@@ -135,7 +167,14 @@ export function parseLedgerCommand(value: unknown): ParseLedgerCommandResult | P
     if (!itemId) return { ok: false, reason: "invalid_body", operationId };
     return {
       ok: true,
-      command: { operationId, action, memberName, pin, itemId },
+      command: {
+        operationId,
+        action,
+        memberName,
+        ...(targetMemberName !== undefined ? { targetMemberName } : {}),
+        pin,
+        itemId,
+      },
     };
   }
 
@@ -144,14 +183,33 @@ export function parseLedgerCommand(value: unknown): ParseLedgerCommandResult | P
     return { ok: false, reason: "invalid_task_state", operationId };
   }
   const reason = optionalText(value.reason) ?? "";
-  return { ok: true, command: { operationId, action: action as LedgerCommandAction, memberName, pin, amount, reason } };
+  return {
+    ok: true,
+    command: {
+      operationId,
+      action: action as LedgerCommandAction,
+      memberName,
+      ...(targetMemberName !== undefined ? { targetMemberName } : {}),
+      pin,
+      amount,
+      reason,
+    },
+  };
 }
 
+/**
+ * The movement's identity, so a replayed `operationId` is recognised and a
+ * reused one against a DIFFERENT movement is a conflict. `member` is the TARGET
+ * (the balance that moves); the author is already pinned by `actorId`. For a
+ * command with no explicit target this is byte-for-byte the pre-split value, so
+ * an in-flight replay across a deploy still matches its own receipt.
+ */
 function ledgerCommandFingerprint(command: LedgerCommand): string {
+  const targetName = command.targetMemberName?.trim() || command.memberName;
   return createHash("sha256")
     .update(JSON.stringify({
       action: command.action,
-      member: command.memberName,
+      member: targetName,
       actorId: command.memberId,
       ...(command.itemId !== undefined ? { itemId: String(command.itemId) } : {}),
       ...(command.amount !== undefined ? { amount: command.amount } : {}),
@@ -163,6 +221,7 @@ function ledgerCommandFingerprint(command: LedgerCommand): string {
 interface ResolvedRosterMember {
   id: string;
   fullName: string;
+  role: string;
 }
 
 function sameName(left: string, right: string): boolean {
@@ -290,15 +349,21 @@ async function readCatalogPenalty(pb: AdminPB, itemId: string): Promise<PenaltyC
  * locked ledger helper the approval command uses, so operationId replay,
  * fingerprints, non-negative balances, the snapshot projection and the repair
  * marker all behave identically to an approval.
+ *
+ * The AUTHOR and the SUBJECT are separate: `memberId` is the live parent whose
+ * PIN was verified (it is written as `appliedBy` / `actorId` for the audit
+ * trail), while the balance that moves belongs to the TARGET, resolved here from
+ * the live roster rather than from the actor's identity.
  */
 export async function executeLedgerCommand(command: LedgerCommand): Promise<LedgerCommandResult> {
   let roster: ResolvedRosterMember[];
   try {
     roster = (await getLiveMembers())
-      .filter((member) => member.role !== "pet")
-      .map((member) => ({ id: member.id, fullName: member.name }));
+      .map((member) => ({ id: member.id, fullName: member.name, role: member.role }));
   } catch {
-    return failure(command.operationId, command.action, "ledger_unavailable", emptyWeekData());
+    // A roster we could not read is an OUTAGE, not a refusal: the family must be
+    // able to tell "Consuela is unreachable, try again" from "that PIN is wrong".
+    return failure(command.operationId, command.action, "member_roster_unavailable", emptyWeekData());
   }
 
   let weekStart: string;
@@ -313,9 +378,18 @@ export async function executeLedgerCommand(command: LedgerCommand): Promise<Ledg
     return failure(command.operationId, command.action, "ledger_unavailable", emptyWeekData());
   }
 
-  const target = resolveMember(roster, command.memberName);
+  // The target defaults to the actor, so an existing same-member command lands
+  // on exactly the member it always did.
+  const requestedTarget = command.targetMemberName?.trim() || command.memberName;
+  const target = resolveMember(roster, requestedTarget);
   if (!target) {
+    // Never a silent fallback to the actor: an unknown name moves NO points.
     return failure(command.operationId, command.action, "unknown_member", emptyWeekData(weekStart));
+  }
+  if (target.role === "pet") {
+    // A pet is on the roster but can never hold points. Reporting it as an
+    // unknown member would be a lie about a name the family can see.
+    return failure(command.operationId, command.action, "pet_target", emptyWeekData(weekStart));
   }
 
   let resolved: ResolvedEntry | null = null;

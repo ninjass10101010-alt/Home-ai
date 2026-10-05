@@ -33,6 +33,13 @@ export interface UseTaskOperationOutboxResult {
   onAcknowledged: (listener: (acknowledgement: TaskOutboxAcknowledgedEvent) => void) => () => void;
   pending: number;
   queued: number;
+  /**
+   * Entries sitting in a backoff — the request already went out and the server
+   * said "later". Exposed SEPARATELY from `queued` because a single entry can
+   * be five minutes from its next attempt, and "Sending N changes" is a
+   * different promise from "N will be retried".
+   */
+  retrying: number;
   reconciling: number;
   authRequired: number;
   failed: number;
@@ -100,10 +107,18 @@ export function useTaskOperationOutbox(
     const reconciling = entries.filter((entry) => entry.status === "reconciling").length;
     const authRequired = entries.filter((entry) => entry.status === "auth-required").length;
     const failed = entries.filter((entry) => entry.status === "failed").length;
+    const retrying = entries.filter((entry) => entry.status === "retrying").length;
     return {
       entries,
       pending: entries.length,
+      // `queued` stays "in flight or about to be": it deliberately still folds
+      // `retrying` in, because the banners that render it promise an imminent
+      // send and a 2-second backoff is imminent — and because a renderer that
+      // asked for "exactly queued" would show nothing at all during a normal
+      // transient failure. `retrying` is exposed above so a renderer can split
+      // the long waits out without guessing from `entries`.
       queued: entries.length - reconciling - authRequired - failed,
+      retrying,
       reconciling,
       authRequired,
       failed,

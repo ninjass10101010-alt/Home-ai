@@ -324,7 +324,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
               <button
                 ref={primaryActionRef}
                 onClick={closeFlow}
-                className="min-h-[44px] w-full rounded-2xl bg-[var(--color-accent-button,var(--color-accent-selected))] px-3 py-2 text-sm font-semibold text-white tap"
+                className="min-h-[44px] w-full rounded-2xl bg-[color-mix(in_srgb,var(--color-accent-selected)_60%,black)] px-3 py-2 text-sm font-semibold text-white tap"
               >
                 Done
               </button>
@@ -391,7 +391,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
             <button
               onClick={closeFlow}
               disabled={isSending}
-              className="w-full mt-3 min-h-[44px] px-3 py-2 rounded-2xl glass text-text-secondary text-sm disabled:opacity-50"
+              className="w-full mt-3 min-h-[44px] px-3 py-2 rounded-2xl material-regular text-text-secondary text-sm disabled:opacity-50"
             >
               Cancel
             </button>

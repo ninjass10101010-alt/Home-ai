@@ -159,7 +159,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
 
                 {item.member && (
                   <span
-                    className="text-xs px-2 py-0.5 rounded-full text-text-primary shrink-0 glass-subtle"
+                    className="text-xs px-2 py-0.5 rounded-full text-text-primary shrink-0 material-thin"
                     style={{
                       background: getMemberPillBg(item.color || "green"),
                     }}

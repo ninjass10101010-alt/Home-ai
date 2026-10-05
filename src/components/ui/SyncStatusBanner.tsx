@@ -38,7 +38,12 @@ export default function SyncStatusBanner({
       <Link
         href="/settings"
         data-testid="sync-status-banner-signin"
-        className="underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-amber)]"
+        /* `.hit-44` because this link measured 145.9 × 19.5 CSS px — a 19.5px
+           target for the one action the banner exists to offer, on every route
+           that renders PageShell. The centred `::before` grows the hit box to
+           44 × 44 with no layout change, which is the documented pattern for a
+           control that must stay visually compact. */
+        className="hit-44 underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-amber)]"
       >
         Sign in with your PIN →
       </Link>

@@ -650,19 +650,43 @@ describe("single in-flight flush and cross-tab subscription", () => {
     expect(listTaskOutbox()).toHaveLength(0);
   });
 
-  it("gives different drivers their own in-flight flush", async () => {
+  it("gives different drivers their own in-flight flush, and never re-POSTs one on the wire", async () => {
+    // Two hand-built drivers are two pumps: the guard is keyed on the outbox for a
+    // REGISTERED driver (a remount swaps the driver object, and keying on it meant
+    // the second pump walked the same entries), but a driver handed straight to
+    // `flushTaskOutbox` keeps a pump of its own.
     enqueueClaim();
-    const firstSend = vi.fn(async () => ({ status: 200, body: ack("op-claim-1") }));
-    const secondSend = vi.fn(async () => ({ status: 200, body: ack("op-claim-1") }));
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const firstSend = vi.fn(async (entry: TaskOutboxEntry) => {
+      await gate;
+      return { status: 200, body: ack(entry.operationId) };
+    });
+    const secondSend = vi.fn(async (entry: TaskOutboxEntry) => ({
+      status: 200,
+      body: ack(entry.operationId),
+    }));
     const firstDriver = { send: firstSend, onAcknowledged: ADOPT_NOOP, adoptSnapshot: ADOPT_NOOP };
     const secondDriver = { send: secondSend, onAcknowledged: ADOPT_NOOP, adoptSnapshot: ADOPT_NOOP };
 
     const first = flushTaskOutbox(firstDriver);
     const second = flushTaskOutbox(secondDriver);
     expect(second).not.toBe(first);
-    await Promise.all([first, second]);
+
+    release();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    // The operation went on the wire ONCE. The second pump found it already in
+    // flight and had nothing of its own to do: re-POSTing the same operationId
+    // also computed `attemptCount` from the same stale value, so the retry budget
+    // under-counted and one pump could overwrite the other's terminal state.
     expect(firstSend).toHaveBeenCalledTimes(1);
-    expect(secondSend).toHaveBeenCalledTimes(1);
+    expect(secondSend).not.toHaveBeenCalled();
+    expect(firstResult).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(secondResult).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
   });
 
   it("keeps notifying subscribers after one throws", () => {
@@ -1222,7 +1246,7 @@ describe("auth recovery and classification", () => {
     expect(listTaskOutbox()).toHaveLength(0);
   });
 
-  it("retains a session-gated 401 indefinitely on a capped ladder and never fails it", async () => {
+  it("ends a session-gated 401 ladder at the attempt ceiling instead of retrying forever", async () => {
     enqueueTaskOperation({
       operationId: "op-manage-session",
       route: "/api/tasks/manage",
@@ -1235,25 +1259,37 @@ describe("auth recovery and classification", () => {
       body: errorAck("op-manage-session", { reason: "unauthorized" }),
     }));
 
-    for (let index = 0; index < 12; index += 1) {
+    // Every 401 takes the deferred `auth-required` branch, and that branch had no
+    // ceiling: the entry re-POSTed itself on the 2s→30min auth ladder forever, under
+    // copy that promises a PIN — but an expired session is fixed by a re-login, not
+    // by a PIN, so that copy was actively wrong.
+    for (let index = 0; index < TASK_OUTBOX_MAX_ATTEMPTS - 1; index += 1) {
       expireBackoff("op-manage-session");
       const result = await flushWithAdoption({ send: unauthorized });
       expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+      const waiting = entryFor("op-manage-session");
+      expect(waiting.status).toBe("auth-required");
+      // The auth ladder is its own budget: it never spends the retry one.
+      expect(waiting.attemptCount).toBe(0);
     }
 
-    expect(unauthorized).toHaveBeenCalledTimes(12);
-    const blocked = entryFor("op-manage-session");
-    expect(blocked.status).toBe("auth-required");
-    expect(blocked.attemptCount).toBe(0);
-    expect(blocked.authAttemptCount).toBe(12);
-    expect(
-      Date.parse(blocked.nextAttemptAt ?? "") - Date.now(),
-    ).toBeLessThanOrEqual(TASK_OUTBOX_MAX_AUTH_BACKOFF_MS + 1_000);
-
+    // The ceiling send ends the ladder as a refusal, with the terminal event that
+    // releases the family's optimistic row.
     expireBackoff("op-manage-session");
-    const recovered = await flushWithAdoption({ send: respond(200, ack("op-manage-session")) });
-    expect(recovered).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
-    expect(listTaskOutbox()).toHaveLength(0);
+    const final = await flushWithAdoption({ send: unauthorized });
+    expect(final).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    expect(unauthorized).toHaveBeenCalledTimes(TASK_OUTBOX_MAX_ATTEMPTS);
+
+    const refused = entryFor("op-manage-session");
+    expect(refused.status).toBe("failed");
+    expect(refused.lastErrorReason).toBe("unauthorized");
+    expect(refused.nextAttemptAt).toBeUndefined();
+
+    // A failed entry is never sent again, however often it is pumped.
+    expireBackoff("op-manage-session");
+    const after = await flushWithAdoption({ send: unauthorized });
+    expect(after).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
+    expect(unauthorized).toHaveBeenCalledTimes(TASK_OUTBOX_MAX_ATTEMPTS);
   });
 
   it("caps the auth ladder and the reconcile ladder at their long backoff ceilings", () => {

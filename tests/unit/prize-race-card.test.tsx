@@ -193,7 +193,15 @@ describe("PrizeRaceCard", () => {
       expect(line!.textContent).not.toContain("30 pts");
     });
 
-    it("invites a zero-point member into the race when others have points", () => {
+    it("tells a 0-point member holding a prize rank the real distance, not 'join the race'", () => {
+      // Bailey is on 0 points with one member ahead of him, so his COMPETITION
+      // rank is 2 — a prize rank. `raceGap` used to short-circuit on zero and
+      // answer `rank: null`, and this card then said "Earn points to join this
+      // week's race!" while the list directly above it handed his rank to nobody
+      // ("Up for grabs"): two opposite stories on one screen, and the loser of
+      // the two was the kid. Zero points still HOLDS no prize — so he must not
+      // be congratulated — but he must be told the truth: the leader's 10 pts
+      // are the distance, and the list and the line now agree.
       const el = render(
         <PrizeRaceCard
           prizes={PRIZES}
@@ -202,9 +210,34 @@ describe("PrizeRaceCard", () => {
           myName="Bailey"
         />
       );
-      expect(el.querySelector("[aria-live='polite']")!.textContent).toContain(
-        "Earn points to join this week's race!"
+      const line = el.querySelector("[aria-live='polite']")!.textContent!;
+      expect(line).toContain("You're 10 pts from a prize — keep going!");
+      // Never a prize he cannot hold, and never the old "you are not in the
+      // race" loss-frame for a member the list itself ranks.
+      expect(line).not.toContain("prize spot");
+      expect(line).not.toContain("You're in the lead");
+      expect(line).not.toContain("Earn points to join");
+      // …and it agrees with the list: his rank holds nothing yet.
+      expect(prizeRow(el, "Chooses dessert")!.textContent).toContain("Up for grabs");
+    });
+
+    it("invites a member in only when there is no distance to measure, never inventing one", () => {
+      // Two tied leaders leave rank 2 EMPTY (standard competition rank), so no
+      // member currently holds the cutoff and there is no threshold to state a
+      // distance against. That — and only that — is the invitation's case: the
+      // line must not invent "N pts from a prize" the card cannot support.
+      const el = render(
+        <PrizeRaceCard
+          prizes={PRIZES}
+          entries={[entry("Rebecca", 50), entry("Emily", 50), entry("Bailey", 0)]}
+          daysUntilReset={4}
+          myName="Bailey"
+        />
       );
+      const line = el.querySelector("[aria-live='polite']")!.textContent!;
+      expect(line).toContain("Earn points to join this week's race!");
+      expect(line).not.toMatch(/\d+ pts from a prize/);
+      expect(line).not.toContain("prize spot");
     });
 
     it("renders no personal line when myName is not provided", () => {
@@ -219,20 +252,24 @@ describe("PrizeRaceCard", () => {
     });
   });
 
-  it("handles the countdown boundaries (0 = tonight, 1 = tomorrow, N = days)", () => {
-    const zero = render(
-      <PrizeRaceCard prizes={PRIZES} entries={[entry("Rebecca", 10)]} daysUntilReset={0} />
-    );
-    expect(zero.textContent).toContain("Resets tonight!");
-
+  it("the countdown copy covers its real 1..7 range (1 = tomorrow, N = days)", () => {
+    // `getDaysUntilWeekReset()` returns 1..7 by construction — a Monday maps to
+    // 7, because the race runs Monday 00:00 → Sunday 23:59, so the reset is a
+    // full week away and the week never ends at midnight. There is therefore no
+    // "tonight" state to render, and the `daysUntilReset <= 0` arm that produced
+    // "Resets tonight!" was deleted: it could only ever fire on the one day the
+    // race had just begun. Every value the helper can return is checked.
     const one = render(
       <PrizeRaceCard prizes={PRIZES} entries={[entry("Rebecca", 10)]} daysUntilReset={1} />
     );
-    expect(one.textContent).toContain("Resets tomorrow");
+    expect(one.textContent).toContain("⏳ Resets tomorrow");
 
-    const many = render(
-      <PrizeRaceCard prizes={PRIZES} entries={[entry("Rebecca", 10)]} daysUntilReset={4} />
-    );
-    expect(many.textContent).toContain("⏳ Resets in 4 days");
+    for (const days of [2, 3, 4, 5, 6, 7]) {
+      const el = render(
+        <PrizeRaceCard prizes={PRIZES} entries={[entry("Rebecca", 10)]} daysUntilReset={days} />
+      );
+      expect(el.textContent, `daysUntilReset=${days}`).toContain(`⏳ Resets in ${days} days`);
+      expect(el.textContent, `daysUntilReset=${days}`).not.toContain("tonight");
+    }
   });
 });

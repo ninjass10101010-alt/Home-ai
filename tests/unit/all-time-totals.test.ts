@@ -259,8 +259,11 @@ describe("all-time totals — history shape and completion counting", () => {
       [{ weekStart: "2026-09-14", points: { "Member A": 777, "Member B": 777 }, history: [] }],
     );
     expect(payload.historyComplete).toBe(true);
-    expect(payload.totals["Member A"]).toEqual({ points: 0, completions: 0 });
-    expect(payload.totals["Member B"]).toEqual({ points: 0, completions: 0 });
+    // The stored map is never authority, and a name that appears ONLY there has
+    // no canonical history to compute from — so the honest answer is `null`,
+    // never a confident 0 (the project's absolute rule).
+    expect(payload.totals["Member A"]).toEqual({ points: null, completions: null });
+    expect(payload.totals["Member B"]).toEqual({ points: null, completions: null });
   });
 
   it("keeps members only present in the stored points map in the payload", () => {
@@ -273,7 +276,9 @@ describe("all-time totals — history shape and completion counting", () => {
     );
     expect(payload.historyComplete).toBe(true);
     expect(payload.totals["Member A"]).toEqual({ points: 5, completions: 1 });
-    expect(payload.totals["Member C"]).toEqual({ points: 0, completions: 0 });
+    // Still carried in the payload (the name is not dropped), but its total is
+    // unknown rather than a fabricated 0.
+    expect(payload.totals["Member C"]).toEqual({ points: null, completions: null });
   });
 
   it("adds per-member balances across the whole history", () => {
