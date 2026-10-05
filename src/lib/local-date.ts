@@ -61,9 +61,15 @@ export function localDateOfStoredDate(value: string | null | undefined): string 
 }
 
 export function localPreviousDayISO(iso: string): string {
+  return localDayPlusISO(iso, -1);
+}
+
+/** `iso` shifted by `days` local calendar days (negative = back). Local noon
+ *  anchors the arithmetic, so DST transitions never smear the day, and the
+ *  result is serialized in the family timezone (not UTC). */
+export function localDayPlusISO(iso: string, days: number): string {
   const d = new Date(`${iso}T12:00:00`);
-  d.setDate(d.getDate() - 1);
-  // Serialize in the family timezone (not UTC) so this is correct in any zone.
+  d.setDate(d.getDate() + days);
   return d.toLocaleString("en-CA", { timeZone: familyTimeZone() }).split(",")[0];
 }
 

@@ -97,6 +97,7 @@ describe("kid tool surface", () => {
       "get_todays_events",
       "get_todays_schedule",
       "get_weather",
+      "get_week_events",
       "get_weekly_meals",
     ]);
   });
