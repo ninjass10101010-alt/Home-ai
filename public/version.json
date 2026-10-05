@@ -1,7 +1,7 @@
 {
-  "hash": "bd9ffaec9dc37663903142846e792238fcb4fcfa",
-  "short": "bd9ffae",
-  "message": "docs(photos): record visual verification pass (isolated build, harness)",
-  "date": "2026-10-05 13:46:12 -0400",
+  "hash": "8dee42512fac5a506b3af2da4bf5417802ef6369",
+  "short": "8dee425",
+  "message": "fix(tasks): task-page integrity wave — TZ axis, snapshot cap incident, ledger actor/target, outbox lifecycle, week machinery, UI polish",
+  "date": "2026-10-05 19:54:13 -0400",
   "author": "GarciaFam"
 }
