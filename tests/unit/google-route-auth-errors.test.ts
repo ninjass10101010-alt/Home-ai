@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   isGoogleConnected: vi.fn(),
+  readConnectionSnapshot: vi.fn(),
   authorizeAdminRequest: vi.fn(),
   authorizeCurrentParentRequest: vi.fn(),
   getStoredTokensStrict: vi.fn(),
@@ -39,6 +40,14 @@ vi.mock("@/lib/google/oauth-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/google/oauth-client")>();
   return { ...actual, isGoogleConnected: mocks.isGoogleConnected };
 });
+vi.mock("@/lib/google/connection-state", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/google/connection-state")>();
+  return {
+    ...actual,
+    isGoogleConnected: mocks.isGoogleConnected,
+    readConnectionSnapshot: mocks.readConnectionSnapshot,
+  };
+});
 vi.mock("@/lib/google/calendar", () => ({
   readCalendarSyncRows: mocks.readCalendarSyncRows,
   readCachedEvents: mocks.readCachedEvents,
@@ -74,6 +83,7 @@ vi.mock("@/lib/admin-auth", () => ({
 vi.mock("@/lib/server-auth", () => ({ authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest }));
 
 import { GoogleAuthError } from "@/lib/google/oauth-client";
+import { GoogleAuthError as ConnectionGoogleAuthError } from "@/lib/google/connection-state";
 import { GET as getCalendar } from "@/app/api/google-calendar/route";
 import { GET as getCalendars } from "@/app/api/google/calendars/route";
 import { GET as getTasks, POST as postTasks } from "@/app/api/google-tasks/route";
@@ -90,6 +100,13 @@ function request(path: string, body?: unknown) {
 beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockReset();
   mocks.isGoogleConnected.mockResolvedValue(true);
+  mocks.readConnectionSnapshot.mockResolvedValue({
+    connectedAccountId: null,
+    status: null,
+    accountEmail: null,
+    connectedAt: null,
+    lastVerifiedAt: null,
+  });
   mocks.authorizeAdminRequest.mockResolvedValue({ ok: true });
   mocks.authorizeCurrentParentRequest.mockResolvedValue({ ok: true, member: { id: "m1", role: "parent" } });
   mocks.getStoredTokensStrict.mockResolvedValue({
@@ -137,7 +154,7 @@ describe("GET /api/google-calendar auth errors", () => {
 
   it("returns unavailable when auth state cannot be read", async () => {
     mocks.isGoogleConnected.mockRejectedValueOnce(
-      new GoogleAuthError("unavailable", "PB unavailable"),
+      new ConnectionGoogleAuthError("unavailable", "PB unavailable"),
     );
 
     const response = await getCalendar(request("/api/google-calendar"));
@@ -150,7 +167,7 @@ describe("GET /api/google-calendar auth errors", () => {
     });
   });
 
-  it("does not report an absent direct grant as an alternate connected provider", async () => {
+  it("reports a missing connection snapshot as disconnected, never as Composio", async () => {
     mocks.isGoogleConnected.mockResolvedValue(false);
     mocks.readCachedEvents.mockResolvedValueOnce([{ google_id: "cached", summary: "Cached event" }]);
 
@@ -158,28 +175,68 @@ describe("GET /api/google-calendar auth errors", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, connected: false, source: "none", events: [] });
+    expect(body).toEqual({ ok: true, connected: false, source: "none", stale: true, events: [] });
     expect(body.source).not.toBe("composio");
   });
 
   it("keeps no_grant as a successful disconnected response", async () => {
     mocks.isGoogleConnected.mockRejectedValueOnce(
-      new GoogleAuthError("no_grant", "Google account is not connected"),
+      new ConnectionGoogleAuthError("no_grant", "Google account is not connected"),
     );
 
     const response = await getCalendar(request("/api/google-calendar"));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, connected: false });
+    expect(await response.json()).toMatchObject({ ok: true, connected: false, stale: true });
   });
 
-  it("keeps a strict no-grant metadata read as a successful disconnected response", async () => {
-    mocks.getStoredTokensStrict.mockResolvedValueOnce(null);
+  it("reports an ACTIVE Composio snapshot as google-sourced with provider composio", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValueOnce({
+      connectedAccountId: "composio-account-1",
+      status: "ACTIVE",
+      accountEmail: "family@example.com",
+      connectedAt: "2026-09-24T00:00:00.000Z",
+      lastVerifiedAt: "2026-09-24T00:00:00.000Z",
+    });
+    mocks.readCalendarSyncRows.mockResolvedValueOnce([
+      {
+        id: "r1",
+        calendar_id: "primary",
+        summary: "Primary",
+        color_rgb: "#111111",
+        selected: true,
+        sync_token: null,
+        last_sync_at: "2026-09-24T10:00:00.000Z",
+        last_status: "ok",
+        last_error: null,
+      },
+      {
+        id: "r2",
+        calendar_id: "school",
+        summary: "School",
+        color_rgb: null,
+        selected: true,
+        sync_token: null,
+        last_sync_at: "2026-09-25T10:00:00.000Z",
+        last_status: "ok",
+        last_error: null,
+      },
+    ]);
 
     const response = await getCalendar(request("/api/google-calendar"));
+    const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, connected: false });
+    expect(body).toMatchObject({
+      ok: true,
+      connected: true,
+      source: "google",
+      provider: "composio",
+      account_email: "family@example.com",
+      last_sync_at: "2026-09-25T10:00:00.000Z",
+      calendar_colors: { primary: "#111111" },
+    });
+    expect(body.source).not.toBe("composio");
   });
 
   it.each([
@@ -197,8 +254,8 @@ describe("GET /api/google-calendar auth errors", () => {
     expect(mocks.readCachedReminders).not.toHaveBeenCalled();
   });
 
-  it("returns unavailable when the strict metadata read fails", async () => {
-    mocks.getStoredTokensStrict.mockRejectedValueOnce(new Error("PB unavailable"));
+  it("returns unavailable when the connection snapshot read fails", async () => {
+    mocks.readConnectionSnapshot.mockRejectedValueOnce(new Error("PB unavailable"));
 
     const response = await getCalendar(request("/api/google-calendar"));
 
@@ -206,7 +263,7 @@ describe("GET /api/google-calendar auth errors", () => {
     expect(await response.json()).toEqual({
       ok: false,
       code: "unavailable",
-      error: "Google token state unavailable",
+      error: "Google connection state unavailable",
     });
   });
 });

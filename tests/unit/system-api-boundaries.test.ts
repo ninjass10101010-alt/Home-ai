@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   authorizeCurrentParentRequest: vi.fn(),
   authorizeAdminRequest: vi.fn(),
   verifySession: vi.fn(),
-  readPublicState: vi.fn(),
+  readConnectionSnapshot: vi.fn(),
   readCalendarSyncRows: vi.fn(),
   withAdmin: vi.fn(),
   isGoogleConnected: vi.fn(),
@@ -21,7 +21,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/server-auth", () => ({ authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest }));
 vi.mock("@/lib/admin-auth", () => ({ authorizeAdminRequest: mocks.authorizeAdminRequest }));
 vi.mock("@/lib/session", () => ({ verifySession: mocks.verifySession, SESSION_COOKIE: "consuela_session" }));
-vi.mock("@/lib/google/token-store", () => ({ readPublicState: mocks.readPublicState }));
+vi.mock("@/lib/google/connection-state", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/google/connection-state")>();
+  return {
+    ...actual,
+    isGoogleConnected: mocks.isGoogleConnected,
+    readConnectionSnapshot: mocks.readConnectionSnapshot,
+  };
+});
 vi.mock("@/lib/google/calendar", () => ({
   readCalendarSyncRows: mocks.readCalendarSyncRows,
   listCalendars: mocks.listCalendars,
@@ -72,8 +79,17 @@ const endpoints: Endpoint[] = [
   {
     name: "GET /api/google/state",
     call: () => googleStateGET(request("/api/google/state")),
-    reads: () => [mocks.readPublicState],
-    configure: () => mocks.readPublicState.mockResolvedValue({ status: "available", state: { connected: false } }),
+    reads: () => [mocks.isGoogleConnected, mocks.readConnectionSnapshot],
+    configure: () => {
+      mocks.isGoogleConnected.mockResolvedValue(true);
+      mocks.readConnectionSnapshot.mockResolvedValue({
+        connectedAccountId: "composio-account-1",
+        status: "ACTIVE",
+        accountEmail: null,
+        connectedAt: null,
+        lastVerifiedAt: null,
+      });
+    },
   },
   {
     name: "GET /api/google/sync-state",

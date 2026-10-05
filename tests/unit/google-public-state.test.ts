@@ -57,6 +57,33 @@ describe("Google public token state", () => {
     expect(await response.json()).toMatchObject({ ok: true, connected: false });
   });
 
+  it("reports a connected Composio snapshot in the hook's state shape", async () => {
+    mocks.withAdmin.mockImplementation((fn: (pb: unknown) => Promise<unknown>) => fn(pbForRows([{
+      key: "google_composio_connection",
+      data: {
+        connectedAccountId: "composio-account-1",
+        status: "ACTIVE",
+        accountEmail: "family@example.com",
+        connectedAt: "2026-09-24T00:00:00.000Z",
+        lastVerifiedAt: "2026-09-24T00:00:00.000Z",
+      },
+    }])));
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      connected: true,
+      account_email: "family@example.com",
+      granted_at: "2026-09-24T00:00:00.000Z",
+      revoked_at: null,
+      expires_at: null,
+      scope: null,
+      minutes_until_expiry: null,
+    });
+  });
+
   it("returns an unavailable result instead of disconnected when PB cannot be read", async () => {
     mocks.withAdmin.mockRejectedValue(new Error("PB unavailable"));
 
@@ -116,14 +143,6 @@ describe("Google public token state", () => {
 
     await expect(readPublicState()).resolves.toEqual({
       status: "unavailable",
-      error: "google_state_unavailable",
-    });
-
-    const response = await GET(request());
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      ok: false,
-      state: "unavailable",
       error: "google_state_unavailable",
     });
   });
