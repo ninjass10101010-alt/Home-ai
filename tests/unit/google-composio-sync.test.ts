@@ -160,11 +160,11 @@ describe("syncCalendar — Composio EVENTS_LIST", () => {
     const [action, args, accountId] = mocks.execute.mock.calls[0];
     expect(action).toBe("GOOGLECALENDAR_EVENTS_LIST");
     expect(accountId).toBe(ACCOUNT);
-    expect(args.calendar_id).toBe(PRIMARY);
-    expect(typeof args.time_min).toBe("string");
-    expect(typeof args.time_max).toBe("string");
-    expect(Date.parse(args.time_min)).toBeLessThan(Date.now());
-    expect(Date.parse(args.time_max)).toBeGreaterThan(Date.now());
+    expect(args.calendarId).toBe(PRIMARY);
+    expect(typeof args.timeMin).toBe("string");
+    expect(typeof args.timeMax).toBe("string");
+    expect(Date.parse(args.timeMin)).toBeLessThan(Date.now());
+    expect(Date.parse(args.timeMax)).toBeGreaterThan(Date.now());
 
     expect(outcome.events).toBe(2);
     expect(writes.eventCreates).toHaveLength(2);
@@ -187,6 +187,35 @@ describe("syncCalendar — Composio EVENTS_LIST", () => {
     });
   });
 
+  it("guard: EVENTS_LIST uses the live camelCase names and never the snake_case variants", async () => {
+    const { pb } = pbMock();
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    mocks.execute.mockResolvedValue(envelope({ items: [] }));
+
+    await syncCalendar();
+
+    const [action, args] = mocks.execute.mock.calls[0];
+    expect(action).toBe("GOOGLECALENDAR_EVENTS_LIST");
+    expect(args).toMatchObject({
+      calendarId: PRIMARY,
+      singleEvents: true,
+      showDeleted: true,
+      maxResults: 250,
+    });
+    expect(typeof args.timeMin).toBe("string");
+    expect(typeof args.timeMax).toBe("string");
+    for (const snake of [
+      "calendar_id",
+      "time_min",
+      "time_max",
+      "single_events",
+      "show_deleted",
+      "page_token",
+    ]) {
+      expect(args).not.toHaveProperty(snake);
+    }
+  });
+
   it("full-pulls the explicit window every run and leaves a persisted sync_token untouched", async () => {
     const { pb, writes, calRows } = pbMock({
       calRows: [{ id: "cp", calendar_id: PRIMARY, summary: "Primary", selected: true, sync_token: "STALE" }],
@@ -198,9 +227,9 @@ describe("syncCalendar — Composio EVENTS_LIST", () => {
 
     const [, args] = mocks.execute.mock.calls[0];
     expect(args.syncToken).toBeUndefined();
-    expect(args.page_token).toBeUndefined();
-    expect(args.time_min).toBeTruthy();
-    expect(args.time_max).toBeTruthy();
+    expect(args.pageToken).toBeUndefined();
+    expect(args.timeMin).toBeTruthy();
+    expect(args.timeMax).toBeTruthy();
 
     const saved = writes.calUpdates.find((u: any) => u.payload.last_status === "ok");
     expect(saved).toBeTruthy();
@@ -236,7 +265,7 @@ describe("syncCalendar — Composio EVENTS_LIST", () => {
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
     mocks.execute.mockImplementation(async (_action: string, args: any) => {
-      if (args.calendar_id === FAMILY) throw composioApiError(503);
+      if (args.calendarId === FAMILY) throw composioApiError(503);
       return envelope({ items: [event("p1", "Primary thing")] });
     });
 
@@ -266,7 +295,7 @@ describe("syncCalendar — Composio EVENTS_LIST", () => {
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
     mocks.execute.mockImplementation(async (_action: string, args: any) => {
-      if (args.calendar_id === FAMILY) {
+      if (args.calendarId === FAMILY) {
         // call()'s network catch: code api_error, no status attached.
         throw Object.assign(new Error("Composio request failed"), { code: "api_error" });
       }
@@ -428,9 +457,11 @@ describe("Composio write helpers", () => {
       calendar_id: PRIMARY,
       event_id: "evt_1",
       summary: "Moved",
-      start_datetime: "2026-10-06T12:00:00Z",
-      end_datetime: "2026-10-06T13:30:00Z",
+      start_time: "2026-10-06T12:00:00Z",
+      end_time: "2026-10-06T13:30:00Z",
     });
+    expect(args.start_datetime).toBeUndefined();
+    expect(args.end_datetime).toBeUndefined();
     expect(updated.id).toBe("evt_1");
   });
 

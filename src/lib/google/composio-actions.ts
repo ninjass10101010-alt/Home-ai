@@ -42,11 +42,31 @@ export const COMPOSIO_ACTIONS = {
   TASKS_DELETE_TASK: "GOOGLETASKS_DELETE_TASK",
 } as const;
 
-// Arg-name notes (confirm live in Task 1):
-// - GOOGLECALENDAR_EVENTS_LIST REQUIRES time_min/time_max (no default window).
-//   Calendar id arg is `calendar_id` (primary is the literal "primary").
-// - GOOGLETASKS_LIST_TASKS response key is `tasks`; pass showCompleted when
-//   filtering by completed date.
+// Arg names are LIVE-VERIFIED against the real API (2026-10-05) and are
+// PER-ACTION — do not assume one convention:
+// - GOOGLECALENDAR_EVENTS_LIST: camelCase — calendarId, timeMin, timeMax,
+//   singleEvents, showDeleted, maxResults, pageToken, orderBy, timeZone,
+//   syncToken, iCalUID, eventTypes, updatedMin. timeMin/timeMax REQUIRED (no
+//   default window); the snake_case variants are silently ignored.
+// - GOOGLECALENDAR_LIST_CALENDARS: snake_case — page_token, sync_token,
+//   max_results, show_hidden, show_deleted, min_access_role.
+// - GOOGLECALENDAR_CREATE_EVENT: snake_case — calendar_id, summary,
+//   description, location, timezone, start_datetime, end_datetime,
+//   event_duration_hour, event_duration_minutes, attendees.
+// - GOOGLECALENDAR_PATCH_EVENT: snake_case — calendar_id, event_id, summary,
+//   description, location, timezone, start_time, end_time, attendees, status.
+// - GOOGLECALENDAR_DELETE_EVENT: event_id, calendar_id, send_updates,
+//   send_notifications.
+// - GOOGLETASKS_LIST_TASK_LISTS: pageToken, maxResults.
+// - GOOGLETASKS_LIST_TASKS: tasklist_id, showCompleted, showDeleted,
+//   showHidden, updatedMin, dueMin/dueMax, completedMin/Max, maxResults,
+//   pageToken. Response key is `tasks`.
+// - GOOGLETASKS_INSERT_TASK: tasklist_id, title, notes, due, status,
+//   completed.
+// - GOOGLETASKS_PATCH_TASK: tasklist_id, task_id, title, notes, due, status,
+//   completed.
+// - GOOGLETASKS_DELETE_TASK: tasklist_id, task_id.
+// - GOOGLETASKS_CREATE_TASK_LIST: tasklist_title (NOT `title`).
 // - Composio execute response shape is `{ data, successful, error }`.
 export const COMPOSIO_CONNECT_FLOW_NOTES = {
   // Connect Links are PER-TOOLKIT: POST /connected_accounts/link takes exactly

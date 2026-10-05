@@ -108,9 +108,9 @@ describe("syncCalendar — persisted sync tokens are ignored (Composio full-wind
     expect(action).toBe("GOOGLECALENDAR_EVENTS_LIST");
     expect(accountId).toBe("ca_test");
     expect(args.syncToken).toBeUndefined();
-    expect(args.page_token).toBeUndefined();
-    expect(args.time_min).toBeTruthy();
-    expect(args.time_max).toBeTruthy();
+    expect(args.pageToken).toBeUndefined();
+    expect(args.timeMin).toBeTruthy();
+    expect(args.timeMax).toBeTruthy();
     expect(eventCreates).toHaveLength(1);
 
     // The fresh state says ok but does not touch the (dead) token field.

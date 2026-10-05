@@ -147,7 +147,7 @@ async function getTasklists(accountId: string): Promise<GoogleTaskList[]> {
 async function createConsuelaList(accountId: string): Promise<GoogleTaskList> {
   const res = await executeComposioAction<unknown>(
     COMPOSIO_ACTIONS.TASKS_CREATE_TASK_LIST,
-    { title: CONSUELA_LIST_TITLE },
+    { tasklist_title: CONSUELA_LIST_TITLE },
     accountId,
   );
   const [created] = mapTaskListsPayload(res);

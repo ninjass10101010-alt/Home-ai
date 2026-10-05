@@ -259,7 +259,7 @@ const WINDOW_BACK_MS = 30 * 24 * 3600_000;
 const WINDOW_FORWARD_MS = 90 * 24 * 3600_000;
 
 // Composio exposes no incremental sync token (there is no SYNC_EVENTS action),
-// so every run is a full-window pull. time_min/time_max are mandatory — the
+// so every run is a full-window pull. timeMin/timeMax are mandatory — the
 // action has no default window. The persisted `sync_token` cache field is dead
 // state: it is never read, never sent, and never rewritten here.
 async function listEventsViaComposio(
@@ -275,13 +275,14 @@ async function listEventsViaComposio(
 
   while (true) {
     const args: Record<string, unknown> = {
-      calendar_id: calendarId,
-      time_min: timeMin,
-      time_max: timeMax,
-      single_events: true,
-      show_deleted: true,
+      calendarId,
+      timeMin,
+      timeMax,
+      singleEvents: true,
+      showDeleted: true,
+      maxResults: 250,
     };
-    if (pageToken) args.page_token = pageToken;
+    if (pageToken) args.pageToken = pageToken;
 
     const result = await executeGoogleAction<ComposioEnvelope<ComposioEventsData>>(
       COMPOSIO_ACTIONS.LIST_EVENTS,
@@ -630,8 +631,8 @@ function patchEventArgs(eventId: string, input: Partial<CalendarEventInput>): Re
   if (input.location !== undefined) args.location = input.location;
   const startIso = input.start?.dateTime || input.start?.date;
   const endIso = input.end?.dateTime || input.end?.date;
-  if (startIso) args.start_datetime = startIso;
-  if (endIso) args.end_datetime = endIso;
+  if (startIso) args.start_time = startIso;
+  if (endIso) args.end_time = endIso;
   const timeZone = input.start?.timeZone || input.end?.timeZone;
   if (timeZone) args.timezone = timeZone;
   if (input.attendees) args.attendees = input.attendees.map((a) => a.email);

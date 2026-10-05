@@ -164,7 +164,7 @@ describe("syncCalendar — multi-calendar loop (Composio)", () => {
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
     mocks.execute.mockImplementation(async (_action: string, args: any) =>
-      args.calendar_id === FAMILY
+      args.calendarId === FAMILY
         ? eventsEnvelope([ev("shared1", "Family thing")])
         : eventsEnvelope([ev("shared1", "Primary thing")]),
     );
@@ -206,13 +206,13 @@ describe("syncCalendar — multi-calendar loop (Composio)", () => {
 
     expect(outcome.perCalendar.every((c: any) => c.ok)).toBe(true);
     const callsByCalendar = new Map(
-      mocks.execute.mock.calls.map((c: any) => [c[1].calendar_id, c[1]]),
+      mocks.execute.mock.calls.map((c: any) => [c[1].calendarId, c[1]]),
     );
     expect([...callsByCalendar.keys()].sort()).toEqual([FAMILY, "primary"]);
     for (const args of callsByCalendar.values()) {
       expect(args.syncToken).toBeUndefined();
-      expect(args.time_min).toBeTruthy();
-      expect(args.time_max).toBeTruthy();
+      expect(args.timeMin).toBeTruthy();
+      expect(args.timeMax).toBeTruthy();
     }
   });
 
@@ -225,7 +225,7 @@ describe("syncCalendar — multi-calendar loop (Composio)", () => {
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
     mocks.execute.mockImplementation(async (_action: string, args: any) => {
-      if (args.calendar_id === FAMILY) throw composioApiError(503);
+      if (args.calendarId === FAMILY) throw composioApiError(503);
       return eventsEnvelope([ev("p1", "Primary thing")]);
     });
 
@@ -257,11 +257,11 @@ describe("syncCalendar — multi-calendar loop (Composio)", () => {
 
     await syncCalendar();
 
-    const famCall = mocks.execute.mock.calls.find((c: any) => c[1].calendar_id === FAMILY)!;
-    const primCall = mocks.execute.mock.calls.find((c: any) => c[1].calendar_id !== FAMILY)!;
-    expect(famCall[1].time_min).toBeTruthy();
+    const famCall = mocks.execute.mock.calls.find((c: any) => c[1].calendarId === FAMILY)!;
+    const primCall = mocks.execute.mock.calls.find((c: any) => c[1].calendarId !== FAMILY)!;
+    expect(famCall[1].timeMin).toBeTruthy();
     expect(famCall[1].syncToken).toBeUndefined();
-    expect(primCall[1].time_min).toBeTruthy();
+    expect(primCall[1].timeMin).toBeTruthy();
     expect(primCall[1].syncToken).toBeUndefined();
   });
 
@@ -275,7 +275,7 @@ describe("syncCalendar — multi-calendar loop (Composio)", () => {
     expect(outcome.perCalendar).toHaveLength(1);
     expect(outcome.perCalendar[0].calendarId).toBe("primary");
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    expect(mocks.execute.mock.calls[0][1].calendar_id).toBe("primary");
+    expect(mocks.execute.mock.calls[0][1].calendarId).toBe("primary");
   });
 
   it("honors an explicit deselect-all (rows exist, none selected → no Composio calls)", async () => {
@@ -306,7 +306,7 @@ describe("syncCalendar — deselect landing mid-sync (PUT is not lock-covered)",
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
     mocks.execute.mockImplementation(async (_action: string, args: any) => {
-      if (args.calendar_id === FAMILY) {
+      if (args.calendarId === FAMILY) {
         // The selection PUT lands WHILE this calendar's pull is in flight:
         // selected=false committed + prune already ran.
         deselectAndPrune(FAMILY);
@@ -340,7 +340,7 @@ describe("syncCalendar — deselect landing mid-sync (PUT is not lock-covered)",
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
     mocks.execute.mockImplementation(async (_action: string, args: any) => {
-      if (args.calendar_id !== FAMILY) {
+      if (args.calendarId !== FAMILY) {
         // Deselect lands after the selected list was captured but before
         // Family's syncOneCalendar starts.
         deselectAndPrune(FAMILY);
@@ -351,7 +351,7 @@ describe("syncCalendar — deselect landing mid-sync (PUT is not lock-covered)",
 
     const outcome = (await syncCalendar()) as any;
 
-    const famCalls = mocks.execute.mock.calls.filter((c: any) => c[1].calendar_id === FAMILY);
+    const famCalls = mocks.execute.mock.calls.filter((c: any) => c[1].calendarId === FAMILY);
     expect(famCalls).toHaveLength(0);
     expect(writes.eventCreates.filter((r: any) => r.calendar_id === FAMILY)).toHaveLength(0);
     expect(writes.calUpdates.find((u: any) => u.id === "cf")).toBeUndefined();

@@ -40,6 +40,7 @@ import {
   mapTaskListsPayload,
   mapTasksPayload,
   syncTasks,
+  updateTask,
 } from "../../src/lib/google/tasks.ts";
 
 const TASKS_ACCOUNT = {
@@ -305,6 +306,31 @@ describe("syncTasks through Composio", () => {
 });
 
 describe("tasks CRUD envelope handling", () => {
+  it("updateTask calls PATCH_TASK with the live tasklist_id/task_id keys", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValue(TASKS_ACCOUNT);
+    mocks.executeComposioAction.mockResolvedValue({
+      data: { response_data: { id: "t_1", title: "Sweep", status: "completed" } },
+      successful: true,
+      error: null,
+    });
+
+    await expect(
+      updateTask("list_consuela", "t_1", { title: "Sweep", status: "completed" }),
+    ).resolves.toMatchObject({ id: "t_1", title: "Sweep", status: "completed" });
+
+    const [action, args, accountId] = mocks.executeComposioAction.mock.calls[0];
+    expect(action).toBe(COMPOSIO_ACTIONS.TASKS_UPDATE_TASK);
+    expect(args).toMatchObject({
+      tasklist_id: "list_consuela",
+      task_id: "t_1",
+      title: "Sweep",
+      status: "completed",
+    });
+    expect(args.tasklistId).toBeUndefined();
+    expect(args.taskId).toBeUndefined();
+    expect(accountId).toBe("ca_tasks_1");
+  });
+
   it("returns an INSERT_TASK result nested under data.response_data", async () => {
     mocks.readConnectionSnapshot.mockResolvedValue(TASKS_ACCOUNT);
     mocks.executeComposioAction.mockResolvedValue({
@@ -363,9 +389,13 @@ describe("getOrCreateConsuelaListId", () => {
 
     expect(mocks.executeComposioAction).toHaveBeenCalledWith(
       COMPOSIO_ACTIONS.TASKS_CREATE_TASK_LIST,
-      expect.objectContaining({ title: "Consuela" }),
+      expect.objectContaining({ tasklist_title: "Consuela" }),
       "ca_tasks_1",
     );
+    const createListArgs = mocks.executeComposioAction.mock.calls.find(
+      ([action]: any[]) => action === COMPOSIO_ACTIONS.TASKS_CREATE_TASK_LIST,
+    )![1];
+    expect(createListArgs).not.toHaveProperty("title");
     expect(db.tasklists.find((row) => row.google_id === "list_consuela")).toMatchObject({
       title: "Consuela",
       owned_by_dashboard: true,
