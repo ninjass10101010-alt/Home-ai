@@ -55,6 +55,10 @@ function collectItems(root: unknown, keys: string[]): unknown[] {
   }
   // A bare single resource (e.g. an INSERT_TASK response) has no list key.
   if (typeof record.id === "string" || typeof record.id === "number") return [record];
+  // Timed writes (INSERT/PATCH/CREATE_TASK_LIST) nest the resource under
+  // `response_data` — mirror calendar's write unwrap.
+  const nested = asRecord(record.response_data);
+  if (nested) return collectItems(nested, keys);
   return [];
 }
 
@@ -140,6 +144,20 @@ async function getTasklists(accountId: string): Promise<GoogleTaskList[]> {
   return all;
 }
 
+async function createConsuelaList(accountId: string): Promise<GoogleTaskList> {
+  const res = await executeComposioAction<unknown>(
+    COMPOSIO_ACTIONS.TASKS_CREATE_TASK_LIST,
+    { title: CONSUELA_LIST_TITLE },
+    accountId,
+  );
+  const [created] = mapTaskListsPayload(res);
+  if (!created) {
+    throw new ComposioError("api_error", "Composio did not return a task list");
+  }
+  await upsertTasklist(created, true);
+  return created;
+}
+
 async function getOrCreateConsuelaListId(accountId: string): Promise<string> {
   const lists = await getTasklists(accountId);
   const existing = lists.find((l) => l.title === CONSUELA_LIST_TITLE);
@@ -147,13 +165,10 @@ async function getOrCreateConsuelaListId(accountId: string): Promise<string> {
     await upsertTasklist(existing, true);
     return existing.id;
   }
-  // COMPOSIO_ACTIONS pins no "create task list" action, so the dashboard can
-  // no longer mint its own list — fall back to the account's default list
-  // instead of hardcoding an unpinned slug.
-  const fallback = lists.find((l) => l.id === "@default") ?? lists[0];
-  if (!fallback) throw new ComposioError("api_error", "No Google Tasks list is available");
-  await upsertTasklist(fallback, false);
-  return fallback.id;
+  // No Consuela list yet: mint one (dashboard-owned) instead of writing into
+  // the account's default list.
+  const created = await createConsuelaList(accountId);
+  return created.id;
 }
 
 async function upsertTasklist(list: GoogleTaskList, ownedByDashboard: boolean): Promise<void> {
@@ -372,11 +387,14 @@ export async function updateTask(
 
 export async function deleteTask(tasklistId: string, taskId: string): Promise<void> {
   const accountId = await readTasksAccountId();
-  await executeComposioAction(
+  const res = await executeComposioAction(
     COMPOSIO_ACTIONS.TASKS_DELETE_TASK,
     { tasklist_id: tasklistId, task_id: taskId },
     accountId,
   );
+  // A tool that ran but failed reports HTTP 200 with `successful:false` —
+  // unwrap so a failed delete rejects instead of reporting success.
+  unwrapExecuteResult(res);
 }
 
 export async function completeTask(

@@ -237,6 +237,39 @@ describe("syncCalendar — Composio EVENTS_LIST", () => {
     expect(famErr.payload.last_error).toContain("503");
   });
 
+  it("isolates a network api_error without an HTTP status and records last_status:error", async () => {
+    const { pb, writes } = pbMock({
+      calRows: [
+        { id: "cp", calendar_id: PRIMARY, summary: "Primary", selected: true, sync_token: null },
+        { id: "cf", calendar_id: FAMILY, summary: "Family", selected: true, sync_token: null },
+      ],
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    mocks.execute.mockImplementation(async (_action: string, args: any) => {
+      if (args.calendar_id === FAMILY) {
+        // call()'s network catch: code api_error, no status attached.
+        throw Object.assign(new Error("Composio request failed"), { code: "api_error" });
+      }
+      return envelope({ items: [event("p1", "Primary thing")] });
+    });
+
+    const outcome = (await syncCalendar()) as any;
+
+    expect(outcome.perCalendar).toHaveLength(2);
+    const prim = outcome.perCalendar.find((c: any) => c.calendarId === PRIMARY);
+    const fam = outcome.perCalendar.find((c: any) => c.calendarId === FAMILY);
+    expect(prim.ok).toBe(true);
+    expect(prim.events).toBe(1);
+    expect(fam.ok).toBe(false);
+    expect(fam.error).toContain("Composio request failed");
+    expect(outcome.events).toBe(1);
+
+    const famErr = writes.calUpdates.find(
+      (u: any) => u.id === "cf" && u.payload.last_status === "error",
+    );
+    expect(famErr.payload.last_error).toContain("Composio request failed");
+  });
+
   it("maps Composio auth_failed to a run-level GoogleAuthError, not a per-calendar record", async () => {
     const { pb, writes } = pbMock();
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
@@ -368,6 +401,26 @@ describe("Composio write helpers", () => {
     expect(action).toBe("GOOGLECALENDAR_DELETE_EVENT");
     expect(accountId).toBe(ACCOUNT);
     expect(args).toMatchObject({ calendar_id: PRIMARY, event_id: "evt_9" });
+  });
+
+  it("deleteCalendarEvent rejects a tool-level unsuccessful envelope", async () => {
+    const { pb } = pbMock();
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    mocks.execute.mockResolvedValue({
+      data: null,
+      successful: false,
+      error: { message: "delete failed", code: "TOOL_EXECUTION_ERROR" },
+    });
+
+    await expect(deleteCalendarEvent("evt_9")).rejects.toThrow("delete failed");
+  });
+
+  it("deleteCalendarEvent accepts a response_data-nested success envelope", async () => {
+    const { pb } = pbMock();
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    mocks.execute.mockResolvedValue(envelope({ response_data: { success: true } }));
+
+    await expect(deleteCalendarEvent("evt_9")).resolves.toBeUndefined();
   });
 
   it("rejects a tool-level unsuccessful envelope instead of returning undefined", async () => {

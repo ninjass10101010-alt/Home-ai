@@ -33,7 +33,14 @@ vi.mock("../../src/lib/google/connection-state.ts", async (importOriginal) => {
 
 import { COMPOSIO_ACTIONS } from "../../src/lib/google/composio-actions.ts";
 import { TASKS_SNAPSHOT_KEY } from "../../src/lib/google/connection-state.ts";
-import { mapTaskListsPayload, mapTasksPayload, syncTasks } from "../../src/lib/google/tasks.ts";
+import {
+  createTask,
+  deleteTask,
+  getConsuelaListId,
+  mapTaskListsPayload,
+  mapTasksPayload,
+  syncTasks,
+} from "../../src/lib/google/tasks.ts";
 
 const TASKS_ACCOUNT = {
   connectedAccountId: "ca_tasks_1",
@@ -263,18 +270,6 @@ describe("syncTasks through Composio", () => {
     mocks.readConnectionSnapshot.mockResolvedValue(TASKS_ACCOUNT);
     mocks.executeComposioAction.mockRejectedValue(new Error("Composio error (500)"));
 
-    // Caller contract (/api/google/sync): calendar legs run first; the tasks
-    // leg is best-effort and its rejection is caught by the caller.
-    const [calendar, tasks] = await Promise.all([
-      Promise.resolve({ events: 4, deleted: 0 }),
-      syncTasks().catch((error: unknown) => ({
-        skipped: true as const,
-        reason: error instanceof Error ? error.message : "Tasks sync failed",
-      })),
-    ]);
-
-    expect(calendar).toEqual({ events: 4, deleted: 0 });
-    expect(tasks).toEqual({ skipped: true, reason: "Composio error (500)" });
     await expect(syncTasks()).rejects.toThrow("Composio error (500)");
   });
 
@@ -290,6 +285,91 @@ describe("syncTasks through Composio", () => {
   });
 });
 
+describe("tasks CRUD envelope handling", () => {
+  it("returns an INSERT_TASK result nested under data.response_data", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValue(TASKS_ACCOUNT);
+    mocks.executeComposioAction.mockResolvedValue({
+      data: { response_data: { id: "t_new", title: "Created", status: "needsAction" } },
+      successful: true,
+      error: null,
+    });
+
+    await expect(createTask("list_consuela", { title: "Created" })).resolves.toMatchObject({
+      id: "t_new",
+      title: "Created",
+    });
+  });
+
+  it("deleteTask rejects a tool-level unsuccessful envelope", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValue(TASKS_ACCOUNT);
+    mocks.executeComposioAction.mockResolvedValue({
+      data: null,
+      successful: false,
+      error: { message: "delete failed" },
+    });
+
+    await expect(deleteTask("list_consuela", "t_1")).rejects.toThrow("delete failed");
+  });
+
+  it("deleteTask resolves on a successful envelope", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValue(TASKS_ACCOUNT);
+    mocks.executeComposioAction.mockResolvedValue({ data: { success: true }, successful: true });
+
+    await expect(deleteTask("list_consuela", "t_1")).resolves.toBeUndefined();
+  });
+});
+
+describe("getOrCreateConsuelaListId", () => {
+  it("creates the Consuela list when no matching list exists", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValue(TASKS_ACCOUNT);
+    mocks.executeComposioAction.mockImplementation(async (action: string) => {
+      if (action === COMPOSIO_ACTIONS.TASKS_LIST_TASKLISTS) {
+        return {
+          data: { items: [{ id: "list_school", title: "School" }] },
+          successful: true,
+          error: null,
+        };
+      }
+      if (action === COMPOSIO_ACTIONS.TASKS_CREATE_TASK_LIST) {
+        return {
+          data: { response_data: { id: "list_consuela", title: "Consuela" } },
+          successful: true,
+          error: null,
+        };
+      }
+      throw new Error(`unexpected action: ${action}`);
+    });
+
+    await expect(getConsuelaListId()).resolves.toBe("list_consuela");
+
+    expect(mocks.executeComposioAction).toHaveBeenCalledWith(
+      COMPOSIO_ACTIONS.TASKS_CREATE_TASK_LIST,
+      expect.objectContaining({ title: "Consuela" }),
+      "ca_tasks_1",
+    );
+    expect(db.tasklists.find((row) => row.google_id === "list_consuela")).toMatchObject({
+      title: "Consuela",
+      owned_by_dashboard: true,
+    });
+  });
+
+  it("reuses an existing Consuela list without creating another", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValue(TASKS_ACCOUNT);
+    mocks.executeComposioAction.mockResolvedValue({
+      data: { items: [{ id: "list_consuela", title: "Consuela" }] },
+      successful: true,
+      error: null,
+    });
+
+    await expect(getConsuelaListId()).resolves.toBe("list_consuela");
+    expect(mocks.executeComposioAction).not.toHaveBeenCalledWith(
+      COMPOSIO_ACTIONS.TASKS_CREATE_TASK_LIST,
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+});
+
 describe("Composio payload mappers", () => {
   it("normalizes wrapper and shape variants defensively", () => {
     expect(
@@ -302,6 +382,23 @@ describe("Composio payload mappers", () => {
     expect(
       mapTasksPayload({ data: { items: [{ id: "t2", title: "B", status: "completed" }] } })[0],
     ).toMatchObject({ id: "t2", status: "completed" });
+  });
+
+  it("unwraps a response_data-nested INSERT/PATCH resource", () => {
+    expect(
+      mapTasksPayload({
+        data: { response_data: { id: "t_new", title: "Created", status: "needsAction" } },
+        successful: true,
+        error: null,
+      }),
+    ).toMatchObject([{ id: "t_new", title: "Created" }]);
+    expect(
+      mapTaskListsPayload({
+        data: { response_data: { id: "list_new", title: "Consuela" } },
+        successful: true,
+        error: null,
+      }),
+    ).toMatchObject([{ id: "list_new", title: "Consuela" }]);
   });
 
   it("throws on a failed Composio execution instead of mapping it as empty", () => {

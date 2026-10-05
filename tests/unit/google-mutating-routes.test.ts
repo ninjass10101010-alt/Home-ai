@@ -210,6 +210,11 @@ describe("Google mutating route authorization", () => {
 
     expect(result.status).toBe(options.status);
     expect(body).toMatchObject({ ok: false, error: options.error, ...(options.skipped ? { skipped: true } : {}), ...(options.partial ? { partial: true } : {}) });
+    if (options.tasksError) {
+      // A tasks failure never discards the calendar results from the same run.
+      expect(body.calendar).toMatchObject({ events: 2, deleted: 0, perCalendar: [] });
+      expect(body.tasks).toMatchObject({ skipped: true });
+    }
   });
 
   it("reports a disconnected Tasks account as a skip, not a failure", async () => {

@@ -35,11 +35,20 @@ export async function getComposioKey(): Promise<string> {
   return key;
 }
 
+// 502: a network/timeout failure is an upstream (broker) failure, not the
+// caller's fault. The numeric status keeps these errors distinguishable from
+// HTTP-status errors and lets callers isolate them per resource.
+const UPSTREAM_FAILURE_STATUS = 502;
+
 async function call(url: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (e) {
-    throw new ComposioError("api_error", e instanceof Error ? e.message : "Composio request failed");
+    throw new ComposioError(
+      "api_error",
+      e instanceof Error ? e.message : "Composio request failed",
+      UPSTREAM_FAILURE_STATUS,
+    );
   }
 }
 
@@ -84,7 +93,9 @@ export async function executeComposioAction<T>(
   });
   if (!res.ok) throw classify(res.status);
   const data = await readJson(res);
-  if (data === null) throw new ComposioError("api_error", "Composio returned an empty response");
+  if (data === null) {
+    throw new ComposioError("api_error", "Composio returned an empty response", UPSTREAM_FAILURE_STATUS);
+  }
   return data as T;
 }
 

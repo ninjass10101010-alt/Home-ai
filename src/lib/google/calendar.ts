@@ -89,12 +89,13 @@ async function requireConnectedAccountId(): Promise<string> {
   return snapshot.connectedAccountId;
 }
 
-// Composio 401/403 means the broker key (or the brokered grant) is dead —
+// Composio auth_failed means the brokered grant (or the broker key) is dead —
 // every calendar shares it, so it must abort the run instead of isolating to
-// one calendar. Other codes (api_error/timeout) callers isolate per calendar.
+// one calendar. Every other ComposioError (api_error/timeout, not_configured)
+// propagates as-is and is contained by the per-calendar catch below.
 function rethrowRunLevelComposioError(err: unknown): never {
   const code = (err as { code?: unknown } | null)?.code;
-  if (code === "auth_failed" || code === "not_configured") {
+  if (code === "auth_failed") {
     throw new GoogleAuthError(
       "config",
       err instanceof Error ? err.message : "Composio is not usable",
@@ -435,14 +436,11 @@ export async function syncCalendar(): Promise<SyncOutcome> {
           totalDeleted += res.deleted;
           if (calendarId === PRIMARY) primaryToken = res.nextSyncToken;
         } catch (err: any) {
-          // Auth failures are global (one broker account serves every
-          // calendar) and were already re-thrown as a run-level
-          // GoogleAuthError — propagate so the routes can answer 401/409.
-          // Duck-typed on `code` (the class sets no `name`, and tests mock
-          // the module boundary, so instanceof is not available here).
-          if (err && typeof err.code === "string" && typeof err.status !== "number") throw err;
-          // Everything else (Composio api_error/timeout, PB hiccup)
+          // Only run-level GoogleAuthErrors abort the whole run: the promoted
+          // auth_failed above, or a missing grant from requireConnectedAccountId.
+          // Everything else — including a network api_error with NO HTTP status —
           // isolates to this calendar: record it, keep the loop going.
+          if (err instanceof GoogleAuthError) throw err;
           console.error(`[google-sync] calendar ${calendarId} failed:`, err?.message || err);
           if (!isGoogleIntegrationGenerationCurrent(operationGeneration)) {
             return { skipped: true, reason: "disconnected" };
@@ -651,11 +649,14 @@ export async function updateCalendarEvent(
 
 export async function deleteCalendarEvent(eventId: string): Promise<void> {
   const connectedAccountId = await requireConnectedAccountId();
-  await executeGoogleAction<ComposioEnvelope<unknown>>(
+  const result = await executeGoogleAction<ComposioEnvelope<ComposioEventWriteData>>(
     COMPOSIO_ACTIONS.DELETE_EVENT,
     { calendar_id: PRIMARY, event_id: eventId },
     connectedAccountId,
   );
+  // DELETE arrives as HTTP 200 even when the tool failed (`successful:false`),
+  // so unwrap like the create/patch writes — a failed delete must reject.
+  createWriteResult(result);
 }
 
 export interface CalendarListEntry {

@@ -44,11 +44,19 @@ describe("composio client", () => {
     expect(await getConnectedAccount("missing")).toBeNull();
   });
 
-  it("throws api_error when a 200 execute response is malformed", async () => {
+  it("throws api_error with status 502 when a 200 execute response is malformed", async () => {
     getServiceConfig.mockResolvedValue("sk-test");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
     await expect(executeComposioAction("X", {})).rejects.toMatchObject({
-      code: "api_error", message: "Composio returned an empty response",
+      code: "api_error", status: 502, message: "Composio returned an empty response",
+    });
+  });
+
+  it("carries status 502 when the execute request fails at the network layer", async () => {
+    getServiceConfig.mockResolvedValue("sk-test");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network down")));
+    await expect(executeComposioAction("X", {})).rejects.toMatchObject({
+      code: "api_error", status: 502, message: "network down",
     });
   });
 
@@ -98,11 +106,13 @@ describe("composio client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("propagates a list network failure as api_error and does not create", async () => {
+  it("propagates a list network failure as api_error with status 502 and does not create", async () => {
     getServiceConfig.mockResolvedValue("sk-test");
     const fetchMock = vi.fn().mockRejectedValue(new TypeError("network down"));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(ensureAuthConfig("googlecalendar")).rejects.toMatchObject({ code: "api_error" });
+    await expect(ensureAuthConfig("googlecalendar")).rejects.toMatchObject({
+      code: "api_error", status: 502,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
