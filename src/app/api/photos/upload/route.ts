@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { SESSION_COOKIE, verifySession } from "@/lib/session";
+import {
+  MAX_ORIGINAL_BYTES,
+  MAX_WALL_BYTES,
+  isAllowedImageType,
+} from "@/lib/photos/upload-limits";
 
 export const dynamic = "force-dynamic";
 
-/** Archive copy is kept as uploaded; the wall copy is the resized JPEG. */
-const MAX_ORIGINAL_BYTES = 20 * 1024 * 1024;
-const MAX_WALL_BYTES = 8 * 1024 * 1024;
-const ALLOWED_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-]);
+/**
+ * Ceiling on the raw multipart body, checked from `Content-Length` before the
+ * body is parsed: original (100 MB) + wall copy (8 MB) + part headers. The 8 MB
+ * slack is exactly `MAX_WALL_BYTES`, which is also the most a wall part can add
+ * — an oversized body is refused without ever being buffered into a FormData.
+ */
+const MAX_BODY_BYTES = MAX_ORIGINAL_BYTES + MAX_WALL_BYTES;
 
 function fileFrom(bytes: Uint8Array, name: string, type: string): Blob {
   // The PocketBase client accepts File/Blob/ArrayBuffer for file fields; Node
@@ -34,6 +36,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
+  // Refuse an oversized body before `formData()` buffers it (spec §6.2: a
+  // 100 MB multipart round-trips several full copies, so don't start).
+  const contentLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return NextResponse.json({ ok: false, error: "file_too_large" }, { status: 413 });
+  }
+
   let form: FormData;
   try {
     form = await request.formData();
@@ -45,7 +54,7 @@ export async function POST(request: NextRequest) {
   if (!(original instanceof File) || original.size === 0) {
     return NextResponse.json({ ok: false, error: "missing_file" }, { status: 400 });
   }
-  if (!ALLOWED_TYPES.has(original.type)) {
+  if (!isAllowedImageType(original.type)) {
     return NextResponse.json({ ok: false, error: "unsupported_type" }, { status: 400 });
   }
   if (original.size > MAX_ORIGINAL_BYTES) {
@@ -53,11 +62,19 @@ export async function POST(request: NextRequest) {
   }
 
   const wall = form.get("wall");
+  if (wall instanceof File && wall.size > 0 && !isAllowedImageType(wall.type)) {
+    return NextResponse.json({ ok: false, error: "unsupported_wall_type" }, { status: 400 });
+  }
   if (wall instanceof File && wall.size > MAX_WALL_BYTES) {
     return NextResponse.json({ ok: false, error: "file_too_large" }, { status: 413 });
   }
 
   const takenAt = String(form.get("takenAt") ?? "");
+  // Absent is fine (`takenAt` is optional); a value that won't parse would be
+  // stored as an Invalid Date, so reject it where the message still makes sense.
+  if (takenAt && Number.isNaN(Date.parse(takenAt))) {
+    return NextResponse.json({ ok: false, error: "invalid_taken_at" }, { status: 400 });
+  }
   const caption = String(form.get("caption") ?? "").trim();
   const album = String(form.get("album") ?? "").trim();
   const width = Number(form.get("width")) || undefined;
@@ -80,7 +97,9 @@ export async function POST(request: NextRequest) {
 
     const record = await withAdmin(async (pb) => pb.collection("photos").create(data));
     return NextResponse.json({ ok: true, id: String(record.id) }, { status: 201 });
-  } catch {
+  } catch (err) {
+    // Message only — an upload failure must never log file bytes or form data.
+    console.error("[photos]", err instanceof Error ? err.message : err);
     return NextResponse.json({ ok: false, error: "upload_failed" }, { status: 502 });
   }
 }

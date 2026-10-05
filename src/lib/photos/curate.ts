@@ -54,6 +54,15 @@ export interface CurateOptions {
   recentIds?: string[];
   /** "Now" for future-date filtering and the on-this-day boost. */
   now?: Date;
+  /**
+   * Queue order (spec §3.7). `"shuffle"` (the default) is today's path,
+   * byte-for-byte — the seeded score/album-cap machinery below. `"newest"` /
+   * `"oldest"` take the chronological branch instead: sort by `takenAt`,
+   * undated last, then the same recent-holdback, then `limit` — no jitter,
+   * no album cap, no on-this-day promotion (those are shuffle-fairness
+   * devices; "newest first" has to actually mean newest first).
+   */
+  order?: "shuffle" | "newest" | "oldest";
 }
 
 const MS_PER_DAY = 86_400_000;
@@ -69,6 +78,7 @@ export function curateWallPhotos(photos: WallPhoto[], options: CurateOptions = {
     albumCap = 3,
     recentIds = [],
     now = new Date(),
+    order = "shuffle",
   } = options;
 
   const eligible = photos.filter((p) => {
@@ -80,6 +90,31 @@ export function curateWallPhotos(photos: WallPhoto[], options: CurateOptions = {
   });
 
   if (eligible.length === 0) return [];
+
+  // Chronological modes (spec §3.7): sort the whole eligible set by takenAt,
+  // undated LAST in both directions (a photo with no clock cannot be placed in
+  // time — appending it is honest; leading it would pretend it is the oldest),
+  // then the same recent-holdback as shuffle (fresher batch first, order within
+  // each batch preserved), then slice. No jitter, no album cap, no on-this-day
+  // promotion: those are shuffle-fairness devices, and "newest first" must
+  // actually mean newest first or the control lies.
+  if (order !== "shuffle") {
+    const sorted = [...eligible].sort((a, b) => {
+      const at = new Date(a.takenAt).getTime();
+      const bt = new Date(b.takenAt).getTime();
+      const aUndated = Number.isNaN(at);
+      const bUndated = Number.isNaN(bt);
+      if (aUndated || bUndated) {
+        if (aUndated && bUndated) return 0;
+        return aUndated ? 1 : -1;
+      }
+      return order === "newest" ? bt - at : at - bt;
+    });
+    const recent = new Set(recentIds);
+    const fresh = sorted.filter((p) => !recent.has(p.id));
+    const seenRecently = sorted.filter((p) => recent.has(p.id));
+    return [...fresh, ...seenRecently].slice(0, limit);
+  }
 
   const rand = mulberry32(hashString(seed));
   const jittered = eligible

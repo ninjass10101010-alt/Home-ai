@@ -144,6 +144,160 @@ describe("repeat handling", () => {
   });
 });
 
+describe("shuffle regression pin (spec §3.7 — the branch chrono modes must not touch)", () => {
+  // A fixed, mixed library: varied dates, albums, one undated, one future,
+  // two recently shown. The exact sequence below is today's shuffle output for
+  // this seed; if any shuffle edit changes it, the pin fails — by design.
+  const pinned: WallPhoto[] = [
+    photo("a", { takenAt: "2026-03-05T09:00:00.000Z", album: "trip" }),
+    photo("b", { takenAt: "2024-12-25T09:00:00.000Z" }),
+    photo("c", { takenAt: "2026-08-01T09:00:00.000Z", album: "trip" }),
+    photo("d", { takenAt: "2025-06-10T09:00:00.000Z", album: "everyday" }),
+    photo("e", { takenAt: "", album: "scan" }),
+    photo("f", { takenAt: "2026-09-01T09:00:00.000Z" }),
+    photo("g", { takenAt: "2019-01-01T09:00:00.000Z", album: "trip" }),
+    photo("h", { takenAt: "2027-01-01T09:00:00.000Z" }),
+    photo("i", { takenAt: "2026-07-15T09:00:00.000Z", album: "everyday" }),
+    photo("j", { takenAt: "2026-09-30T08:00:00.000Z" }),
+  ];
+  const pinOpts = {
+    dateKey: "2026-9-30",
+    now: NOW,
+    limit: 8,
+    recentIds: ["a", "f"],
+  };
+
+  it("returns exactly this sequence for a seeded input, with no order option", () => {
+    const ids = curateWallPhotos(pinned, pinOpts).map((p) => p.id);
+    expect(ids).toEqual(["j", "e", "d", "c", "g", "i", "b", "f"]);
+  });
+
+  it("returns the same pinned sequence with an explicit shuffle order", () => {
+    const ids = curateWallPhotos(pinned, { ...pinOpts, order: "shuffle" }).map((p) => p.id);
+    expect(ids).toEqual(["j", "e", "d", "c", "g", "i", "b", "f"]);
+  });
+
+  it("still excludes the future-dated row and respects the limit inside the pin", () => {
+    const ids = curateWallPhotos(pinned, pinOpts).map((p) => p.id);
+    expect(ids).toHaveLength(8);
+    expect(ids).not.toContain("h");
+  });
+});
+
+describe("chronological order — newest / oldest (spec §3.7)", () => {
+  // Deliberately scrambled input order: the modes must sort by takenAt, never
+  // trust the array. `anniv` is an on-this-day picture from 2019 — in shuffle
+  // it would jump the line; in chrono it must sit in date position.
+  const mixed: WallPhoto[] = [
+    photo("m2", { takenAt: "2025-05-05T10:00:00.000Z" }),
+    photo("m1", { takenAt: "2026-06-06T10:00:00.000Z" }),
+    photo("anniv", { takenAt: "2019-09-30T10:00:00.000Z" }),
+    photo("m3", { takenAt: "2023-01-01T10:00:00.000Z" }),
+    photo("undated", { takenAt: "" }),
+  ];
+
+  it("newest is strictly chronological descending", () => {
+    const ids = curateWallPhotos(mixed, { now: NOW, order: "newest", limit: 10 }).map((p) => p.id);
+    expect(ids).toEqual(["m1", "m2", "m3", "anniv", "undated"]);
+  });
+
+  it("oldest is strictly chronological ascending, undated STILL last", () => {
+    const ids = curateWallPhotos(mixed, { now: NOW, order: "oldest", limit: 10 }).map((p) => p.id);
+    expect(ids).toEqual(["anniv", "m3", "m2", "m1", "undated"]);
+  });
+
+  it("does not promote an on-this-day photo in a chronological mode", () => {
+    const ids = curateWallPhotos(mixed, { now: NOW, order: "newest", limit: 10 }).map((p) => p.id);
+    expect(ids[0]).not.toBe("anniv");
+    expect(ids[3]).toBe("anniv");
+  });
+
+  it.each(["shuffle", "newest", "oldest"] as const)(
+    "excludes future-dated photos in order=%s",
+    (order) => {
+      const ids = curateWallPhotos(
+        [
+          photo("past", { takenAt: "2025-01-01T00:00:00.000Z" }),
+          photo("future", { takenAt: "2027-06-01T00:00:00.000Z" }),
+          photo("undated", { takenAt: "" }),
+        ],
+        { now: NOW, order, limit: 10 },
+      ).map((p) => p.id);
+      expect(ids).not.toContain("future");
+      expect(ids).toContain("past");
+      expect(ids).toContain("undated");
+    },
+  );
+
+  it("applies the recent-holdback: fresh photos first, seen ones behind them", () => {
+    const shots = [
+      photo("n1", { takenAt: "2026-08-01T10:00:00.000Z" }),
+      photo("n2", { takenAt: "2026-07-01T10:00:00.000Z" }),
+      photo("n3", { takenAt: "2026-06-01T10:00:00.000Z" }),
+      photo("n4", { takenAt: "2026-05-01T10:00:00.000Z" }),
+    ];
+    const ids = curateWallPhotos(shots, {
+      now: NOW,
+      order: "newest",
+      limit: 4,
+      recentIds: ["n1"],
+    }).map((p) => p.id);
+    // n1 is the newest photo but was just shown; the fresher batch fills the
+    // queue first, in chronological order, and n1 waits at the back.
+    expect(ids).toEqual(["n2", "n3", "n4", "n1"]);
+  });
+
+  it("holdback + limit: the recently-seen photo yields its slot to a fresher one", () => {
+    const shots = [
+      photo("n1", { takenAt: "2026-08-01T10:00:00.000Z" }),
+      photo("n2", { takenAt: "2026-07-01T10:00:00.000Z" }),
+      photo("n3", { takenAt: "2026-06-01T10:00:00.000Z" }),
+    ];
+    const ids = curateWallPhotos(shots, {
+      now: NOW,
+      order: "oldest",
+      limit: 2,
+      recentIds: ["n1"],
+    }).map((p) => p.id);
+    expect(ids).toEqual(["n3", "n2"]);
+  });
+
+  it("ignores the album cap: one album can fill the whole chronological queue", () => {
+    // Six shots from one trip, stricter cap than the queue length. The cap is
+    // a shuffle-fairness device; "oldest first" must not skip a photo because
+    // its album already had its turn.
+    const trip = [
+      photo("o1", { takenAt: "2024-01-01T10:00:00.000Z", album: "Oregon" }),
+      photo("o2", { takenAt: "2024-02-01T10:00:00.000Z", album: "Oregon" }),
+      photo("o3", { takenAt: "2024-03-01T10:00:00.000Z", album: "Oregon" }),
+      photo("o4", { takenAt: "2024-04-01T10:00:00.000Z", album: "Oregon" }),
+      photo("o5", { takenAt: "2024-05-01T10:00:00.000Z", album: "Oregon" }),
+      photo("u6", { takenAt: "2024-06-01T10:00:00.000Z" }),
+    ];
+    const ids = curateWallPhotos(trip, {
+      now: NOW,
+      order: "oldest",
+      limit: 6,
+      albumCap: 1,
+    }).map((p) => p.id);
+    expect(ids).toEqual(["o1", "o2", "o3", "o4", "o5", "u6"]);
+  });
+
+  it("honors limit by taking the chronological head, not a subset", () => {
+    const ids = curateWallPhotos(mixed, { now: NOW, order: "newest", limit: 2 }).map((p) => p.id);
+    expect(ids).toEqual(["m1", "m2"]);
+  });
+
+  it("honors limit in oldest mode too", () => {
+    const ids = curateWallPhotos(mixed, { now: NOW, order: "oldest", limit: 3 }).map((p) => p.id);
+    expect(ids).toEqual(["anniv", "m3", "m2"]);
+  });
+
+  it("returns an empty queue for an empty library", () => {
+    expect(curateWallPhotos([], { now: NOW, order: "newest" })).toEqual([]);
+  });
+});
+
 describe("on this day", () => {
   it("recognises the same calendar day in an earlier year", () => {
     const anniversary = new Date(2019, NOW.getMonth(), NOW.getDate(), 9, 0, 0);

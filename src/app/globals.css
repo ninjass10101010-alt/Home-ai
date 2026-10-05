@@ -3562,6 +3562,48 @@ main.wall-home-fit .wall-widget-grid {
 .wall-photo-incoming.is-instant {
   transition: none;
 }
+/* ── Transition variants (spec §3.3) ────────────────────────────────────────
+   Every variant stays a discrete, finite, one-shot event per photo change —
+   no keyframes, no loops (contract 4 / constraint 1). The dissolve half is
+   derived from --motion-glide with calc(), not a new token (constraint 11),
+   and the black here is the same black the scrim already paints — no new
+   colours. */
+.wall-photo-veil {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity calc(var(--motion-glide) / 2) var(--ease-standard);
+}
+/* Armed = cover phase: the veil fades to fully opaque, then drops back to 0
+   (the base value) when `is-armed` leaves for the reveal phase. */
+.wall-photo-veil.is-armed {
+  opacity: 1;
+}
+/* Slide: one-shot transform layers. Incoming enters from the right while the
+   shown layer walks out to the left; both run one 600ms glide, then the
+   classes leave with the swap and the layers are back at rest. */
+.wall-photo-incoming.is-slide {
+  opacity: 1;
+  transform: translateX(100%);
+  transition: transform var(--motion-glide) var(--ease-standard);
+}
+.wall-photo-incoming.is-slide.is-armed {
+  transform: translateX(0);
+}
+.wall-photo-outgoing {
+  transform: translateX(0);
+  transition: transform var(--motion-glide) var(--ease-standard);
+}
+.wall-photo-outgoing.is-armed {
+  transform: translateX(-100%);
+}
+/* Mid-slide the tile can show through between the two layers; surface-0 reads
+   as grey there, so the backing goes black for the duration. */
+.wall-photo-tile.is-sliding {
+  background: rgb(0 0 0);
+}
 .wall-photo-scrim {
   position: absolute;
   inset-inline: 0;
@@ -3640,6 +3682,14 @@ html[data-wall="true"] .text-\[13px\] {
 }
 html[data-wall="true"] .hit-44::before {
   inset: -12px;
+  /* The base rule centres the box with top/left 50% + translate -50% and sizes
+     it with max(100%, 44px); keeping those under a plain `inset` stretched the
+     pseudo past the inset AND shifted it up-left. With auto size and no
+     translate the -12px inset is what actually defines the box — centred and
+     symmetric around the control. */
+  width: auto;
+  height: auto;
+  translate: none;
 }
 html[data-wall="true"] .schedule-row {
   min-height: 56px;

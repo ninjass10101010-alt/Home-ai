@@ -265,7 +265,18 @@ export default function HomePage() {
   // Audit 4.5: stacked layouts (phone / tablet portrait, never the wall) keep
   // only the ranked first fold rendered; the rest wait behind the More… sheet.
   const foldActive = !wall && layoutMounted && orientation !== "desktop" && homeWidgets.length > PHONE_WIDGET_FOLD;
-  const renderedWidgets = foldActive && !widgetsExpanded ? homeWidgets.slice(0, PHONE_WIDGET_FOLD) : homeWidgets;
+  // Until the layout resolves, mount only the first fold: the full set would
+  // fire every widget's mount fetch on a phone only for the resolved fold to
+  // unmount the below-fold ones a frame later. The first fold IS the content
+  // everywhere, so nothing flashes empty — desktop/wall briefly paint those
+  // four real widgets in the fallback grid for the one frame before the
+  // resolved layout lands (real content beats a skeleton flash, and widgets
+  // are still in their own loading states at that point either way).
+  const renderedWidgets = !layoutMounted
+    ? homeWidgets.slice(0, PHONE_WIDGET_FOLD)
+    : foldActive && !widgetsExpanded
+      ? homeWidgets.slice(0, PHONE_WIDGET_FOLD)
+      : homeWidgets;
 
   const sessionSecondsRemaining = Math.ceil(sessionRemainingMs / 1000);
   const showSessionPill = isLoggedIn && sessionRemainingMs < 30 * 60 * 1000 - 60 * 1000;

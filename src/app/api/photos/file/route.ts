@@ -65,7 +65,9 @@ export async function GET(request: NextRequest) {
         "x-content-type-options": "nosniff",
       },
     });
-  } catch {
+  } catch (err) {
+    // Message only: this path knows filenames and PB statuses, never bytes.
+    console.error("[photos]", err instanceof Error ? err.message : err);
     return new NextResponse(null, { status: 503 });
   }
 }

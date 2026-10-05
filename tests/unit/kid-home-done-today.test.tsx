@@ -85,7 +85,10 @@ function seedTasks(completedAt: string) {
       completed: true,
       completedBy: "Caspian",
       completedAt,
-      completedInWeek: localWeekStartISO(),
+      // Seed the week from the test's own date — calling this with the real
+      // clock (before fake timers are installed) crosses week boundaries and
+      // broke this suite on 2026-10-05.
+      completedInWeek: localWeekStartISO(new Date(completedAt)),
       priority: "medium",
     },
   ]));

@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import SoftButton from "@/components/ui/SoftButton";
 import { resizeForWall } from "@/lib/photos/resize";
+import { MAX_ORIGINAL_BYTES, isAllowedImageType } from "@/lib/photos/upload-limits";
 
 /**
  * Add family photos from any device on the network.
@@ -22,10 +23,15 @@ interface QueueItem {
   state: ItemState;
   /** True when the resized copy could not be produced and only the original went up. */
   originalOnly: boolean;
+  /**
+   * Caption/album frozen when the file was QUEUED. A retry runs through the
+   * same closure path as a fresh upload, so reading the live inputs there
+   * would stamp whatever the family is typing NOW onto an older file.
+   */
+  caption: string;
+  album: string;
   error?: string;
 }
-
-const MAX_BYTES = 20 * 1024 * 1024;
 
 function label(state: ItemState): string {
   switch (state) {
@@ -49,24 +55,32 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
     setItems((list) => list.map((item) => (item.key === key ? { ...item, ...next } : item)));
   }, []);
 
-  const send = useCallback(
-    async (files: File[]) => {
-      const queue: QueueItem[] = files.map((file, index) => ({
-        key: `${file.name}-${file.lastModified}-${index}`,
-        file,
-        state: "waiting",
-        originalOnly: false,
-      }));
-      setItems(queue);
+  /**
+   * Upload one batch and MERGE it into the status list by `key`. Wholesale
+   * `setItems(queue)` here wiped every earlier row — the successful uploads
+   * vanished from the list the moment a retry started.
+   */
+  const run = useCallback(
+    async (queue: QueueItem[]) => {
+      if (queue.length === 0) return;
+      setItems((list) => {
+        const next = [...list];
+        for (const item of queue) {
+          const at = next.findIndex((row) => row.key === item.key);
+          if (at >= 0) next[at] = item;
+          else next.push(item);
+        }
+        return next;
+      });
       setBusy(true);
 
       for (const item of queue) {
-        if (!item.file.type.startsWith("image/")) {
+        if (!isAllowedImageType(item.file.type)) {
           patch(item.key, { state: "failed", error: "Not an image" });
           continue;
         }
-        if (item.file.size > MAX_BYTES) {
-          patch(item.key, { state: "failed", error: "Larger than 20MB" });
+        if (item.file.size > MAX_ORIGINAL_BYTES) {
+          patch(item.key, { state: "failed", error: "Larger than 100MB" });
           continue;
         }
 
@@ -81,8 +95,8 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
           form.set("width", String(resized.width));
           form.set("height", String(resized.height));
         }
-        if (caption.trim()) form.set("caption", caption.trim());
-        if (album.trim()) form.set("album", album.trim());
+        if (item.caption) form.set("caption", item.caption);
+        if (item.album) form.set("album", item.album);
         // No EXIF reader in the bundle: the file's own clock is the best
         // available "taken" date, and beats using the upload date.
         form.set("takenAt", new Date(item.file.lastModified).toISOString());
@@ -105,12 +119,41 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
       setBusy(false);
       onUploaded?.();
     },
-    [caption, album, onUploaded, patch],
+    [onUploaded, patch],
   );
+
+  const send = useCallback(
+    (files: File[]) => {
+      // Snapshot at ENQUEUE time: everything queued in this batch carries the
+      // caption/album that was in the inputs when the batch started.
+      const snapCaption = caption.trim();
+      const snapAlbum = album.trim();
+      void run(
+        files.map((file, index) => ({
+          key: `${file.name}-${file.lastModified}-${index}`,
+          file,
+          state: "waiting" as const,
+          originalOnly: false,
+          caption: snapCaption,
+          album: snapAlbum,
+        })),
+      );
+    },
+    [caption, album, run],
+  );
+
+  /** Retry keeps each failed row's key (merge replaces it) and its own snapshot. */
+  const retryFailed = useCallback(() => {
+    void run(
+      items
+        .filter((item) => item.state === "failed")
+        .map((item): QueueItem => ({ ...item, state: "waiting", error: undefined })),
+    );
+  }, [items, run]);
 
   const pick = (fileList: FileList | null) => {
     const files = Array.from(fileList ?? []);
-    if (files.length > 0 && !busy) void send(files);
+    if (files.length > 0 && !busy) send(files);
   };
 
   return (
@@ -155,6 +198,11 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
           accept="image/*"
           multiple
           className="sr-only"
+          // The dropzone wrapper already is the button (role/tabIndex/label
+          // above); a second stop in the tab order — or a second announcement —
+          // would be noise. Clicks still reach it via the wrapper's plumbing.
+          tabIndex={-1}
+          aria-hidden="true"
           onChange={(event) => {
             pick(event.target.files);
             event.target.value = "";
@@ -217,7 +265,7 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
           size="sm"
           variant="secondary"
           disabled={busy}
-          onClick={() => void send(items.filter((i) => i.state === "failed").map((i) => i.file))}
+          onClick={retryFailed}
         >
           Retry failed
         </SoftButton>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from "react"
 import SectionCard from "@/components/patterns/SectionCard";
 import SettingsConfirmDialog from "@/components/settings/SettingsConfirmDialog";
 import WallDisplayToggle from "@/components/settings/WallDisplayToggle";
+import PhotoSettingsSection from "@/components/settings/PhotoSettingsSection";
 import IconButton from "@/components/ui/IconButton";
 import ListRow from "@/components/ui/ListRow";
 import Modal from "@/components/ui/Modal";
@@ -283,6 +284,8 @@ export default function HomeSettingsSection() {
           <SoftButton variant="ghost" onClick={() => setHelpOpen(true)} className="flex-1">Help</SoftButton>
         </div>
       </SectionCard>
+
+      <PhotoSettingsSection />
 
       <SettingsConfirmDialog
         open={resetOpen}

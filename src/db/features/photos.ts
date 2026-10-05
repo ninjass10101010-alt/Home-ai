@@ -53,7 +53,7 @@ export const photosSchema = {
   name: 'photos',
   type: 'base',
   fields: [
-    { name: 'original', type: 'file', required: true, maxSize: 20971520, mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] },
+    { name: 'original', type: 'file', required: true, maxSize: 104857600, mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] },
     { name: 'wall', type: 'file', required: false, maxSize: 8388608, mimeTypes: ['image/jpeg', 'image/webp'] },
     { name: 'takenAt', type: 'date', required: false },
     { name: 'caption', type: 'text', required: false },
@@ -66,6 +66,38 @@ export const photosSchema = {
   indexes: [
     'CREATE INDEX idx_photos_show_on_wall ON photos (showOnWall)',
     'CREATE INDEX idx_photos_taken_at ON photos (takenAt)',
+  ],
+};
+
+/**
+ * The wall's behavioural settings — ONE row, `key = "wall"` (spec §1).
+ *
+ * Server-side rather than localStorage because the widget runs on the wall,
+ * which is its own device: a setting stored on a phone would never reach it.
+ * There are deliberately no per-member rows — the wall is family-shared, and a
+ * per-row-per-parent design would let two parents fight over one panel.
+ *
+ * Access rules are `null` on every field (set by `createCollection`, like every
+ * other feature collection): the browser never talks to PocketBase, only the
+ * `/api/photos/settings` route does.
+ *
+ * `maxSelect: 1` is explicit on both selects on purpose — `buildPBField`
+ * defaults an unset `maxSelect` to `null`, which PocketBase reads as
+ * "allow multiple" and would silently turn a single-choice control into an
+ * array.
+ */
+export const photoSettingsSchema = {
+  name: 'photo_settings',
+  type: 'base',
+  fields: [
+    { name: 'key', type: 'text', required: true, defaultValue: 'wall' },
+    { name: 'rotateSeconds', type: 'number', required: false, defaultValue: 75 },
+    { name: 'transition', type: 'select', required: false, values: ['crossfade', 'dissolve', 'slide', 'cut'], defaultValue: 'crossfade', maxSelect: 1 },
+    { name: 'order', type: 'select', required: false, values: ['shuffle', 'newest', 'oldest'], defaultValue: 'shuffle', maxSelect: 1 },
+    { name: 'showCaption', type: 'bool', required: false, defaultValue: true },
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_photo_settings_key ON photo_settings (key)',
   ],
 };
 

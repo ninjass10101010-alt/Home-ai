@@ -31,7 +31,7 @@ interface PocketBaseField {
   mimeTypes?: string[];
 }
 
-interface PocketBaseSchema {
+export interface PocketBaseSchema {
   name: string;
   type: string;
   fields: PocketBaseField[];
@@ -58,15 +58,32 @@ interface PBField {
 
 // ─── Migration Functions ─────────────────────────────────────────────────────
 
+/** Outcome of create-or-skip: `failed` must be countable, or a half-created
+ *  schema looks like a successful run and the CLI always exits 0. */
+type CreateResult = "created" | "skipped" | "failed";
+
 /**
- * Check if a collection already exists.
+ * Check whether a collection already exists.
+ *
+ * THREE outcomes, because two are not enough: PocketBase answers a missing
+ * collection with a 404, but the probe can also FAIL (network blip, bad auth,
+ * PB down). Reading that as "does not exist" would attempt a create straight
+ * into an outage — so a failed probe is its own result and the caller counts
+ * it as a failure without ever creating blindly.
  */
-async function collectionExists(pb: any, name: string): Promise<boolean> {
+async function probeCollection(pb: any, name: string): Promise<"exists" | "absent" | "unreachable"> {
   try {
     await pb.collection(name).getList(1, 1);
-    return true;
-  } catch {
-    return false;
+    return "exists";
+  } catch (error: any) {
+    if (
+      error?.status === 404 ||
+      error?.data?.code === 404 ||
+      error?.response?.status === 404
+    ) {
+      return "absent";
+    }
+    return "unreachable";
   }
 }
 
@@ -146,13 +163,19 @@ function buildPBField(field: PocketBaseField): Record<string, any> {
 }
 
 /**
- * Create a collection in PocketBase.
+ * Create a collection in PocketBase — or report why it was not created.
  */
-async function createCollection(pb: any, schema: PocketBaseSchema): Promise<boolean> {
-  const exists = await collectionExists(pb, schema.name);
-  if (exists) {
+async function createCollection(pb: any, schema: PocketBaseSchema): Promise<CreateResult> {
+  const probe = await probeCollection(pb, schema.name);
+  if (probe === "exists") {
     console.log(`  ⏭️  Collection "${schema.name}" already exists, skipping`);
-    return false;
+    return "skipped";
+  }
+  if (probe === "unreachable") {
+    console.error(
+      `  ❌ Cannot confirm whether "${schema.name}" exists — PocketBase probe failed, not attempting create`,
+    );
+    return "failed";
   }
 
   const fields = schema.fields.map(buildPBField);
@@ -176,11 +199,67 @@ async function createCollection(pb: any, schema: PocketBaseSchema): Promise<bool
       deleteRule: null,
     });
     console.log(`  ✅ Created collection "${schema.name}"`);
-    return true;
+    return "created";
   } catch (error: any) {
     console.error(`  ❌ Failed to create "${schema.name}": ${error.message}`);
-    return false;
+    return "failed";
   }
+}
+
+/**
+ * Heal `maxSize` drift on a collection that ALREADY exists (spec §6.1).
+ *
+ * Editing a schema file changes nothing on a live database — `createCollection`
+ * skips existing collections, so a bumped file ceiling never reaches PocketBase
+ * and the API keeps rejecting at its own layer. This pass compares each `file`
+ * field's live `maxSize` with the schema's and writes back only what drifted.
+ *
+ * PocketBase moved file options from `field.options.maxSize` (nested, <0.23) to
+ * `field.maxSize` (flat, ≥0.23), so both shapes are read — and each field is
+ * written back in the shape it was read in. Returns the number of fields healed.
+ */
+export async function reconcileFileFieldLimits(pb: any, schema: PocketBaseSchema): Promise<number> {
+  const wanted = new Map<string, number>(
+    schema.fields
+      .filter((field) => field.type === 'file' && typeof field.maxSize === 'number')
+      .map((field) => [field.name, field.maxSize as number]),
+  );
+  if (wanted.size === 0) return 0;
+
+  const live = await pb.collections.getOne(schema.name);
+  const source: any = live ?? {};
+  // Same version split one level up: ≥0.23 serves `fields`, older serves `schema`.
+  const legacyShape = !Array.isArray(source.fields) && Array.isArray(source.schema);
+  const liveFields: any[] = legacyShape
+    ? source.schema
+    : Array.isArray(source.fields)
+      ? source.fields
+      : [];
+  if (liveFields.length === 0) return 0;
+
+  let healed = 0;
+  const updated = liveFields.map((field) => {
+    const wantedMax = wanted.get(field.name);
+    if (wantedMax === undefined || field.type !== 'file') return field;
+    const readFlat = typeof field.maxSize === 'number';
+    const current = readFlat ? field.maxSize : field.options?.maxSize;
+    if (current === wantedMax) return field;
+    healed++;
+    console.log(`  🔧 ${schema.name}.${field.name}: ${current ?? '(unset)'} -> ${wantedMax}`);
+    // `unset` on both counts as flat: a modern field with no options at all
+    // must not grow a nested `options` block it never had.
+    return readFlat || current === undefined
+      ? { ...field, maxSize: wantedMax }
+      : { ...field, options: { ...field.options, maxSize: wantedMax } };
+  });
+
+  if (healed === 0) return 0;
+  await pb.collections.update(
+    String(source.id ?? schema.name),
+    legacyShape ? { schema: updated } : { fields: updated },
+  );
+  console.log(`  ✅ ${schema.name}: healed ${healed} file field limit(s)`);
+  return healed;
 }
 
 /**
@@ -211,21 +290,38 @@ export async function runFeatureMigration(): Promise<{ created: number; skipped:
   let created = 0;
   let skipped = 0;
   let failed = 0;
+  let healed = 0;
 
   // Create collections in order (respecting foreign key dependencies)
   const orderedSchemas = getOrderedSchemas();
 
   for (const schema of orderedSchemas) {
-    const result = await createCollection(pb, schema as PocketBaseSchema);
-    if (result === true) created++;
-    else if (result === false) skipped++;
+    const typed = schema as PocketBaseSchema;
+    const result = await createCollection(pb, typed);
+    if (result === "created") created++;
+    else if (result === "skipped") skipped++;
     else failed++;
+
+    // "Already there" is not "already right": a bumped field option never
+    // reaches an existing collection through create, so patch the drift here.
+    if (result === "skipped") {
+      try {
+        healed += await reconcileFileFieldLimits(pb, typed);
+      } catch (error: any) {
+        // Not folded into `failed` (that tally counts collections): the create
+        // result stands, but a reconcile that did not land is shouted about.
+        console.error(
+          `[migrate] reconcile failed for "${typed.name}": ${error?.message ?? error}`,
+        );
+      }
+    }
   }
 
   console.log(`\n📊 Migration complete:`);
   console.log(`   ✅ Created: ${created}`);
   console.log(`   ⏭️  Skipped: ${skipped}`);
   console.log(`   ❌ Failed: ${failed}`);
+  if (healed > 0) console.log(`   🔧 File limits healed: ${healed}`);
   console.log('');
 
   return { created, skipped, failed };

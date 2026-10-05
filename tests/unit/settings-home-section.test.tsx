@@ -27,6 +27,31 @@ function installMatchMedia() {
   }));
 }
 
+/**
+ * The mounted Photos card fetches `/api/photos/settings` on mount (plan T7).
+ * Without this stub the child's fetch would hit the network (or throw on the
+ * relative URL), so every render in this suite needs a settings responder.
+ */
+function installSettingsFetch() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/photos/settings")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            settings: { rotateSeconds: 75, transition: "crossfade", order: "shuffle", showCaption: true },
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({ ok: false }) };
+    }),
+  );
+}
+
 function setViewport(width: number) {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
   Object.defineProperty(window, "innerHeight", { configurable: true, value: width === 390 ? 844 : 1024 });
@@ -48,6 +73,15 @@ function seedConfig(): HomeLayoutConfig {
   return config;
 }
 
+/** Flush the mounted Photos card's settings GET so its setState lands inside act. */
+async function flushSettingsFetch() {
+  for (let i = 0; i < 4; i += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+}
+
 async function renderView() {
   const host = document.createElement("div");
   document.body.appendChild(host);
@@ -60,6 +94,7 @@ async function renderView() {
       </LayoutProvider>,
     );
   });
+  await flushSettingsFetch();
   return { host, root };
 }
 
@@ -89,6 +124,7 @@ async function renderProbe(showSection: boolean) {
       </LayoutProvider>,
     );
   });
+  await flushSettingsFetch();
   return { host, root };
 }
 
@@ -101,6 +137,7 @@ async function rerenderProbe(root: Root, showSection: boolean) {
       </LayoutProvider>,
     );
   });
+  await flushSettingsFetch();
 }
 
 function rowIds(scope: ParentNode) {
@@ -186,6 +223,7 @@ beforeEach(() => {
   reducedMotion = false;
   setViewport(390);
   installMatchMedia();
+  installSettingsFetch();
   seedConfig();
 });
 
@@ -222,6 +260,29 @@ describe("HomeSettingsSection", () => {
     // "N on Home" counts what the selected layout actually shows, so derive it
     // rather than hard-coding a widget count the next manifest edit would break.
     expect(host.textContent).toContain(`${config.phone.widgets.length - config.phone.hidden.length} on Home`);
+  });
+
+  it("mounts the Photos card directly below Layout & display and reads settings once", async () => {
+    const { host } = await renderView();
+
+    const headings = Array.from(host.querySelectorAll("h2")).map((node) => node.textContent?.trim());
+    const layoutIndex = headings.indexOf("Layout & display");
+    const photosIndex = headings.indexOf("Photos");
+    expect(layoutIndex).toBeGreaterThanOrEqual(0);
+    expect(photosIndex).toBeGreaterThan(layoutIndex);
+    expect(host.textContent).toContain("Tune how family photos change on the wall.");
+    // Healthy stub read → the card enabled itself instead of showing the degraded line.
+    expect(host.textContent).not.toContain("Couldn't read saved settings — showing defaults.");
+    expect(
+      host.querySelector<HTMLInputElement>("#photo-rotate-seconds")?.disabled,
+    ).toBe(false);
+
+    const fetchMock = globalThis.fetch as unknown as { mock: { calls: unknown[][] } };
+    const settingsGets = fetchMock.mock.calls.filter(
+      ([input, init]) =>
+        String(input).includes("/api/photos/settings") && (!init || !(init as RequestInit).method),
+    );
+    expect(settingsGets).toHaveLength(1);
   });
 
   it("keeps phone, tablet, and desktop order and hidden rows independent", async () => {
