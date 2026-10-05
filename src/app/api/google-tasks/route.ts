@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
-import { isGoogleConnected, GoogleAuthError, mapGoogleAuthError } from "@/lib/google/oauth-client";
+import {
+  isGoogleConnected,
+  GoogleAuthError,
+  mapGoogleAuthError,
+  readConnectionSnapshot,
+  TASKS_SNAPSHOT_KEY,
+} from "@/lib/google/connection-state";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
-import { getStoredTokensStrict } from "@/lib/google/token-store.ts";
 import {
   createTask,
   updateTask,
@@ -33,16 +38,12 @@ function disconnectedResponse() {
   });
 }
 
-async function readTokensStrict() {
+async function readTasksConnectionState(): Promise<boolean> {
   try {
-    const tokens = await getStoredTokensStrict();
-    if (!tokens || tokens.revoked_at) {
-      throw new GoogleAuthError("no_grant", "Google account is not connected");
-    }
-    return tokens;
-  } catch (error) {
-    if (error instanceof GoogleAuthError) throw error;
-    throw new GoogleAuthError("unavailable", "Google token state unavailable");
+    const snapshot = await readConnectionSnapshot(TASKS_SNAPSHOT_KEY);
+    return !!snapshot.connectedAccountId && snapshot.status === "ACTIVE";
+  } catch {
+    throw new GoogleAuthError("unavailable", "Google tasks state unavailable");
   }
 }
 
@@ -79,6 +80,27 @@ export async function GET(req: NextRequest) {
     return disconnectedResponse();
   }
 
+  // Tasks is an optional SECOND Composio connection on its own snapshot key;
+  // the old Google OAuth scope check is retired (Composio brokers the grant).
+  let tasksConnected: boolean;
+  try {
+    tasksConnected = await readTasksConnectionState();
+  } catch (error) {
+    return authErrorResponse(error);
+  }
+
+  if (!tasksConnected) {
+    return NextResponse.json({
+      ok: true,
+      connected: true,
+      tasks: [],
+      reminders: [],
+      tasks_scope_granted: false,
+      notice:
+        "Google Tasks is not connected. Connect Google Tasks in Settings → Connections to enable task and reminder sync.",
+    });
+  }
+
   if (sync === "now") {
     try {
       await syncTasks();
@@ -91,19 +113,6 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const tokens = await readTokensStrict();
-    const hasTasksScope = tokens?.scope?.includes("googleapis.com/auth/tasks");
-    if (!hasTasksScope) {
-      return NextResponse.json({
-        ok: true,
-        connected: true,
-        tasks: [],
-        reminders: [],
-        tasks_scope_granted: false,
-        notice:
-          "Google Tasks scope is not granted. Reminders and Tasks sync are paused until you add the Tasks scope (requires a Web OAuth client with a public redirect URI).",
-      });
-    }
     const tasks = resource === "reminders" ? [] : await readCachedTasks();
     const reminders = resource === "tasks" ? [] : await readCachedReminders();
     return NextResponse.json({ ok: true, connected: true, tasks, reminders, tasks_scope_granted: true });

@@ -1,4 +1,5 @@
 import { getServiceConfig } from "@/lib/services/config";
+import { recordApiCall } from "./api-quota.ts";
 import {
   COMPOSIO_ACTIONS,
   COMPOSIO_EXECUTE_PATH,
@@ -83,6 +84,9 @@ export async function executeComposioAction<T>(
   action: string, args: Record<string, unknown>, connectedAccountId?: string,
 ): Promise<T> {
   if (!action) throw new ComposioError("api_error", "No Composio action is pinned for this capability");
+  // Quota observability: count every execute attempt against the shared
+  // consuela_google_api_usage day row. A PB hiccup must never fail the action.
+  await recordApiCall(`composio:${action}`).catch(() => null);
   const key = await getComposioKey();
   const body: Record<string, unknown> = { arguments: args };
   if (connectedAccountId) body.connected_account_id = connectedAccountId;

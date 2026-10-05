@@ -33,11 +33,6 @@ vi.mock("@/lib/google/calendar", () => ({
   readCalendarSyncRows: mocks.readCalendarSyncRows,
   listCalendars: mocks.listCalendars,
 }));
-vi.mock("@/lib/google/oauth-client", () => ({
-  isGoogleConnected: mocks.isGoogleConnected,
-  GoogleAuthError: class GoogleAuthError extends Error {},
-  mapGoogleAuthError: vi.fn(() => ({ status: 500, body: { error: "unavailable" } })),
-}));
 vi.mock("@/lib/google/pb-collections", () => ({ ensureGoogleCollections: mocks.ensureGoogleCollections }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn) }));
 vi.mock("@/lib/ai/providers", () => ({

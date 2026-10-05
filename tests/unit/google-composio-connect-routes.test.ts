@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => {
     writeConnectionSnapshot: vi.fn(),
     disconnectGoogle: vi.fn(),
     syncCalendar: vi.fn(),
-    clearDirectGoogleCache: vi.fn(),
+    clearCalendarCache: vi.fn(),
     invalidateGoogleIntegrationOperation: vi.fn(),
   };
 });
@@ -46,7 +46,7 @@ vi.mock("@/lib/google/connection-state", () => ({
   disconnectGoogle: mocks.disconnectGoogle,
 }));
 vi.mock("@/lib/google/calendar", () => ({ syncCalendar: mocks.syncCalendar }));
-vi.mock("@/lib/google/token-store", () => ({ clearDirectGoogleCache: mocks.clearDirectGoogleCache }));
+vi.mock("@/lib/google/token-store", () => ({ clearCalendarCache: mocks.clearCalendarCache }));
 vi.mock("@/lib/google/integration-operation", () => ({
   invalidateGoogleIntegrationOperation: mocks.invalidateGoogleIntegrationOperation,
 }));
@@ -86,7 +86,7 @@ const spies = [
   mocks.writeConnectionSnapshot,
   mocks.disconnectGoogle,
   mocks.syncCalendar,
-  mocks.clearDirectGoogleCache,
+  mocks.clearCalendarCache,
   mocks.invalidateGoogleIntegrationOperation,
 ];
 
@@ -112,7 +112,7 @@ beforeEach(() => {
   mocks.writeConnectionSnapshot.mockResolvedValue(undefined);
   mocks.disconnectGoogle.mockResolvedValue(undefined);
   mocks.syncCalendar.mockResolvedValue({ events: 0, deleted: 0, perCalendar: [] });
-  mocks.clearDirectGoogleCache.mockResolvedValue(true);
+  mocks.clearCalendarCache.mockResolvedValue(true);
   mocks.deleteConnectedAccount.mockResolvedValue(true);
   mocks.getConnectedAccount.mockResolvedValue(null);
 });
@@ -457,7 +457,7 @@ describe("POST /api/google/composio/disconnect", () => {
     });
     expect(mocks.deleteConnectedAccount).toHaveBeenCalledWith("ca_1");
     expect(mocks.disconnectGoogle).toHaveBeenCalledTimes(1);
-    expect(mocks.clearDirectGoogleCache).toHaveBeenCalledTimes(1);
+    expect(mocks.clearCalendarCache).toHaveBeenCalledTimes(1);
     expect(mocks.invalidateGoogleIntegrationOperation).toHaveBeenCalledTimes(1);
   });
 
@@ -486,7 +486,7 @@ describe("POST /api/google/composio/disconnect", () => {
     expect(typeof body.warning).toBe("string");
     expect(body.warning.length).toBeGreaterThan(0);
     expect(mocks.disconnectGoogle).toHaveBeenCalledTimes(1);
-    expect(mocks.clearDirectGoogleCache).toHaveBeenCalledTimes(1);
+    expect(mocks.clearCalendarCache).toHaveBeenCalledTimes(1);
     expect(mocks.invalidateGoogleIntegrationOperation).toHaveBeenCalledTimes(1);
     expect(consoleWarn).toHaveBeenCalledWith(
       "[google/composio/disconnect] remote delete failed:",
@@ -503,7 +503,7 @@ describe("POST /api/google/composio/disconnect", () => {
     expect(await response.json()).toEqual({ ok: false, error: "google_state_unavailable" });
     expect(mocks.deleteConnectedAccount).not.toHaveBeenCalled();
     expect(mocks.disconnectGoogle).not.toHaveBeenCalled();
-    expect(mocks.clearDirectGoogleCache).not.toHaveBeenCalled();
+    expect(mocks.clearCalendarCache).not.toHaveBeenCalled();
     expect(mocks.invalidateGoogleIntegrationOperation).not.toHaveBeenCalled();
   });
 
@@ -519,7 +519,7 @@ describe("POST /api/google/composio/disconnect", () => {
     });
     expect(mocks.deleteConnectedAccount).not.toHaveBeenCalled();
     expect(mocks.disconnectGoogle).toHaveBeenCalledTimes(1);
-    expect(mocks.clearDirectGoogleCache).toHaveBeenCalledTimes(1);
+    expect(mocks.clearCalendarCache).toHaveBeenCalledTimes(1);
     expect(mocks.invalidateGoogleIntegrationOperation).toHaveBeenCalledTimes(1);
   });
 

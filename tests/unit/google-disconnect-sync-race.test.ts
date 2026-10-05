@@ -1,38 +1,34 @@
+// Task 13 — Composio-era sync/disconnect serialization contract.
+//
+// The direct Device Flow route that this file used to drive is gone. The
+// disconnect path now is: clearConnectionSnapshot() (drop the Composio
+// snapshot), invalidateGoogleIntegrationOperation() (bump the generation),
+// clearCalendarCache() (prune cached calendar rows). This test proves the
+// ordering guarantee that a late in-flight Composio pull cannot resurrect a
+// disconnected calendar: the sync captured the generation BEFORE the pull,
+// re-checks it after the pull resolves, and must bail before any PocketBase
+// upsert once the disconnect bumped it.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
-  googleFetch: vi.fn(),
+  executeComposioAction: vi.fn(),
   withAdmin: vi.fn(),
-  authorizeAdminRequest: vi.fn(),
-  revokeGoogleToken: vi.fn(),
-  getStoredTokensStrict: vi.fn(),
-  revokeTokens: vi.fn(),
-  clearDirectGoogleCache: vi.fn(),
-  invalidateDeviceAttempt: vi.fn(),
-  cancelDeviceAttempt: vi.fn(),
-  invalidateAllDeviceAttempts: vi.fn(),
 }));
 
-vi.mock("@/lib/google/oauth-client.ts", () => ({ googleFetch: mocks.googleFetch }));
+vi.mock("@/lib/google/composio", () => ({
+  executeComposioAction: mocks.executeComposioAction,
+}));
 vi.mock("@/lib/pb-auth.ts", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
-vi.mock("@/lib/admin-auth", () => ({ authorizeAdminRequest: mocks.authorizeAdminRequest }));
-vi.mock("@/lib/google/device-auth", () => ({ revokeGoogleToken: mocks.revokeGoogleToken }));
-vi.mock("@/lib/google/device-attempts", () => ({
-  invalidateDeviceAttempt: mocks.invalidateDeviceAttempt,
-  cancelDeviceAttempt: mocks.cancelDeviceAttempt,
-  invalidateAllDeviceAttempts: mocks.invalidateAllDeviceAttempts,
-}));
-vi.mock("@/lib/google/token-store", () => ({
-  getStoredTokensStrict: mocks.getStoredTokensStrict,
-  revokeTokens: mocks.revokeTokens,
-  clearDirectGoogleCache: mocks.clearDirectGoogleCache,
-}));
 
 import { syncCalendar } from "@/lib/google/calendar";
-import { POST as revoke } from "@/app/api/google/device-revoke/route";
+import { clearConnectionSnapshot } from "@/lib/google/connection-state";
+import {
+  __resetGoogleIntegrationOperationForTests,
+  invalidateGoogleIntegrationOperation,
+} from "@/lib/google/integration-operation";
+import { clearCalendarCache } from "@/lib/google/token-store";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -40,70 +36,107 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function pbMock(eventRows: any[]) {
-  const calendarRows = [{ id: "cal", calendar_id: "primary", summary: "Primary", selected: true, sync_token: null }];
-  return {
-    calendarRows,
-    eventRows,
+function pbMock() {
+  const snapshotRows: any[] = [{
+    id: "snap",
+    key: "google_composio_connection",
+    data: { connectedAccountId: "ca_1", status: "ACTIVE" },
+  }];
+  const calendarRows: any[] = [
+    { id: "cal", calendar_id: "primary", summary: "Primary", selected: true, sync_token: null },
+  ];
+  const eventRows: any[] = [
+    { id: "evt-cached", google_id: "old-remote", calendar_id: "primary", summary: "Cached event" },
+  ];
+  const writes = {
+    eventCreates: [] as any[],
+    eventUpdates: [] as any[],
+    eventDeletes: [] as string[],
+    calendarWrites: [] as any[],
+  };
+
+  const pb = {
     collection: (name: string) => {
+      if (name === "consuela_data_snapshots") {
+        return {
+          getFullList: async (args: any = {}) => {
+            const match = /key = "([^"]+)"/.exec(args?.filter || "");
+            return match ? snapshotRows.filter((row) => row.key === match[1]) : snapshotRows;
+          },
+          delete: async (id: string) => {
+            const index = snapshotRows.findIndex((row) => row.id === id);
+            if (index >= 0) snapshotRows.splice(index, 1);
+          },
+          create: async () => ({}),
+          update: async () => ({}),
+        };
+      }
       if (name === "consuela_google_calendar_sync") {
         return {
           getFullList: async (args: any = {}) => {
-            const match = /calendar_id = "([^"]*)"/.exec(args?.filter || "");
+            const match = /calendar_id = "([^"]+)"/.exec(args?.filter || "");
             return match ? calendarRows.filter((row) => row.calendar_id === match[1]) : calendarRows;
           },
-          update: async (id: string, payload: any) => Object.assign(calendarRows.find((row) => row.id === id) || {}, payload),
+          update: async (id: string, payload: any) => {
+            writes.calendarWrites.push({ op: "update", id, payload });
+            return {};
+          },
           create: async (payload: any) => {
-            const row = { id: "new-cal", ...payload };
-            calendarRows.push(row);
-            return row;
+            writes.calendarWrites.push({ op: "create", payload });
+            return { id: "new-cal" };
+          },
+          delete: async (id: string) => {
+            writes.calendarWrites.push({ op: "delete", id });
+            const index = calendarRows.findIndex((row) => row.id === id);
+            if (index >= 0) calendarRows.splice(index, 1);
           },
         };
       }
       if (name === "consuela_google_calendar_events") {
         return {
-          getFullList: async (args: any = {}) => {
-            const filter = args?.filter || "";
-            const match = /calendar_id = "([^"]*)"/.exec(filter);
-            return match ? eventRows.filter((row) => row.calendar_id === match[1]) : eventRows;
-          },
+          getFullList: async () => eventRows,
           create: async (row: any) => {
+            writes.eventCreates.push(row);
             const created = { id: `event-${eventRows.length + 1}`, ...row };
             eventRows.push(created);
             return created;
           },
-          update: async () => ({}),
+          update: async (id: string, row: any) => {
+            writes.eventUpdates.push({ id, row });
+            return {};
+          },
           delete: async (id: string) => {
+            writes.eventDeletes.push(id);
             const index = eventRows.findIndex((row) => row.id === id);
             if (index >= 0) eventRows.splice(index, 1);
           },
         };
       }
-      return { getFullList: async () => [], create: async () => ({}), update: async () => ({}), delete: async () => ({}) };
+      return {
+        getFullList: async () => [],
+        create: async () => ({}),
+        update: async () => ({}),
+        delete: async () => ({}),
+      };
     },
   };
+  return { pb, writes, snapshotRows, calendarRows, eventRows };
 }
 
 beforeEach(() => {
-  for (const mock of Object.values(mocks)) mock.mockReset();
-  mocks.authorizeAdminRequest.mockResolvedValue({ ok: true });
-  mocks.invalidateDeviceAttempt.mockResolvedValue(true);
-  mocks.cancelDeviceAttempt.mockResolvedValue({ found: true, shouldClearGrant: true });
-  mocks.invalidateAllDeviceAttempts.mockImplementation(async (cleanup?: () => Promise<unknown>) => cleanup ? cleanup() : undefined);
-  mocks.revokeGoogleToken.mockResolvedValue(true);
-  mocks.getStoredTokensStrict.mockResolvedValue({ access_token: "access", refresh_token: "refresh", revoked_at: null });
-  mocks.revokeTokens.mockResolvedValue(true);
+  mocks.executeComposioAction.mockReset();
+  mocks.withAdmin.mockReset();
+  __resetGoogleIntegrationOperationForTests();
 });
 
 describe("Google calendar sync and disconnect serialization", () => {
-  it("does not recreate event rows after a deferred read and direct cleanup", async () => {
-    const releaseFetch = deferred<void>();
-    const store = pbMock([]);
-    mocks.withAdmin.mockImplementation((fn: (pb: unknown) => Promise<unknown>) => fn(store));
-    mocks.googleFetch.mockImplementation(async () => {
-      await releaseFetch.promise;
+  it("aborts an in-flight Composio pull after disconnect and never resurrects pruned rows", async () => {
+    const releasePull = deferred<unknown>();
+    const store = pbMock();
+    mocks.withAdmin.mockImplementation((fn: (pb: unknown) => Promise<unknown>) => fn(store.pb));
+    mocks.executeComposioAction.mockImplementation(async () => {
+      await releasePull.promise;
       return {
-        status: 200,
         data: {
           items: [{
             id: "remote-1",
@@ -112,29 +145,39 @@ describe("Google calendar sync and disconnect serialization", () => {
             start: { dateTime: "2026-09-25T10:00:00Z" },
             end: { dateTime: "2026-09-25T11:00:00Z" },
           }],
-          nextSyncToken: "TOKEN",
         },
-        headers: new Headers(),
+        successful: true,
+        error: null,
       };
-    });
-    mocks.clearDirectGoogleCache.mockImplementation(async () => {
-      store.eventRows.length = 0;
-      store.calendarRows.length = 0;
-      return true;
     });
 
     const syncPromise = syncCalendar();
-    await vi.waitFor(() => expect(mocks.googleFetch).toHaveBeenCalledTimes(1));
-    const revokePromise = revoke(new NextRequest("http://localhost/api/google/device-revoke", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "disconnect" }),
-    }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    releaseFetch.resolve(undefined);
-    const [, revokeResponse] = await Promise.all([syncPromise, revokePromise]);
+    await vi.waitFor(() => expect(mocks.executeComposioAction).toHaveBeenCalledTimes(1));
 
-    expect(revokeResponse.status).toBe(200);
+    // Disconnect path exactly as POST /api/google/composio/disconnect runs it:
+    // snapshot first, then generation bump, then cache prune.
+    await clearConnectionSnapshot();
+    invalidateGoogleIntegrationOperation();
+    await clearCalendarCache();
+
+    expect(store.snapshotRows).toHaveLength(0);
+    expect(store.eventRows).toHaveLength(0);
+    const writesAtDisconnect = {
+      eventCreates: store.writes.eventCreates.length,
+      eventUpdates: store.writes.eventUpdates.length,
+      calendarWrites: store.writes.calendarWrites.length,
+    };
+
+    releasePull.resolve(undefined);
+    const outcome = await syncPromise;
+
+    // The generation re-check after the pull must abort the run...
+    expect(outcome).toEqual({ skipped: true, reason: "disconnected" });
+    // ...so no event was upserted and no calendar/sync state was rewritten
+    // after the disconnect (the pruned rows stay pruned).
+    expect(store.writes.eventCreates).toHaveLength(writesAtDisconnect.eventCreates);
+    expect(store.writes.eventUpdates).toHaveLength(writesAtDisconnect.eventUpdates);
+    expect(store.writes.calendarWrites).toHaveLength(writesAtDisconnect.calendarWrites);
     expect(store.eventRows).toHaveLength(0);
   });
 });

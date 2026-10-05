@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fixture from "../fixtures/composio-contract.json";
 
-const { getServiceConfig } = vi.hoisted(() => ({ getServiceConfig: vi.fn() }));
+const { getServiceConfig, recordApiCall } = vi.hoisted(() => ({
+  getServiceConfig: vi.fn(),
+  recordApiCall: vi.fn(),
+}));
 vi.mock("@/lib/services/config", () => ({ getServiceConfig }));
+vi.mock("@/lib/google/api-quota", () => ({ recordApiCall }));
 
 import {
   createConnectedAccountLink, deleteConnectedAccount, ensureAuthConfig, executeComposioAction,
@@ -10,7 +14,12 @@ import {
 } from "@/lib/google/composio";
 
 describe("composio client", () => {
-  beforeEach(() => { getServiceConfig.mockReset(); vi.restoreAllMocks(); });
+  beforeEach(() => {
+    getServiceConfig.mockReset();
+    recordApiCall.mockReset();
+    recordApiCall.mockResolvedValue({ count: 1, tripped: false, blocked: false });
+    vi.restoreAllMocks();
+  });
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it("throws not_configured when the key is absent", async () => {
@@ -36,6 +45,33 @@ describe("composio client", () => {
     await expect(executeComposioAction("X", {})).rejects.toMatchObject({ code: "auth_failed" });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("boom", { status: 500 })));
     await expect(executeComposioAction("X", {})).rejects.toMatchObject({ code: "api_error", status: 500 });
+  });
+
+  it("records exactly one quota call per Composio execute", async () => {
+    getServiceConfig.mockResolvedValue("sk-test");
+    const fetchMock = vi.fn().mockImplementation(
+      async () => new Response(JSON.stringify(fixture.executeListEvents), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await executeComposioAction("GOOGLECALENDAR_X", {}, "ca_1");
+    await executeComposioAction("GOOGLECALENDAR_Y", {});
+
+    expect(recordApiCall).toHaveBeenCalledTimes(2);
+    expect(recordApiCall).toHaveBeenNthCalledWith(1, "composio:GOOGLECALENDAR_X");
+    expect(recordApiCall).toHaveBeenNthCalledWith(2, "composio:GOOGLECALENDAR_Y");
+  });
+
+  it("does not fail an execute when the quota recorder is unavailable", async () => {
+    getServiceConfig.mockResolvedValue("sk-test");
+    recordApiCall.mockRejectedValue(new Error("PB down"));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(fixture.executeListEvents), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(executeComposioAction("GOOGLECALENDAR_X", {})).resolves.toMatchObject({
+      successful: true,
+    });
+    expect(recordApiCall).toHaveBeenCalledTimes(1);
   });
 
   it("returns null for an unknown connected account", async () => {

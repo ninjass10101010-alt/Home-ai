@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   readConnectionSnapshot: vi.fn(),
   authorizeAdminRequest: vi.fn(),
   authorizeCurrentParentRequest: vi.fn(),
-  getStoredTokensStrict: vi.fn(),
   readCalendarSyncRows: vi.fn(),
   readCachedEvents: vi.fn(),
   readCachedReminders: vi.fn(),
@@ -26,20 +25,9 @@ const mocks = vi.hoisted(() => ({
   getConsuelaListId: vi.fn(),
 }));
 
-vi.mock("@/lib/google/token-store", () => ({
-  getStoredTokensStrict: mocks.getStoredTokensStrict,
-}));
-vi.mock("@/lib/google/device-auth", () => ({
-  refreshAccessToken: vi.fn(),
-  revokeGoogleToken: vi.fn(),
-}));
 vi.mock("@/lib/google/api-quota", () => ({
   recordApiCall: vi.fn(),
 }));
-vi.mock("@/lib/google/oauth-client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/google/oauth-client")>();
-  return { ...actual, isGoogleConnected: mocks.isGoogleConnected };
-});
 vi.mock("@/lib/google/connection-state", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/google/connection-state")>();
   return {
@@ -82,8 +70,7 @@ vi.mock("@/lib/admin-auth", () => ({
 }));
 vi.mock("@/lib/server-auth", () => ({ authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest }));
 
-import { GoogleAuthError } from "@/lib/google/oauth-client";
-import { GoogleAuthError as ConnectionGoogleAuthError } from "@/lib/google/connection-state";
+import { GoogleAuthError } from "@/lib/google/connection-state";
 import { GET as getCalendar } from "@/app/api/google-calendar/route";
 import { GET as getCalendars } from "@/app/api/google/calendars/route";
 import { GET as getTasks, POST as postTasks } from "@/app/api/google-tasks/route";
@@ -109,11 +96,6 @@ beforeEach(() => {
   });
   mocks.authorizeAdminRequest.mockResolvedValue({ ok: true });
   mocks.authorizeCurrentParentRequest.mockResolvedValue({ ok: true, member: { id: "m1", role: "parent" } });
-  mocks.getStoredTokensStrict.mockResolvedValue({
-    scope: "googleapis.com/auth/tasks",
-    account_email: "family@example.com",
-    granted_at: "2026-09-24T00:00:00.000Z",
-  });
   mocks.readCalendarSyncRows.mockResolvedValue([]);
   mocks.readCachedEvents.mockResolvedValue([]);
   mocks.readCachedReminders.mockResolvedValue([]);
@@ -154,7 +136,7 @@ describe("GET /api/google-calendar auth errors", () => {
 
   it("returns unavailable when auth state cannot be read", async () => {
     mocks.isGoogleConnected.mockRejectedValueOnce(
-      new ConnectionGoogleAuthError("unavailable", "PB unavailable"),
+      new GoogleAuthError("unavailable", "PB unavailable"),
     );
 
     const response = await getCalendar(request("/api/google-calendar"));
@@ -181,7 +163,7 @@ describe("GET /api/google-calendar auth errors", () => {
 
   it("keeps no_grant as a successful disconnected response", async () => {
     mocks.isGoogleConnected.mockRejectedValueOnce(
-      new ConnectionGoogleAuthError("no_grant", "Google account is not connected"),
+      new GoogleAuthError("no_grant", "Google account is not connected"),
     );
 
     const response = await getCalendar(request("/api/google-calendar"));
@@ -343,22 +325,24 @@ describe("GET /api/google-tasks auth errors", () => {
     });
   });
 
-  it("keeps a strict no-grant metadata read as a successful disconnected response", async () => {
-    mocks.getStoredTokensStrict.mockResolvedValueOnce(null);
-
+  it("keeps a missing Tasks Composio connection as an honest not-connected notice", async () => {
     const response = await getTasks(request("/api/google-tasks"));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       ok: true,
-      connected: false,
+      connected: true,
       tasks: [],
       reminders: [],
+      tasks_scope_granted: false,
+      notice: expect.any(String),
     });
+    expect(mocks.readCachedTasks).not.toHaveBeenCalled();
+    expect(mocks.readCachedReminders).not.toHaveBeenCalled();
   });
 
-  it("returns unavailable when the strict scope read fails", async () => {
-    mocks.getStoredTokensStrict.mockRejectedValueOnce(new Error("PB unavailable"));
+  it("returns unavailable when the Tasks connection snapshot read fails", async () => {
+    mocks.readConnectionSnapshot.mockRejectedValueOnce(new Error("PB unavailable"));
 
     const response = await getTasks(request("/api/google-tasks"));
 
@@ -366,7 +350,7 @@ describe("GET /api/google-tasks auth errors", () => {
     expect(await response.json()).toEqual({
       ok: false,
       code: "unavailable",
-      error: "Google token state unavailable",
+      error: "Google tasks state unavailable",
     });
   });
 });
@@ -441,7 +425,7 @@ describe("POST /api/cron/consuela/google-sync auth errors", () => {
 
   it("returns no_grant as 409", async () => {
     mocks.isGoogleConnected.mockRejectedValueOnce(
-      new ConnectionGoogleAuthError("no_grant", "Google account is not connected"),
+      new GoogleAuthError("no_grant", "Google account is not connected"),
     );
 
     const response = await postCronSync(request("/api/cron/consuela/google-sync"));
@@ -456,7 +440,7 @@ describe("POST /api/cron/consuela/google-sync auth errors", () => {
 
   it("returns unavailable as 503", async () => {
     mocks.syncCalendar.mockRejectedValueOnce(
-      new ConnectionGoogleAuthError("unavailable", "PB unavailable"),
+      new GoogleAuthError("unavailable", "PB unavailable"),
     );
 
     const response = await postCronSync(request("/api/cron/consuela/google-sync"));

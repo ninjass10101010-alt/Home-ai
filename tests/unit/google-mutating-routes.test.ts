@@ -26,12 +26,7 @@ const mocks = vi.hoisted(() => {
     };
   }
   return {
-  authorizeAdminRequest: vi.fn(),
-  isDeviceAttemptActive: vi.fn(),
-  withDeviceAttemptCommit: vi.fn(),
-  pollForToken: vi.fn(),
-    fetchAccountEmail: vi.fn(),
-    saveTokens: vi.fn(),
+    authorizeAdminRequest: vi.fn(),
     isGoogleConnected: vi.fn(),
     readConnectionSnapshot: vi.fn(),
     GoogleAuthError,
@@ -39,32 +34,17 @@ const mocks = vi.hoisted(() => {
     syncCalendar: vi.fn(),
     listCalendars: vi.fn(),
     ensureGoogleCollections: vi.fn(),
-    getStoredTokens: vi.fn(),
-    getStoredTokensStrict: vi.fn(),
     syncTasks: vi.fn(),
   };
 });
 
 vi.mock("@/lib/admin-auth", () => ({ authorizeAdminRequest: mocks.authorizeAdminRequest }));
-vi.mock("@/lib/google/device-auth", () => ({
-  pollForToken: mocks.pollForToken,
-  fetchAccountEmail: mocks.fetchAccountEmail,
-}));
-vi.mock("@/lib/google/device-attempts", () => ({
-  isDeviceAttemptActive: mocks.isDeviceAttemptActive,
-  withDeviceAttemptCommit: mocks.withDeviceAttemptCommit,
-}));
-vi.mock("@/lib/google/token-store", () => ({ saveTokens: mocks.saveTokens, getStoredTokens: mocks.getStoredTokens, getStoredTokensStrict: mocks.getStoredTokensStrict }));
-vi.mock("@/lib/google/oauth-client", () => ({
-    isGoogleConnected: mocks.isGoogleConnected,
-    GoogleAuthError: mocks.GoogleAuthError,
-    mapGoogleAuthError: mocks.mapGoogleAuthError,
-  }));
 vi.mock("@/lib/google/connection-state", () => ({
   isGoogleConnected: mocks.isGoogleConnected,
   GoogleAuthError: mocks.GoogleAuthError,
   mapGoogleAuthError: mocks.mapGoogleAuthError,
   readConnectionSnapshot: mocks.readConnectionSnapshot,
+  TASKS_SNAPSHOT_KEY: "google_composio_tasks",
 }));
 vi.mock("@/lib/google/calendar", () => ({ syncCalendar: mocks.syncCalendar, listCalendars: mocks.listCalendars }));
 vi.mock("@/lib/google/tasks", async (importOriginal) => ({
@@ -73,7 +53,6 @@ vi.mock("@/lib/google/tasks", async (importOriginal) => ({
 }));
 vi.mock("@/lib/google/pb-collections", () => ({ ensureGoogleCollections: mocks.ensureGoogleCollections }));
 
-import { POST as poll } from "@/app/api/google/device-poll/route";
 import { POST as sync } from "@/app/api/google/sync/route";
 import { GET as getTasks, POST as postTasks } from "@/app/api/google-tasks/route";
 
@@ -90,11 +69,6 @@ beforeEach(() => {
     if (key !== "GoogleAuthError" && key !== "mapGoogleAuthError") (mock as any).mockReset();
   }
   mocks.authorizeAdminRequest.mockResolvedValue({ ok: true });
-  mocks.isDeviceAttemptActive.mockResolvedValue(true);
-  mocks.withDeviceAttemptCommit.mockImplementation(async (_id: string, fn: () => Promise<unknown>) => fn());
-  mocks.pollForToken.mockResolvedValue({ status: "pending", error: "authorization_pending", interval: 5 });
-  mocks.fetchAccountEmail.mockResolvedValue("family@example.com");
-  mocks.saveTokens.mockResolvedValue(undefined);
   mocks.isGoogleConnected.mockResolvedValue(true);
   mocks.readConnectionSnapshot.mockResolvedValue({
     connectedAccountId: "composio-account-1",
@@ -106,22 +80,10 @@ beforeEach(() => {
   mocks.syncCalendar.mockResolvedValue({ events: 2, deleted: 0, perCalendar: [] });
   mocks.listCalendars.mockResolvedValue([]);
   mocks.ensureGoogleCollections.mockResolvedValue(undefined);
-  mocks.getStoredTokens.mockResolvedValue({ scope: "calendar" });
-  mocks.getStoredTokensStrict.mockResolvedValue({ scope: "calendar" });
   mocks.syncTasks.mockResolvedValue({ tasks: 1, deleted: 0 });
 });
 
 describe("Google mutating route authorization", () => {
-  it.each(["child", "pet"])("rejects a %s session before polling for a token", async (role) => {
-    mocks.authorizeAdminRequest.mockResolvedValue({ ok: false, status: 403, error: "adult_only" });
-    const result = await poll(request("/api/google/device-poll", { attempt_id: "attempt-1", device_code: "device" }));
-
-    expect(result.status).toBe(403);
-    expect(await result.json()).toMatchObject({ ok: false, error: "adult_only" });
-    expect(mocks.pollForToken).not.toHaveBeenCalled();
-    expect(role).toBeTruthy();
-  });
-
   it("blocks a child Google Tasks POST before connection or PB work", async () => {
     mocks.authorizeAdminRequest.mockResolvedValue({ ok: false, status: 403, error: "adult_only" });
     const result = await postTasks(request("/api/google-tasks", { action: "create", title: "Nope" }));
@@ -140,15 +102,6 @@ describe("Google mutating route authorization", () => {
     expect(await result.json()).toMatchObject({ ok: false, error: "adult_only" });
     expect(mocks.ensureGoogleCollections).not.toHaveBeenCalled();
     expect(mocks.isGoogleConnected).not.toHaveBeenCalled();
-  });
-
-  it("allows a parent session to poll a pending token", async () => {
-    const result = await poll(request("/api/google/device-poll", { attempt_id: "attempt-1", device_code: "device" }));
-    const body = await result.json();
-
-    expect(result.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, status: "pending" });
-    expect(mocks.pollForToken).toHaveBeenCalledWith("device", 5);
   });
 
   it.each(["child", "pet"])("rejects a %s session before starting a sync", async (role) => {

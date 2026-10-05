@@ -3,7 +3,7 @@ import { authorizeAdminRequest } from "@/lib/admin-auth";
 import { deleteConnectedAccount } from "@/lib/google/composio";
 import { disconnectGoogle, readConnectionSnapshot } from "@/lib/google/connection-state";
 import { invalidateGoogleIntegrationOperation } from "@/lib/google/integration-operation";
-import { clearDirectGoogleCache } from "@/lib/google/token-store";
+import { clearCalendarCache } from "@/lib/google/token-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     await disconnectGoogle();
     localRevoked = true;
     invalidateGoogleIntegrationOperation();
-    await clearDirectGoogleCache();
+    await clearCalendarCache();
   } catch (error) {
     console.warn("[google/composio/disconnect]", errorMessage(error));
     return NextResponse.json(
