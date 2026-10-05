@@ -1,14 +1,15 @@
-import { googleFetch } from "./oauth-client.ts";
 import { withAdmin } from "../pb-auth.ts";
 import {
   getGoogleIntegrationGeneration,
   isGoogleIntegrationGenerationCurrent,
   withGoogleIntegrationOperation,
 } from "./integration-operation.ts";
+import { executeComposioAction } from "./composio.ts";
+import { COMPOSIO_ACTIONS } from "./composio-actions.ts";
+import { GoogleAuthError, readConnectionSnapshot } from "./connection-state.ts";
 import type { GoogleCalendarEvent } from "./types.ts";
 
 const PRIMARY = "primary";
-const CONSUMELA_TAG = "consuelaDashboard";
 const EVENTS_COLLECTION = "consuela_google_calendar_events";
 const CAL_SYNC_COLLECTION = "consuela_google_calendar_sync";
 
@@ -42,15 +43,28 @@ export interface SyncSkipped {
 export type SyncOutcome = SyncResult | SyncSkipped;
 
 // L8 — in-process lock: two concurrent cron fires (or a manual "Sync now" on
-// top of the cron) must not run listAllEvents + the upsert loop at the same
-// time. The loser gets { skipped: true } and the route reports it.
+// top of the cron) must not run the per-calendar pulls + upsert loop at the
+// same time. The loser gets { skipped: true } and the route reports it.
 let syncInFlight: Promise<SyncOutcome> | null = null;
 
-interface EventsListResponse {
+// Composio v3.1 wraps every execute result in `{ data, successful, error }`.
+interface ComposioEnvelope<T> {
+  data?: T | null;
+  successful?: boolean;
+  error?: { message?: string; code?: string } | null;
+}
+
+interface ComposioEventsData {
   items?: GoogleCalendarEvent[];
-  nextSyncToken?: string;
   nextPageToken?: string;
 }
+
+interface ComposioCalendarListData {
+  items?: { id: string; summary: string; primary?: boolean; accessRole: string; colorRgb?: string }[];
+}
+
+// Timed writes return the created/updated event nested under `response_data`.
+type ComposioEventWriteData = GoogleCalendarEvent & { response_data?: GoogleCalendarEvent };
 
 interface GoogleEventsListArgs {
   calendarId?: string;
@@ -63,6 +77,49 @@ interface GoogleEventsListArgs {
 
 function escapePb(s: string): string {
   return s.replace(/"/g, '\\"');
+}
+
+// One Composio connected account brokers the family's Google grant. A missing
+// id is a run-level no-grant (routes answer 409), never a per-calendar error.
+async function requireConnectedAccountId(): Promise<string> {
+  const snapshot = await readConnectionSnapshot();
+  if (!snapshot.connectedAccountId) {
+    throw new GoogleAuthError("no_grant", "Google account is not connected");
+  }
+  return snapshot.connectedAccountId;
+}
+
+// Composio 401/403 means the broker key (or the brokered grant) is dead —
+// every calendar shares it, so it must abort the run instead of isolating to
+// one calendar. Other codes (api_error/timeout) callers isolate per calendar.
+function rethrowRunLevelComposioError(err: unknown): never {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (code === "auth_failed" || code === "not_configured") {
+    throw new GoogleAuthError(
+      "config",
+      err instanceof Error ? err.message : "Composio is not usable",
+    );
+  }
+  throw err;
+}
+
+async function executeGoogleAction<T>(
+  action: string,
+  args: Record<string, unknown>,
+  connectedAccountId: string,
+): Promise<T> {
+  try {
+    return await executeComposioAction<T>(action, args, connectedAccountId);
+  } catch (err) {
+    return rethrowRunLevelComposioError(err);
+  }
+}
+
+function unwrapComposioData<T>(result: ComposioEnvelope<T>): T {
+  if (!result || result.successful === false || result.data == null) {
+    throw new Error(result?.error?.message || "Composio tool execution failed");
+  }
+  return result.data;
 }
 
 // Rows written before multi-calendar sync carry an empty calendar_id — they belong to the primary calendar.
@@ -128,19 +185,6 @@ async function getSelectedCalendars(): Promise<{ calendarId: string; summary: st
   }
 }
 
-async function getCalendarToken(calendarId: string): Promise<string | null> {
-  try {
-    const rows = await withAdmin(async (pb) =>
-      pb
-        .collection(CAL_SYNC_COLLECTION)
-        .getFullList({ requestKey: null, filter: `calendar_id = "${escapePb(calendarId)}"` }),
-    );
-    return rows[0]?.sync_token || null;
-  } catch {
-    return null;
-  }
-}
-
 // Fresh read of ONE calendar's `selected` flag. The selection PUT is NOT
 // covered by the sync lock, so a deselect can land while a sync run is in
 // flight — syncOneCalendar re-checks through this before doing any work and
@@ -194,52 +238,60 @@ async function saveCalendarState(calendarId: string, patch: CalendarStatePatch):
   });
 }
 
+const WINDOW_BACK_MS = 30 * 24 * 3600_000;
+const WINDOW_FORWARD_MS = 90 * 24 * 3600_000;
+
+// Composio exposes no incremental sync token (there is no SYNC_EVENTS action),
+// so every run is a full-window pull. time_min/time_max are mandatory — the
+// action has no default window. The persisted `sync_token` cache field is dead
+// state: it is never read, never sent, and never rewritten here.
+async function listEventsViaComposio(
+  calendarId: string,
+  window: { timeMin?: string; timeMax?: string } = {},
+): Promise<{ events: GoogleCalendarEvent[]; nextCursor: string | null }> {
+  const connectedAccountId = await requireConnectedAccountId();
+  const timeMin = window.timeMin || new Date(Date.now() - WINDOW_BACK_MS).toISOString();
+  const timeMax = window.timeMax || new Date(Date.now() + WINDOW_FORWARD_MS).toISOString();
+
+  const events: GoogleCalendarEvent[] = [];
+  let pageToken: string | undefined;
+
+  while (true) {
+    const args: Record<string, unknown> = {
+      calendar_id: calendarId,
+      time_min: timeMin,
+      time_max: timeMax,
+      single_events: true,
+      show_deleted: true,
+    };
+    if (pageToken) args.page_token = pageToken;
+
+    const result = await executeGoogleAction<ComposioEnvelope<ComposioEventsData>>(
+      COMPOSIO_ACTIONS.LIST_EVENTS,
+      args,
+      connectedAccountId,
+    );
+    const data = unwrapComposioData(result);
+    if (data.items) events.push(...data.items);
+    if (data.nextPageToken) pageToken = data.nextPageToken;
+    else break;
+  }
+
+  return { events, nextCursor: null };
+}
+
+// Compatibility wrapper for callers of the old direct-Google surface (the
+// manual module probe script). syncToken is meaningless under Composio, so
+// nextSyncToken is always null and any syncToken arg is ignored.
 export async function listAllEvents(args: GoogleEventsListArgs = {}): Promise<{
   events: GoogleCalendarEvent[];
   nextSyncToken: string | null;
 }> {
-  const calendarId = args.calendarId || PRIMARY;
-  const query: Record<string, string | number | boolean> = {
-    showDeleted: true,
-    singleEvents: true,
-    maxResults: args.maxResults || 250,
-  };
-  if (args.syncToken) {
-    query.syncToken = args.syncToken;
-  } else {
-    if (args.timeMin) query.timeMin = args.timeMin;
-    else query.timeMin = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
-    if (args.timeMax) query.timeMax = args.timeMax;
-    else query.timeMax = new Date(Date.now() + 90 * 24 * 3600_000).toISOString();
-  }
-  if (args.pageToken) query.pageToken = args.pageToken;
-
-  const events: GoogleCalendarEvent[] = [];
-  let nextSyncToken: string | null = null;
-  let pageToken: string | undefined = args.pageToken;
-
-  while (true) {
-    const q = { ...query };
-    if (pageToken) q.pageToken = pageToken;
-    else delete (q as any).pageToken;
-
-    const res = await googleFetch<EventsListResponse>(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
-      { method: "GET", query: q, endpoint: "/calendar/v3/calendars/{id}/events" },
-    );
-    if (res.data.items) events.push(...res.data.items);
-    if (res.data.nextSyncToken) {
-      nextSyncToken = res.data.nextSyncToken;
-      break;
-    }
-    if (res.data.nextPageToken) {
-      pageToken = res.data.nextPageToken;
-    } else {
-      break;
-    }
-  }
-
-  return { events, nextSyncToken };
+  const { events } = await listEventsViaComposio(args.calendarId || PRIMARY, {
+    timeMin: args.timeMin,
+    timeMax: args.timeMax,
+  });
+  return { events, nextSyncToken: null };
 }
 
 function isAllDay(event: GoogleCalendarEvent): boolean {
@@ -327,24 +379,8 @@ async function syncOneCalendar(
   // since, its rows were just pruned and syncing would resurrect them.
   if (!(await isCalendarSelected(calendarId))) return null;
 
-  const existingToken = await getCalendarToken(calendarId);
-  let events: GoogleCalendarEvent[];
-  let nextSyncToken: string | null;
-
-  try {
-    ({ events, nextSyncToken } = await listAllEvents(
-      { calendarId, ...(existingToken ? { syncToken: existingToken } : {}) },
-    ));
-  } catch (err) {
-    // Google returns 410 GONE once an incremental syncToken is expired or
-    // invalidated (e.g. after ~a week of downtime, permission changes, or
-    // a revoked re-grant). Without this fallback the stale token stays in
-    // PB forever and every subsequent cron run fails with the same error.
-    // Clear it and do one full-window resync for THIS calendar instead.
-    if ((err as any)?.status !== 410 || !existingToken) throw err;
-    console.log(`[google-sync] ${calendarId}: sync token invalidated (410) — performing full resync`);
-    ({ events, nextSyncToken } = await listAllEvents({ calendarId }));
-  }
+  // Always a full-window pull: Composio exposes no sync token to resume from.
+  const { events } = await listEventsViaComposio(calendarId);
 
   if (!isGoogleIntegrationGenerationCurrent(operationGeneration)) return null;
   const { upserted, deleted } = await upsertCalendarEvents(calendarId, events);
@@ -359,13 +395,14 @@ async function syncOneCalendar(
     return { calendarId, summary, events: 0, deleted: 0, nextSyncToken: null, ok: true };
   }
 
+  // The persisted sync_token field is deliberately not written: there is no
+  // incremental resume under Composio, so the old value is left untouched.
   await saveCalendarState(calendarId, {
-    sync_token: nextSyncToken,
     last_status: "ok",
     last_error: null,
     touch: true,
   });
-  return { calendarId, summary, events: upserted, deleted, nextSyncToken, ok: true };
+  return { calendarId, summary, events: upserted, deleted, nextSyncToken: null, ok: true };
 }
 
 // L8 — in-process lock: two concurrent cron fires (or a manual "Sync now" on
@@ -398,13 +435,13 @@ export async function syncCalendar(): Promise<SyncOutcome> {
           totalDeleted += res.deleted;
           if (calendarId === PRIMARY) primaryToken = res.nextSyncToken;
         } catch (err: any) {
-          // A token/auth failure is global (every calendar shares one
-          // grant) — propagate so the routes can answer 401/409 as before.
-          // Duck-typed on GoogleAuthError's `code` (the class sets no `name`,
-          // and tests mock the oauth-client module, so instanceof is not
-          // available here).
+          // Auth failures are global (one broker account serves every
+          // calendar) and were already re-thrown as a run-level
+          // GoogleAuthError — propagate so the routes can answer 401/409.
+          // Duck-typed on `code` (the class sets no `name`, and tests mock
+          // the module boundary, so instanceof is not available here).
           if (err && typeof err.code === "string" && typeof err.status !== "number") throw err;
-          // Everything else (410-without-token, 5xx, quota, PB hiccup)
+          // Everything else (Composio api_error/timeout, PB hiccup)
           // isolates to this calendar: record it, keep the loop going.
           console.error(`[google-sync] calendar ${calendarId} failed:`, err?.message || err);
           if (!isGoogleIntegrationGenerationCurrent(operationGeneration)) {
@@ -530,24 +567,69 @@ export interface CalendarEventInput {
   extendedProperties?: { private?: Record<string, string>; shared?: Record<string, string> };
 }
 
-export async function createCalendarEvent(input: CalendarEventInput): Promise<GoogleCalendarEvent> {
-  const body = {
+function eventDuration(startIso?: string, endIso?: string): { hours: number; minutes: number } | null {
+  if (!startIso || !endIso) return null;
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  const totalMinutes = Math.round((end - start) / 60000);
+  return { hours: Math.floor(totalMinutes / 60), minutes: totalMinutes % 60 };
+}
+
+// Composio's GOOGLECALENDAR_CREATE_EVENT takes flat arguments plus duration
+// fields (it ignores end_datetime on create). reminders/extendedProperties are
+// not part of that schema and are dropped; nothing reads the old
+// consuelaDashboard tag.
+function createEventArgs(input: CalendarEventInput): Record<string, unknown> {
+  const startIso = input.start.dateTime || input.start.date;
+  const endIso = input.end.dateTime || input.end.date;
+  const args: Record<string, unknown> = {
+    calendar_id: PRIMARY,
     summary: input.summary,
-    description: input.description || "",
-    location: input.location || "",
-    start: input.start,
-    end: input.end,
-    reminders: input.reminders || { useDefault: true },
-    attendees: input.attendees,
-    extendedProperties: {
-      private: { source: CONSUMELA_TAG },
-    },
+    start_datetime: startIso,
   };
-  const res = await googleFetch<GoogleCalendarEvent>(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(PRIMARY)}/events`,
-    { method: "POST", body, endpoint: "/calendar/v3/calendars/{id}/events" },
+  if (input.description) args.description = input.description;
+  if (input.location) args.location = input.location;
+  if (input.start.timeZone) args.timezone = input.start.timeZone;
+  const duration = eventDuration(startIso, endIso);
+  if (duration) {
+    args.event_duration_hour = duration.hours;
+    args.event_duration_minutes = duration.minutes;
+  }
+  if (input.attendees?.length) args.attendees = input.attendees.map((a) => a.email);
+  return args;
+}
+
+function patchEventArgs(eventId: string, input: Partial<CalendarEventInput>): Record<string, unknown> {
+  const args: Record<string, unknown> = { calendar_id: PRIMARY, event_id: eventId };
+  if (input.summary !== undefined) args.summary = input.summary;
+  if (input.description !== undefined) args.description = input.description;
+  if (input.location !== undefined) args.location = input.location;
+  const startIso = input.start?.dateTime || input.start?.date;
+  const endIso = input.end?.dateTime || input.end?.date;
+  if (startIso) args.start_datetime = startIso;
+  if (endIso) args.end_datetime = endIso;
+  const timeZone = input.start?.timeZone || input.end?.timeZone;
+  if (timeZone) args.timezone = timeZone;
+  if (input.attendees) args.attendees = input.attendees.map((a) => a.email);
+  return args;
+}
+
+function createWriteResult(
+  result: ComposioEnvelope<ComposioEventWriteData>,
+): GoogleCalendarEvent {
+  const data = unwrapComposioData(result);
+  return data.response_data ?? data;
+}
+
+export async function createCalendarEvent(input: CalendarEventInput): Promise<GoogleCalendarEvent> {
+  const connectedAccountId = await requireConnectedAccountId();
+  const result = await executeGoogleAction<ComposioEnvelope<ComposioEventWriteData>>(
+    COMPOSIO_ACTIONS.CREATE_EVENT,
+    createEventArgs(input),
+    connectedAccountId,
   );
-  return res.data;
+  return createWriteResult(result);
 }
 
 export async function updateCalendarEvent(
@@ -555,20 +637,24 @@ export async function updateCalendarEvent(
   input: Partial<CalendarEventInput>,
   ifMatchEtag?: string,
 ): Promise<GoogleCalendarEvent> {
-  const headers: Record<string, string> = {};
-  if (ifMatchEtag) headers["If-Match"] = ifMatchEtag;
-
-  const res = await googleFetch<GoogleCalendarEvent>(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(PRIMARY)}/events/${encodeURIComponent(eventId)}`,
-    { method: "PATCH", body: input, headers, endpoint: "/calendar/v3/calendars/{id}/events/{eventId}" },
+  // Composio PATCH_EVENT has no If-Match equivalent; the etag argument is kept
+  // for signature compatibility and intentionally not sent.
+  void ifMatchEtag;
+  const connectedAccountId = await requireConnectedAccountId();
+  const result = await executeGoogleAction<ComposioEnvelope<ComposioEventWriteData>>(
+    COMPOSIO_ACTIONS.UPDATE_EVENT,
+    patchEventArgs(eventId, input),
+    connectedAccountId,
   );
-  return res.data;
+  return createWriteResult(result);
 }
 
 export async function deleteCalendarEvent(eventId: string): Promise<void> {
-  await googleFetch(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(PRIMARY)}/events/${encodeURIComponent(eventId)}`,
-    { method: "DELETE", endpoint: "/calendar/v3/calendars/{id}/events/{eventId}" },
+  const connectedAccountId = await requireConnectedAccountId();
+  await executeGoogleAction<ComposioEnvelope<unknown>>(
+    COMPOSIO_ACTIONS.DELETE_EVENT,
+    { calendar_id: PRIMARY, event_id: eventId },
+    connectedAccountId,
   );
 }
 
@@ -581,13 +667,14 @@ export interface CalendarListEntry {
 }
 
 export async function listCalendars(): Promise<CalendarListEntry[]> {
-  const res = await googleFetch<{
-    items?: { id: string; summary: string; primary?: boolean; accessRole: string; colorRgb?: string }[];
-  }>(
-    "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-    { method: "GET", endpoint: "/calendar/v3/users/me/calendarList" },
+  const connectedAccountId = await requireConnectedAccountId();
+  const result = await executeGoogleAction<ComposioEnvelope<ComposioCalendarListData>>(
+    COMPOSIO_ACTIONS.LIST_CALENDARS,
+    {},
+    connectedAccountId,
   );
-  return (res.data.items || []).map((c) => ({
+  const data = unwrapComposioData(result);
+  return (data.items || []).map((c) => ({
     id: c.id,
     summary: c.summary,
     primary: !!c.primary,

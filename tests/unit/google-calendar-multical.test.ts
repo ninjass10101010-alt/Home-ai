@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  googleFetch: vi.fn(),
+  execute: vi.fn(),
   withAdmin: vi.fn(),
 }));
 
-vi.mock("../../src/lib/google/oauth-client.ts", () => ({
-  googleFetch: mocks.googleFetch,
+vi.mock("../../src/lib/google/composio.ts", () => ({
+  executeComposioAction: mocks.execute,
 }));
 
 vi.mock("../../src/lib/pb-auth.ts", () => ({
@@ -16,10 +16,12 @@ vi.mock("../../src/lib/pb-auth.ts", () => ({
 import { syncCalendar, pruneCalendar, setCalendarSelection } from "../../src/lib/google/calendar.ts";
 
 const FAMILY = "family@gmail.com";
+const ACCOUNT = "ca_test";
 
 interface PbMockOptions {
   calRows?: any[];
   eventRows?: any[];
+  connectedAccountId?: string | null;
 }
 
 function pbMock(opts: PbMockOptions = {}) {
@@ -27,6 +29,7 @@ function pbMock(opts: PbMockOptions = {}) {
     { id: "cal-primary", calendar_id: "primary", summary: "Primary", selected: true, sync_token: "P_TOKEN" },
   ];
   const eventRows = opts.eventRows ?? [];
+  const connectedAccountId = opts.connectedAccountId === undefined ? ACCOUNT : opts.connectedAccountId;
   const writes = {
     calUpdates: [] as any[],
     calCreates: [] as any[],
@@ -36,6 +39,17 @@ function pbMock(opts: PbMockOptions = {}) {
   };
   const pb = {
     collection: (name: string) => {
+      if (name === "consuela_data_snapshots") {
+        return {
+          getFullList: async () =>
+            connectedAccountId
+              ? [{ id: "snap", data: { connectedAccountId, status: "ACTIVE" } }]
+              : [],
+          create: async () => ({}),
+          update: async () => ({}),
+          delete: async () => ({}),
+        };
+      }
       if (name === "consuela_google_calendar_sync") {
         return {
           getFullList: async (args: any = {}) => {
@@ -122,21 +136,25 @@ function ev(id: string, summary: string) {
     id,
     status: "confirmed",
     summary,
-    start: { dateTime: "2026-09-15T10:00:00Z" },
-    end: { dateTime: "2026-09-15T11:00:00Z" },
+    start: { dateTime: "2026-10-06T10:00:00Z" },
+    end: { dateTime: "2026-10-06T11:00:00Z" },
   };
 }
 
-function eventsResponse(items: any[], nextSyncToken: string) {
-  return { status: 200, data: { items, nextSyncToken }, headers: new Headers() };
+function eventsEnvelope(items: any[]) {
+  return { data: { items }, successful: true, error: null };
+}
+
+function composioApiError(status: number) {
+  return Object.assign(new Error(`Composio error (${status})`), { code: "api_error", status });
 }
 
 beforeEach(() => {
-  mocks.googleFetch.mockReset();
+  mocks.execute.mockReset();
   mocks.withAdmin.mockReset();
 });
 
-describe("syncCalendar — multi-calendar loop", () => {
+describe("syncCalendar — multi-calendar loop (Composio)", () => {
   it("upserts two selected calendars with distinct calendar_id (same google_id is fine)", async () => {
     const { pb, writes } = pbMock({
       calRows: [
@@ -145,10 +163,10 @@ describe("syncCalendar — multi-calendar loop", () => {
       ],
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-    mocks.googleFetch.mockImplementation(async (url: string) =>
-      url.includes(encodeURIComponent(FAMILY))
-        ? eventsResponse([ev("shared1", "Family thing")], "FAM_TOKEN")
-        : eventsResponse([ev("shared1", "Primary thing")], "PRIM_TOKEN"),
+    mocks.execute.mockImplementation(async (_action: string, args: any) =>
+      args.calendar_id === FAMILY
+        ? eventsEnvelope([ev("shared1", "Family thing")])
+        : eventsEnvelope([ev("shared1", "Primary thing")]),
     );
 
     const outcome = (await syncCalendar()) as any;
@@ -157,21 +175,24 @@ describe("syncCalendar — multi-calendar loop", () => {
     expect(outcome.perCalendar.map((c: any) => c.calendarId).sort()).toEqual([FAMILY, "primary"]);
     expect(outcome.perCalendar.every((c: any) => c.ok)).toBe(true);
     expect(outcome.events).toBe(2);
-    expect(outcome.nextSyncToken).toBe("PRIM_TOKEN");
+    // Composio exposes no incremental cursor — the run reports no next token.
+    expect(outcome.nextSyncToken).toBeNull();
 
     // Two rows persisted, keyed to their own calendar despite the shared google_id
     expect(writes.eventCreates).toHaveLength(2);
     const byCal = Object.fromEntries(writes.eventCreates.map((r: any) => [r.calendar_id, r.google_id]));
     expect(byCal).toEqual({ primary: "shared1", [FAMILY]: "shared1" });
 
-    // Each calendar got its own token back
+    // Each calendar is marked ok, and the dead sync_token field is not written
     const famSave = writes.calUpdates.find((u) => u.payload.calendar_id === FAMILY);
     const primSave = writes.calUpdates.find((u) => u.payload.calendar_id === "primary");
-    expect(famSave.payload.sync_token).toBe("FAM_TOKEN");
-    expect(primSave.payload.sync_token).toBe("PRIM_TOKEN");
+    expect(famSave.payload.last_status).toBe("ok");
+    expect(primSave.payload.last_status).toBe("ok");
+    expect("sync_token" in famSave.payload).toBe(false);
+    expect("sync_token" in primSave.payload).toBe(false);
   });
 
-  it("handles a per-calendar 410 with a full resync of THAT calendar only", async () => {
+  it("ignores persisted sync tokens — every calendar full-pulls with an explicit window", async () => {
     const { pb } = pbMock({
       calRows: [
         { id: "cp", calendar_id: "primary", summary: "Primary", selected: true, sync_token: "P_STALE" },
@@ -179,29 +200,20 @@ describe("syncCalendar — multi-calendar loop", () => {
       ],
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-    mocks.googleFetch.mockImplementation(async (url: string, opts: any) => {
-      if (url.includes(encodeURIComponent(FAMILY))) {
-        if (opts?.query?.syncToken) {
-          throw Object.assign(new Error("Google API 410: gone"), { status: 410 });
-        }
-        return eventsResponse([ev("f1", "Family thing")], "F_FRESH");
-      }
-      return eventsResponse([ev("p1", "Primary thing")], "P_FRESH");
-    });
+    mocks.execute.mockImplementation(async () => eventsEnvelope([]));
 
     const outcome = (await syncCalendar()) as any;
 
     expect(outcome.perCalendar.every((c: any) => c.ok)).toBe(true);
-    // primary: 1 incremental call; family: 410 call + full resync call
-    const calls = mocks.googleFetch.mock.calls;
-    const famCalls = calls.filter((c: any) => String(c[0]).includes(encodeURIComponent(FAMILY)));
-    const primCalls = calls.filter((c: any) => !String(c[0]).includes(encodeURIComponent(FAMILY)));
-    expect(primCalls).toHaveLength(1);
-    expect(primCalls[0][1].query.syncToken).toBe("P_STALE");
-    expect(famCalls).toHaveLength(2);
-    expect(famCalls[0][1].query.syncToken).toBe("F_STALE");
-    expect(famCalls[1][1].query.syncToken).toBeUndefined();
-    expect(famCalls[1][1].query.timeMin).toBeTruthy();
+    const callsByCalendar = new Map(
+      mocks.execute.mock.calls.map((c: any) => [c[1].calendar_id, c[1]]),
+    );
+    expect([...callsByCalendar.keys()].sort()).toEqual([FAMILY, "primary"]);
+    for (const args of callsByCalendar.values()) {
+      expect(args.syncToken).toBeUndefined();
+      expect(args.time_min).toBeTruthy();
+      expect(args.time_max).toBeTruthy();
+    }
   });
 
   it("isolates one calendar's failure — the other still syncs, last_error recorded", async () => {
@@ -212,11 +224,9 @@ describe("syncCalendar — multi-calendar loop", () => {
       ],
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-    mocks.googleFetch.mockImplementation(async (url: string) => {
-      if (url.includes(encodeURIComponent(FAMILY))) {
-        throw Object.assign(new Error("Google API 503: Backend Error"), { status: 503 });
-      }
-      return eventsResponse([ev("p1", "Primary thing")], "P_TOKEN");
+    mocks.execute.mockImplementation(async (_action: string, args: any) => {
+      if (args.calendar_id === FAMILY) throw composioApiError(503);
+      return eventsEnvelope([ev("p1", "Primary thing")]);
     });
 
     const outcome = (await syncCalendar()) as any;
@@ -235,7 +245,7 @@ describe("syncCalendar — multi-calendar loop", () => {
     expect(writes.calUpdates.find((u) => u.id === "cf" && u.payload.last_status === "ok")).toBeUndefined();
   });
 
-  it("a newly selected calendar (no token) full-pulls; a tokened calendar stays incremental", async () => {
+  it("full-pulls a newly selected calendar and a previously-tokened calendar the same way", async () => {
     const { pb } = pbMock({
       calRows: [
         { id: "cp", calendar_id: "primary", summary: "Primary", selected: true, sync_token: "P_TOKEN" },
@@ -243,35 +253,32 @@ describe("syncCalendar — multi-calendar loop", () => {
       ],
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-    mocks.googleFetch.mockImplementation(async () => eventsResponse([], "TOK"));
+    mocks.execute.mockImplementation(async () => eventsEnvelope([]));
 
     await syncCalendar();
 
-    const famCall = mocks.googleFetch.mock.calls.find((c: any) =>
-      String(c[0]).includes(encodeURIComponent(FAMILY)),
-    )!;
-    const primCall = mocks.googleFetch.mock.calls.find((c: any) =>
-      !String(c[0]).includes(encodeURIComponent(FAMILY)),
-    )!;
-    expect(famCall[1].query.syncToken).toBeUndefined();
-    expect(famCall[1].query.timeMin).toBeTruthy();
-    expect(primCall[1].query.syncToken).toBe("P_TOKEN");
+    const famCall = mocks.execute.mock.calls.find((c: any) => c[1].calendar_id === FAMILY)!;
+    const primCall = mocks.execute.mock.calls.find((c: any) => c[1].calendar_id !== FAMILY)!;
+    expect(famCall[1].time_min).toBeTruthy();
+    expect(famCall[1].syncToken).toBeUndefined();
+    expect(primCall[1].time_min).toBeTruthy();
+    expect(primCall[1].syncToken).toBeUndefined();
   });
 
   it("defaults to primary-only when nothing is opted in (backward compatible)", async () => {
     const { pb } = pbMock({ calRows: [] });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-    mocks.googleFetch.mockResolvedValue(eventsResponse([ev("p1", "Thing")], "TOK"));
+    mocks.execute.mockResolvedValue(eventsEnvelope([ev("p1", "Thing")]));
 
     const outcome = (await syncCalendar()) as any;
 
     expect(outcome.perCalendar).toHaveLength(1);
     expect(outcome.perCalendar[0].calendarId).toBe("primary");
-    expect(mocks.googleFetch).toHaveBeenCalledTimes(1);
-    expect(String(mocks.googleFetch.mock.calls[0][0])).toContain("/calendars/primary/events");
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0][1].calendar_id).toBe("primary");
   });
 
-  it("honors an explicit deselect-all (rows exist, none selected → no Google calls)", async () => {
+  it("honors an explicit deselect-all (rows exist, none selected → no Composio calls)", async () => {
     const { pb } = pbMock({
       calRows: [
         { id: "cp", calendar_id: "primary", summary: "Primary", selected: false, sync_token: null },
@@ -284,7 +291,7 @@ describe("syncCalendar — multi-calendar loop", () => {
 
     expect(outcome.perCalendar).toHaveLength(0);
     expect(outcome.events).toBe(0);
-    expect(mocks.googleFetch).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
 
@@ -298,14 +305,14 @@ describe("syncCalendar — deselect landing mid-sync (PUT is not lock-covered)",
       eventRows: [{ id: "e-old", calendar_id: FAMILY, google_id: "old1" }],
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-    mocks.googleFetch.mockImplementation(async (url: string) => {
-      if (url.includes(encodeURIComponent(FAMILY))) {
+    mocks.execute.mockImplementation(async (_action: string, args: any) => {
+      if (args.calendar_id === FAMILY) {
         // The selection PUT lands WHILE this calendar's pull is in flight:
         // selected=false committed + prune already ran.
         deselectAndPrune(FAMILY);
-        return eventsResponse([ev("f1", "Family thing")], "FAM_TOKEN");
+        return eventsEnvelope([ev("f1", "Family thing")]);
       }
-      return eventsResponse([ev("p1", "Primary thing")], "PRIM_TOKEN");
+      return eventsEnvelope([ev("p1", "Primary thing")]);
     });
 
     const outcome = (await syncCalendar()) as any;
@@ -319,11 +326,11 @@ describe("syncCalendar — deselect landing mid-sync (PUT is not lock-covered)",
     expect(famRow.sync_token).toBeNull();
     // The still-selected calendar is unaffected.
     const primRow = calRows.find((r: any) => r.calendar_id === "primary")!;
-    expect(primRow.sync_token).toBe("PRIM_TOKEN");
+    expect(primRow.last_status).toBe("ok");
     expect(outcome.perCalendar.find((c: any) => c.calendarId === FAMILY).events).toBe(0);
   });
 
-  it("a deselect before the calendar's turn skips it entirely — no Google call, no writes", async () => {
+  it("a deselect before the calendar's turn skips it entirely — no Composio call, no writes", async () => {
     const { pb, writes, calRows, eventRows, deselectAndPrune } = pbMock({
       calRows: [
         { id: "cp", calendar_id: "primary", summary: "Primary", selected: true, sync_token: null },
@@ -332,27 +339,25 @@ describe("syncCalendar — deselect landing mid-sync (PUT is not lock-covered)",
       eventRows: [{ id: "e-old", calendar_id: FAMILY, google_id: "old1" }],
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-    mocks.googleFetch.mockImplementation(async (url: string) => {
-      if (!url.includes(encodeURIComponent(FAMILY))) {
+    mocks.execute.mockImplementation(async (_action: string, args: any) => {
+      if (args.calendar_id !== FAMILY) {
         // Deselect lands after the selected list was captured but before
         // Family's syncOneCalendar starts.
         deselectAndPrune(FAMILY);
-        return eventsResponse([ev("p1", "Primary thing")], "PRIM_TOKEN");
+        return eventsEnvelope([ev("p1", "Primary thing")]);
       }
-      return eventsResponse([], "TOK");
+      return eventsEnvelope([]);
     });
 
     const outcome = (await syncCalendar()) as any;
 
-    const famCalls = mocks.googleFetch.mock.calls.filter((c: any) =>
-      String(c[0]).includes(encodeURIComponent(FAMILY)),
-    );
+    const famCalls = mocks.execute.mock.calls.filter((c: any) => c[1].calendar_id === FAMILY);
     expect(famCalls).toHaveLength(0);
     expect(writes.eventCreates.filter((r: any) => r.calendar_id === FAMILY)).toHaveLength(0);
     expect(writes.calUpdates.find((u: any) => u.id === "cf")).toBeUndefined();
     expect(eventRows.filter((r: any) => r.calendar_id === FAMILY)).toHaveLength(0);
     expect(outcome.perCalendar.map((c: any) => c.calendarId)).toEqual(["primary"]);
-    expect(calRows.find((r: any) => r.calendar_id === "primary")!.sync_token).toBe("PRIM_TOKEN");
+    expect(calRows.find((r: any) => r.calendar_id === "primary")!.last_status).toBe("ok");
   });
 });
 
