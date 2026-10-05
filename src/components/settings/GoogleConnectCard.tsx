@@ -227,6 +227,7 @@ export default function GoogleConnectCard() {
     isCurrentGeneration,
     state,
     waiting,
+    tasksConnected,
     errorMessage,
     connect,
     disconnect,
@@ -234,7 +235,7 @@ export default function GoogleConnectCard() {
     refresh,
   } = useGoogleConnection();
 
-  const [copied, setCopied] = useState(false);
+  const [tasksConnectRequested, setTasksConnectRequested] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
@@ -242,6 +243,10 @@ export default function GoogleConnectCard() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
+  const tasksConnectionNotice = tasksConnectRequested && tasksConnected && status === "connected"
+    ? "Google Tasks connected. Tasks and reminders will sync."
+    : null;
+  const noticeText = connectionNotice ?? tasksConnectionNotice;
   const [calendarError, setCalendarError] = useState(false);
   const [syncStateError, setSyncStateError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState(false);
@@ -254,7 +259,6 @@ export default function GoogleConnectCard() {
   const [calendarsReload, setCalendarsReload] = useState(0);
   const calendarMessageTimerRef = useRef<number | null>(null);
   const syncResultTimerRef = useRef<number | null>(null);
-  const copyTimerRef = useRef<number | null>(null);
   const noticeFocusTimerRef = useRef<number | null>(null);
   const savingRef = useRef(false);
   const syncingRef = useRef(false);
@@ -268,20 +272,19 @@ export default function GoogleConnectCard() {
     return () => {
       if (calendarMessageTimerRef.current) window.clearTimeout(calendarMessageTimerRef.current);
       if (syncResultTimerRef.current) window.clearTimeout(syncResultTimerRef.current);
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
       if (noticeFocusTimerRef.current) window.clearTimeout(noticeFocusTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
-    if (!connectionNotice) return;
+    if (!noticeText) return;
     if (noticeFocusTimerRef.current) window.clearTimeout(noticeFocusTimerRef.current);
     noticeFocusTimerRef.current = window.setTimeout(() => disconnectStatusRef.current?.focus(), 0);
     return () => {
       if (noticeFocusTimerRef.current) window.clearTimeout(noticeFocusTimerRef.current);
       noticeFocusTimerRef.current = null;
     };
-  }, [connectionNotice]);
+  }, [noticeText]);
 
   useEffect(() => {
     if (status !== "connected") return;
@@ -445,22 +448,23 @@ export default function GoogleConnectCard() {
     }
   };
 
-  const handleCopyCode = async () => {
-    if (!waiting) return;
-    try {
-      await navigator.clipboard.writeText(waiting.user_code);
-      setCopied(true);
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  };
-
   const handleConnect = () => {
     setConnectionNotice(null);
     setDisconnectError(null);
+    setTasksConnectRequested(false);
     void connect();
+  };
+
+  const handleConnectTasks = () => {
+    setConnectionNotice(null);
+    setDisconnectError(null);
+    setTasksConnectRequested(true);
+    void connect("googletasks");
+  };
+
+  const handleCancelWaiting = () => {
+    setTasksConnectRequested(false);
+    cancel();
   };
 
   const handleSyncNow = async () => {
@@ -600,6 +604,12 @@ export default function GoogleConnectCard() {
           {syncStateError ? <p role="status" className="mt-1 text-xs text-text-secondary">{syncStateError}</p> : null}
         </div>
       </div>
+      {!tasksConnected ? (
+        <div className="space-y-2 rounded-xl border border-white/10 bg-[var(--color-surface-2)]/60 px-3 py-3">
+          <p className="text-xs text-text-secondary">Google Tasks and reminders sync separately from your calendar.</p>
+          <SoftButton variant="secondary" onClick={handleConnectTasks} className="w-full">Connect Google Tasks</SoftButton>
+        </div>
+      ) : null}
       {calendars && calendars.length > 0 ? (
         <div className="space-y-2 border-y border-white/10 py-4">
           <p className="text-xs font-semibold uppercase tracking-[0.15em] text-text-muted">Calendars</p>
@@ -644,20 +654,18 @@ export default function GoogleConnectCard() {
         <span className="grid h-10 w-10 shrink-0 animate-pulse place-items-center rounded-2xl bg-[var(--color-accent-selected)]/20 text-xl" aria-hidden="true">🔗</span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-text-primary">Waiting for Google sign-in</p>
-          <p className="mt-0.5 text-xs text-text-secondary">On any device, open the URL below and enter this code:</p>
+          <p className="mt-0.5 text-xs text-text-secondary">
+            {waiting.toolkit === "googletasks"
+              ? "Grant Google Tasks access on the consent page. This card updates automatically."
+              : "Grant access on the Google consent page. This card updates automatically."}
+          </p>
         </div>
         <CountdownPill expiresAt={waiting.expires_at} />
       </div>
-      <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/40 p-5 text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-text-muted">Your code</p>
-        <p className="mt-2 select-all font-mono text-3xl font-bold tracking-[0.2em] text-text-primary">{waiting.user_code}</p>
-        <p className="mt-3 select-all break-all text-xs text-text-secondary">{waiting.verification_url}</p>
-      </div>
       <div className="flex gap-2">
-        <SoftButton onClick={handleCopyCode} className="flex-1">{copied ? "Copied!" : "Copy code"}</SoftButton>
-        <SoftButton variant="secondary" onClick={() => window.open(waiting.verification_url, "_blank", "noopener,noreferrer")} className="flex-1">Open google.com/device</SoftButton>
+        <SoftButton onClick={() => window.open(waiting.auth_url, "_blank", "noopener,noreferrer")} className="flex-1">Open Google consent</SoftButton>
+        <SoftButton variant="secondary" onClick={handleCancelWaiting} className="flex-1">Cancel</SoftButton>
       </div>
-      <SoftButton variant="ghost" onClick={cancel} className="w-full">Cancel</SoftButton>
     </div>
   ) : (
     <div className="space-y-4">
@@ -667,7 +675,7 @@ export default function GoogleConnectCard() {
           <p className="text-sm font-semibold text-text-primary">
             {status === "error:config" ? "Google credentials not configured" : status === "error:revoked" ? "Previously connected — please reconnect" : "Connect a Google account"}
           </p>
-          <p className="mt-0.5 text-xs text-text-secondary">Sync your family calendar with Consuela. Google sign-in opens on any device using a one-time code — no browser redirect required.</p>
+          <p className="mt-0.5 text-xs text-text-secondary">Sync your family calendar with Consuela. Google sign-in opens a secure consent page in a new tab.</p>
         </div>
       </div>
       {errorMessage ? <p role="alert" className="rounded-xl border border-[var(--color-accent-rose)]/30 bg-[var(--color-accent-rose)]/10 px-3 py-2 text-xs text-[var(--color-accent-rose)]">{errorMessage}</p> : null}
@@ -684,7 +692,7 @@ export default function GoogleConnectCard() {
         tone="var(--color-accent-cyan)"
         className="settings-google-card"
       >
-        {connectionNotice ? <p ref={disconnectStatusRef} data-google-disconnect-status="true" tabIndex={-1} role="status" className="mb-3 text-sm font-semibold text-[var(--color-accent-amber)]">{connectionNotice}</p> : null}
+        {noticeText ? <p ref={disconnectStatusRef} data-google-disconnect-status="true" tabIndex={-1} role="status" className="mb-3 text-sm font-semibold text-[var(--color-accent-amber)]">{noticeText}</p> : null}
         {content}
       </SectionCard>
       <SettingsConfirmDialog

@@ -22,6 +22,36 @@ function response(body: Record<string, unknown>, ok = true, status = 200): any {
   return { ok, status, json: async () => body };
 }
 
+function disconnectedState() {
+  return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
+}
+
+function connectedState(email = "family@example.com") {
+  return response({ ok: true, connected: true, account_email: email, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
+}
+
+function setupPayload(toolkit: "googlecalendar" | "googletasks" = "googlecalendar", expiresInMs = 600_000) {
+  return response({
+    ok: true,
+    toolkit,
+    auth_url: toolkit === "googletasks" ? "https://backend.composio.dev/link/tasks" : "https://backend.composio.dev/link/abc",
+    connected_account_id: toolkit === "googletasks" ? "ca_tasks" : "ca_1",
+    expires_at: new Date(Date.now() + expiresInMs).toISOString(),
+  });
+}
+
+function activeStatus(toolkit: "googlecalendar" | "googletasks" = "googlecalendar") {
+  return response({ ok: true, connected: true, status: "ACTIVE", toolkit, connected_account_id: toolkit === "googletasks" ? "ca_tasks" : "ca_1", account_email: "family@example.com" });
+}
+
+function pendingStatus() {
+  return response({ ok: true, connected: false, status: "INITIATED", reason: "account_not_active" });
+}
+
+function isStatusUrl(url: string): boolean {
+  return url.includes("/api/google/composio/status");
+}
+
 let hook: ReturnType<typeof useGoogleConnection>;
 const roots: Root[] = [];
 
@@ -72,12 +102,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("useGoogleConnection polling invalidation", () => {
+describe("useGoogleConnection composio consent flow", () => {
   it("discovers connected state on mount", async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/api/google/state")) {
-        return response({ ok: true, connected: true, account_email: "family@example.com", granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-      }
+      if (String(input).endsWith("/api/google/state")) return connectedState();
       return response({ ok: true });
     });
     await mount();
@@ -86,27 +114,78 @@ describe("useGoogleConnection polling invalidation", () => {
     expect(hook.state?.account_email).toBe("family@example.com");
   });
 
-  it("discovers connected state after explicit device-flow completion", async () => {
+  it("discovers connected state after explicit hosted-consent completion", async () => {
     let stateReads = 0;
+    let statusPolls = 0;
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/google/state")) {
         stateReads += 1;
-        return response({
-          ok: true,
-          connected: stateReads > 1,
-          account_email: stateReads > 1 ? "family@example.com" : null,
-          granted_at: null,
-          revoked_at: null,
-          expires_at: null,
-          scope: null,
-          minutes_until_expiry: null,
-        });
+        return stateReads > 1 ? connectedState() : disconnectedState();
       }
-      if (url.endsWith("/api/google/device-grant")) {
-        return response({ ok: true, attempt_id: "attempt-1", device_code: "device", user_code: "code", verification_url: "https://google.test/device", expires_in: 600, interval: 5 });
+      if (url.endsWith("/api/google/composio/setup")) return setupPayload();
+      if (isStatusUrl(url)) {
+        if (url.endsWith("toolkit=googletasks")) return activeStatus("googletasks");
+        statusPolls += 1;
+        return statusPolls === 1 ? pendingStatus() : activeStatus();
       }
-      if (url.endsWith("/api/google/device-poll")) return response({ ok: true, status: "complete" });
+      return response({ ok: true });
+    });
+    await mount();
+    await act(async () => {
+      await hook.connect();
+    });
+
+    expect(hook.status).toBe("waiting");
+    expect(hook.waiting?.auth_url).toBe("https://backend.composio.dev/link/abc");
+    expect(hook.waiting?.toolkit).toBe("googlecalendar");
+    expect(typeof hook.waiting?.expires_at).toBe("number");
+
+    await flush(5000);
+    expect(hook.status).toBe("waiting");
+
+    await flush(5000);
+    expect(statusPolls).toBe(2);
+    expect(stateReads).toBe(2);
+    expect(hook.status).toBe("connected");
+    expect(hook.state?.account_email).toBe("family@example.com");
+  });
+
+  it("posts the toolkit and polls the tasks status when connecting tasks", async () => {
+    let setupBody: unknown = null;
+    let sawTasksStatusUrl = false;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) return connectedState();
+      if (url.endsWith("/api/google/composio/setup")) {
+        setupBody = JSON.parse(String(init?.body));
+        return setupPayload("googletasks");
+      }
+      if (isStatusUrl(url)) {
+        if (url.endsWith("toolkit=googletasks")) sawTasksStatusUrl = true;
+        return sawTasksStatusUrl && setupBody !== null ? activeStatus("googletasks") : pendingStatus();
+      }
+      return response({ ok: true });
+    });
+    await mount();
+    await act(async () => {
+      await hook.connect("googletasks");
+    });
+    await flush(5000);
+
+    expect(setupBody).toEqual({ toolkit: "googletasks" });
+    expect(sawTasksStatusUrl).toBe(true);
+    expect(hook.tasksConnected).toBe(true);
+    expect(hook.status).toBe("connected");
+    expect(hook.state?.account_email).toBe("family@example.com");
+  });
+
+  it("expires the hosted consent when the link deadline passes without approval", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) return disconnectedState();
+      if (url.endsWith("/api/google/composio/setup")) return setupPayload("googlecalendar", 1000);
+      if (isStatusUrl(url)) return pendingStatus();
       return response({ ok: true });
     });
     await mount();
@@ -115,9 +194,197 @@ describe("useGoogleConnection polling invalidation", () => {
     });
     await flush(5000);
 
-    expect(stateReads).toBe(2);
+    expect(hook.status).toBe("error:expired");
+    expect(hook.waiting).toBeNull();
+  });
+
+  it("treats a missing connected account as expired before the deadline", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) return disconnectedState();
+      if (url.endsWith("/api/google/composio/setup")) return setupPayload();
+      if (isStatusUrl(url)) {
+        return response({ ok: true, connected: false, status: "NOT_FOUND", reason: "account_not_found" });
+      }
+      return response({ ok: true });
+    });
+    await mount();
+    await act(async () => {
+      await hook.connect();
+    });
+    await flush(5000);
+
+    expect(hook.status).toBe("error:expired");
+    expect(hook.waiting).toBeNull();
+  });
+
+  it("restores the connected calendar after cancelling an optional tasks connect", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) return connectedState();
+      if (url.endsWith("/api/google/composio/setup")) return setupPayload("googletasks");
+      if (isStatusUrl(url)) return pendingStatus();
+      return response({ ok: true });
+    });
+    await mount();
+    await act(async () => {
+      await hook.connect("googletasks");
+    });
+    await flush(5000);
+    expect(hook.status).toBe("waiting");
+
+    act(() => hook.cancel());
     expect(hook.status).toBe("connected");
-    expect(hook.state?.account_email).toBe("family@example.com");
+    expect(hook.waiting).toBeNull();
+
+    await flush(10000);
+    expect(hook.status).toBe("connected");
+  });
+
+  it("probes the tasks toolkit when calendar is connected", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) return connectedState();
+      if (isStatusUrl(url)) {
+        return url.endsWith("toolkit=googletasks")
+          ? activeStatus("googletasks")
+          : disconnectedState();
+      }
+      return response({ ok: true });
+    });
+    await mount();
+    await flush(0);
+
+    expect(hook.tasksConnected).toBe(true);
+  });
+
+  it("rejects a malformed 2xx setup body", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) return disconnectedState();
+      if (url.endsWith("/api/google/composio/setup")) return response({ ok: true, toolkit: "googlecalendar" });
+      return response({ ok: true });
+    });
+    await mount();
+    await act(async () => {
+      await hook.connect();
+    });
+
+    expect(hook.status).toBe("error:unknown");
+    expect(hook.waiting).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("/api/google/composio/setup"))).toBe(true);
+  });
+
+  it("rejects a malformed 2xx status body instead of waiting forever", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) return disconnectedState();
+      if (url.endsWith("/api/google/composio/setup")) return setupPayload();
+      if (isStatusUrl(url)) return response({ ok: true });
+      return response({ ok: true });
+    });
+    await mount();
+    await act(async () => {
+      await hook.connect();
+    });
+    await flush(5000);
+
+    expect(hook.status).toBe("error:unknown");
+    expect(hook.waiting).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => isStatusUrl(String(url)))).toBe(true);
+  });
+
+  it("does not let a deferred status poll restore state after cancel", async () => {
+    const poll = deferred<any>();
+    let stateReads = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) {
+        stateReads += 1;
+        return disconnectedState();
+      }
+      if (url.endsWith("/api/google/composio/setup")) return setupPayload();
+      if (isStatusUrl(url)) return poll.promise;
+      return response({ ok: true });
+    });
+    await mount();
+    await act(async () => {
+      await hook.connect();
+    });
+    await flush(5000);
+    const readsBeforeCancel = stateReads;
+
+    act(() => hook.cancel());
+    await act(async () => {
+      poll.resolve(activeStatus());
+      await Promise.resolve();
+    });
+    await flush(10000);
+
+    expect(stateReads).toBe(readsBeforeCancel);
+    expect(hook.status).toBe("unconnected");
+  });
+
+  it("clears the poll timer when unmounted during hosted consent", async () => {
+    let statusCalls = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) return disconnectedState();
+      if (url.endsWith("/api/google/composio/setup")) return setupPayload();
+      if (isStatusUrl(url)) {
+        statusCalls += 1;
+        return pendingStatus();
+      }
+      return response({ ok: true });
+    });
+    await mount();
+    await act(async () => {
+      await hook.connect();
+    });
+
+    const root = roots.pop();
+    if (root) act(() => root.unmount());
+    await flush(10000);
+
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("/api/google/composio/setup"))).toBe(true);
+    expect(statusCalls).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not let a deferred status poll restore state after disconnect", async () => {
+    const poll = deferred<any>();
+    let stateReads = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/google/state")) {
+        stateReads += 1;
+        return disconnectedState();
+      }
+      if (url.endsWith("/api/google/composio/setup")) return setupPayload();
+      if (url.endsWith("/api/google/composio/disconnect")) {
+        return response({ ok: true, outcome: "disconnected", remoteRevoked: true, localRevoked: true });
+      }
+      if (isStatusUrl(url)) return poll.promise;
+      return response({ ok: true });
+    });
+    await mount();
+    await act(async () => {
+      await hook.connect();
+    });
+    await flush(5000);
+
+    await act(async () => {
+      await hook.disconnect();
+    });
+    const readsAfterDisconnect = stateReads;
+    await act(async () => {
+      poll.resolve(activeStatus());
+      await Promise.resolve();
+    });
+    await flush(10000);
+
+    expect(stateReads).toBe(readsAfterDisconnect);
+    expect(hook.status).toBe("unconnected");
   });
 
   it("ignores a deferred public refresh after cancel", async () => {
@@ -126,7 +393,7 @@ describe("useGoogleConnection polling invalidation", () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/api/google/state")) {
         stateReads += 1;
-        if (stateReads === 1) return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
+        if (stateReads === 1) return disconnectedState();
         return pendingState.promise;
       }
       return response({ ok: true });
@@ -136,13 +403,14 @@ describe("useGoogleConnection polling invalidation", () => {
     const refreshPromise = hook.refresh();
     act(() => hook.cancel());
     await act(async () => {
-      pendingState.resolve(response({ ok: true, connected: true, account_email: "family@example.com", granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null }));
+      pendingState.resolve(connectedState());
       await refreshPromise;
     });
 
     expect(hook.status).toBe("unconnected");
     expect(hook.state?.connected).not.toBe(true);
   });
+
   it("invalidates a pre-transition refresh and never starts a competing disconnect state read", async () => {
     const pendingState = deferred<any>();
     let stateReads = 0;
@@ -150,13 +418,11 @@ describe("useGoogleConnection polling invalidation", () => {
       const url = String(input);
       if (url.endsWith("/api/google/state")) {
         stateReads += 1;
-        if (stateReads === 1) {
-          return response({ ok: true, connected: true, account_email: "family@example.com", granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-        }
+        if (stateReads === 1) return connectedState();
         if (stateReads === 2) return pendingState.promise;
-        return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
+        return disconnectedState();
       }
-      if (url.endsWith("/api/google/device-revoke")) {
+      if (url.endsWith("/api/google/composio/disconnect")) {
         return response({ ok: true, outcome: "disconnected", remoteRevoked: true, localRevoked: true });
       }
       return response({ ok: true });
@@ -175,7 +441,7 @@ describe("useGoogleConnection polling invalidation", () => {
 
     expect(stateReads).toBe(2);
     await act(async () => {
-      pendingState.resolve(response({ ok: true, connected: true, account_email: "family@example.com", granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null }));
+      pendingState.resolve(connectedState());
       await refreshPromise;
     });
 
@@ -185,15 +451,15 @@ describe("useGoogleConnection polling invalidation", () => {
   });
 
   it("rejects a post-transition refresh without another state read", async () => {
-    const revoke = deferred<any>();
+    const disconnect = deferred<any>();
     let stateReads = 0;
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/google/state")) {
         stateReads += 1;
-        return response({ ok: true, connected: true, account_email: "family@example.com", granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
+        return connectedState();
       }
-      if (url.endsWith("/api/google/device-revoke")) return revoke.promise;
+      if (url.endsWith("/api/google/composio/disconnect")) return disconnect.promise;
       return response({ ok: true });
     });
     await mount();
@@ -203,7 +469,7 @@ describe("useGoogleConnection polling invalidation", () => {
       disconnectPromise = hook.disconnect();
     });
     await act(async () => {
-      revoke.resolve(response({ ok: true, outcome: "disconnected", remoteRevoked: true, localRevoked: true }));
+      disconnect.resolve(response({ ok: true, outcome: "disconnected", remoteRevoked: true, localRevoked: true }));
       await disconnectPromise;
     });
     let refreshed!: boolean;
@@ -222,16 +488,7 @@ describe("useGoogleConnection polling invalidation", () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/api/google/state")) {
         stateReads += 1;
-        return response({
-          ok: true,
-          connected: stateReads === 1,
-          account_email: stateReads === 1 ? "family@example.com" : null,
-          granted_at: null,
-          revoked_at: null,
-          expires_at: null,
-          scope: null,
-          minutes_until_expiry: null,
-        });
+        return stateReads === 1 ? connectedState() : disconnectedState();
       }
       return response({ ok: true });
     });
@@ -252,16 +509,7 @@ describe("useGoogleConnection polling invalidation", () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/api/google/state")) {
         stateReads += 1;
-        return response({
-          ok: true,
-          connected: true,
-          account_email: stateReads === 1 ? "old@example.com" : "new@example.com",
-          granted_at: null,
-          revoked_at: null,
-          expires_at: null,
-          scope: null,
-          minutes_until_expiry: null,
-        });
+        return stateReads === 1 ? connectedState("old@example.com") : connectedState("new@example.com");
       }
       return response({ ok: true });
     });
@@ -283,7 +531,7 @@ describe("useGoogleConnection polling invalidation", () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/api/google/state")) {
         stateReads += 1;
-        return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
+        return disconnectedState();
       }
       return response({ ok: true });
     });
@@ -301,15 +549,15 @@ describe("useGoogleConnection polling invalidation", () => {
   });
 
   it("returns false immediately for a refresh started while disconnect is in flight", async () => {
-    const revoke = deferred<any>();
+    const disconnect = deferred<any>();
     let stateReads = 0;
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/google/state")) {
         stateReads += 1;
-        return response({ ok: true, connected: true, account_email: "family@example.com", granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
+        return connectedState();
       }
-      if (url.endsWith("/api/google/device-revoke")) return revoke.promise;
+      if (url.endsWith("/api/google/composio/disconnect")) return disconnect.promise;
       return response({ ok: true });
     });
     await mount();
@@ -324,10 +572,11 @@ describe("useGoogleConnection polling invalidation", () => {
     expect(refreshed).toBe(false);
     expect(stateReads).toBe(1);
     await act(async () => {
-      revoke.resolve(response({ ok: true, outcome: "disconnected", remoteRevoked: true, localRevoked: true }));
+      disconnect.resolve(response({ ok: true, outcome: "disconnected", remoteRevoked: true, localRevoked: true }));
       await disconnectPromise;
     });
   });
+
   it("rejects a malformed 2xx state body before applying it", async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/api/google/state")) return response({ connected: "yes" });
@@ -339,39 +588,6 @@ describe("useGoogleConnection polling invalidation", () => {
     expect(hook.state).toBeNull();
   });
 
-  it("rejects a malformed 2xx device grant body", async () => {
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/google/state")) return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-      if (url.endsWith("/api/google/device-grant")) return response({ ok: true, device_code: "incomplete" });
-      return response({ ok: true });
-    });
-    await mount();
-    await act(async () => {
-      await hook.connect();
-    });
-
-    expect(hook.status).toBe("error:unknown");
-    expect(hook.waiting).toBeNull();
-  });
-
-  it("rejects a malformed 2xx poll body instead of waiting forever", async () => {
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/google/state")) return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-      if (url.endsWith("/api/google/device-grant")) return response({ ok: true, attempt_id: "attempt-1", device_code: "device", user_code: "code", verification_url: "https://google.test/device", expires_in: 600, interval: 5 });
-      if (url.endsWith("/api/google/device-poll")) return response({ ok: true });
-      return response({ ok: true });
-    });
-    await mount();
-    await act(async () => {
-      await hook.connect();
-    });
-    await flush(5000);
-
-    expect(hook.status).toBe("error:unknown");
-    expect(hook.waiting).toBeNull();
-  });
   it.each([
     ["disconnected", { outcome: "disconnected", remoteRevoked: true, localRevoked: true }],
     ["local_only", { outcome: "local_only", remoteRevoked: false, localRevoked: true, warning: "Google access may remain." }],
@@ -380,8 +596,8 @@ describe("useGoogleConnection polling invalidation", () => {
   ])("returns the typed %s disconnect outcome", async (_label, expected) => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.endsWith("/api/google/state")) return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-      if (url.endsWith("/api/google/device-revoke")) return response(expected as Record<string, unknown>, expected.outcome !== "failed");
+      if (url.endsWith("/api/google/state")) return disconnectedState();
+      if (url.endsWith("/api/google/composio/disconnect")) return response(expected as Record<string, unknown>, expected.outcome !== "failed");
       return response({ ok: true });
     });
     await mount();
@@ -393,24 +609,15 @@ describe("useGoogleConnection polling invalidation", () => {
   });
 
   it("clears the disconnect lock after a failed response so connected refreshes can resume", async () => {
-    const revoke = deferred<any>();
+    const disconnect = deferred<any>();
     let stateReads = 0;
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/google/state")) {
         stateReads += 1;
-        return response({
-          ok: true,
-          connected: stateReads === 1,
-          account_email: stateReads === 1 ? "family@example.com" : null,
-          granted_at: null,
-          revoked_at: null,
-          expires_at: null,
-          scope: null,
-          minutes_until_expiry: null,
-        });
+        return stateReads === 1 ? connectedState() : disconnectedState();
       }
-      if (url.endsWith("/api/google/device-revoke")) return revoke.promise;
+      if (url.endsWith("/api/google/composio/disconnect")) return disconnect.promise;
       return response({ ok: true });
     });
     await mount();
@@ -420,7 +627,7 @@ describe("useGoogleConnection polling invalidation", () => {
       disconnectPromise = hook.disconnect();
     });
     await act(async () => {
-      revoke.resolve(response({ ok: false, outcome: "failed", remoteRevoked: false, localRevoked: false, error: "local unavailable" }, false, 500));
+      disconnect.resolve(response({ ok: false, outcome: "failed", remoteRevoked: false, localRevoked: false, error: "local unavailable" }, false, 500));
       await disconnectPromise;
     });
     let refreshed!: boolean;
@@ -440,8 +647,8 @@ describe("useGoogleConnection polling invalidation", () => {
   ])("rejects a type-valid but semantically invalid %s payload", async (_label, invalid) => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.endsWith("/api/google/state")) return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-      if (url.endsWith("/api/google/device-revoke")) return response(invalid as Record<string, unknown>);
+      if (url.endsWith("/api/google/state")) return disconnectedState();
+      if (url.endsWith("/api/google/composio/disconnect")) return response(invalid as Record<string, unknown>);
       return response({ ok: true });
     });
     await mount();
@@ -451,129 +658,5 @@ describe("useGoogleConnection polling invalidation", () => {
     });
 
     expect(result).toEqual({ outcome: "failed", remoteRevoked: false, localRevoked: false, error: "Disconnect failed" });
-  });
-
-  it("does not let a deferred poll restore state after cancel", async () => {
-    const poll = deferred<any>();
-    let stateReads = 0;
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/google/state")) {
-        stateReads += 1;
-        return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-      }
-      if (url.endsWith("/api/google/device-grant")) {
-        return response({ ok: true, attempt_id: "attempt-1", device_code: "device", user_code: "code", verification_url: "https://google.test/device", expires_in: 600, interval: 5 });
-      }
-      if (url.endsWith("/api/google/device-poll")) return poll.promise;
-      return response({ ok: true });
-    });
-    await mount();
-    await act(async () => {
-      await hook.connect();
-    });
-    await flush(5000);
-    const readsBeforeCancel = stateReads;
-
-    act(() => hook.cancel());
-    await act(async () => {
-      poll.resolve(response({ ok: true, status: "complete" }));
-      await Promise.resolve();
-    });
-    await flush(10000);
-
-    expect(stateReads).toBe(readsBeforeCancel);
-    expect(hook.status).toBe("unconnected");
-  });
-
-  it("invalidates the server attempt when the user cancels device flow", async () => {
-    const poll = deferred<any>();
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/google/state")) {
-        return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-      }
-      if (url.endsWith("/api/google/device-grant")) {
-        return response({ ok: true, attempt_id: "attempt-cancel", device_code: "device", user_code: "code", verification_url: "https://google.test/device", expires_in: 600, interval: 5 });
-      }
-      if (url.endsWith("/api/google/device-poll")) return poll.promise;
-      return response({ ok: true });
-    });
-    await mount();
-    await act(async () => {
-      await hook.connect();
-    });
-    await flush(5000);
-    act(() => hook.cancel());
-
-    const revokeCall = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith("/api/google/device-revoke"));
-    expect(revokeCall).toBeTruthy();
-    expect(JSON.parse(String((revokeCall?.[1] as RequestInit).body))).toEqual({ action: "cancel", attempt_id: "attempt-cancel" });
-  });
-
-  it("issues a non-abortable server invalidation when unmounted during device flow", async () => {
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/google/state")) {
-        return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-      }
-      if (url.endsWith("/api/google/device-grant")) {
-        return response({ ok: true, attempt_id: "attempt-unmount", device_code: "device", user_code: "code", verification_url: "https://google.test/device", expires_in: 600, interval: 5 });
-      }
-      return response({ ok: true });
-    });
-    await mount();
-    await act(async () => {
-      await hook.connect();
-    });
-
-    const root = roots.pop();
-    if (root) act(() => root.unmount());
-
-    const revokeCall = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith("/api/google/device-revoke"));
-    expect(revokeCall).toBeTruthy();
-    expect((revokeCall?.[1] as RequestInit).keepalive).toBe(true);
-    expect(JSON.parse(String((revokeCall?.[1] as RequestInit).body))).toEqual({ action: "cancel", attempt_id: "attempt-unmount" });
-  });
-
-  it("does not let a deferred poll restore state after disconnect", async () => {
-    const poll = deferred<any>();
-    const pollJson = deferred<Record<string, unknown>>();
-    let stateReads = 0;
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/google/state")) {
-        stateReads += 1;
-        return response({ ok: true, connected: false, account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
-      }
-      if (url.endsWith("/api/google/device-grant")) {
-        return response({ ok: true, attempt_id: "attempt-1", device_code: "device", user_code: "code", verification_url: "https://google.test/device", expires_in: 600, interval: 5 });
-      }
-      if (url.endsWith("/api/google/device-revoke")) return response({ ok: true, outcome: "disconnected", remoteRevoked: true, localRevoked: true });
-      if (url.endsWith("/api/google/device-poll")) return poll.promise;
-      return response({ ok: true });
-    });
-    await mount();
-    await act(async () => {
-      await hook.connect();
-    });
-    await flush(5000);
-
-    await act(async () => {
-      await hook.disconnect();
-    });
-    const readsAfterDisconnect = stateReads;
-    await act(async () => {
-      poll.resolve({ ok: true, json: () => pollJson.promise });
-      await Promise.resolve();
-    });
-    await act(async () => {
-      pollJson.resolve({ ok: true, status: "complete" });
-      await Promise.resolve();
-    });
-    await flush(10000);
-
-    expect(stateReads).toBe(readsAfterDisconnect);
-    expect(hook.status).toBe("unconnected");
   });
 });
