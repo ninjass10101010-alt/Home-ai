@@ -29,6 +29,10 @@ function composioErrorResponse(error: unknown): NextResponse | null {
   return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status });
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : "unknown error";
+}
+
 function stateUnavailableResponse(): NextResponse {
   return NextResponse.json(
     { ok: false, code: "google_state_unavailable", error: "Google connection state unavailable" },
@@ -61,7 +65,7 @@ export async function GET(req: NextRequest) {
   try {
     snapshot = await readConnectionSnapshot(key);
   } catch (error) {
-    console.error("[google/composio/status]", error);
+    console.warn("[google/composio/status]", errorMessage(error));
     return stateUnavailableResponse();
   }
 
@@ -76,7 +80,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     const mapped = composioErrorResponse(error);
     if (mapped) return mapped;
-    console.error("[google/composio/status]", error);
+    console.warn("[google/composio/status]", errorMessage(error));
     return NextResponse.json(
       { ok: false, code: "api_error", error: "Composio status check failed" },
       { status: 502 },
@@ -98,12 +102,14 @@ export async function GET(req: NextRequest) {
           key,
         );
       } catch (error) {
-        console.error("[google/composio/status] snapshot persist failed", error);
+        console.warn("[google/composio/status] snapshot persist failed:", errorMessage(error));
       }
-      try {
-        await syncCalendar();
-      } catch (error) {
-        console.error("[google/composio/status] initial sync failed", error);
+      if (toolkit === COMPOSIO_TOOLKITS.CALENDAR) {
+        try {
+          await syncCalendar();
+        } catch (error) {
+          console.warn("[google/composio/status] initial sync failed:", errorMessage(error));
+        }
       }
     }
     return NextResponse.json({
@@ -117,10 +123,12 @@ export async function GET(req: NextRequest) {
   }
 
   const accountStatus = account?.status || "NOT_FOUND";
-  try {
-    await writeConnectionSnapshot({ status: accountStatus, lastVerifiedAt: now }, key);
-  } catch (error) {
-    console.error("[google/composio/status] snapshot persist failed", error);
+  if (snapshot.status !== accountStatus) {
+    try {
+      await writeConnectionSnapshot({ status: accountStatus, lastVerifiedAt: now }, key);
+    } catch (error) {
+      console.warn("[google/composio/status] snapshot persist failed:", errorMessage(error));
+    }
   }
   return NextResponse.json({
     ok: true,

@@ -6,7 +6,7 @@ import {
   COMPOSIO_TOOLKITS,
   createConnectedAccountLink,
 } from "@/lib/google/composio";
-import { TASKS_SNAPSHOT_KEY, writeConnectionSnapshot } from "@/lib/google/connection-state";
+import { TASKS_SNAPSHOT_KEY, readConnectionSnapshot, writeConnectionSnapshot } from "@/lib/google/connection-state";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,6 +15,10 @@ type Toolkit = (typeof COMPOSIO_TOOLKITS)[keyof typeof COMPOSIO_TOOLKITS];
 
 function snapshotKeyFor(toolkit: Toolkit): string | undefined {
   return toolkit === COMPOSIO_TOOLKITS.TASKS ? TASKS_SNAPSHOT_KEY : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : "unknown error";
 }
 
 function composioErrorResponse(error: unknown): NextResponse | null {
@@ -62,16 +66,20 @@ export async function POST(req: NextRequest) {
   try {
     await ensureGoogleCollections();
     const link = await createConnectedAccountLink(toolkit);
-    await writeConnectionSnapshot(
-      {
-        connectedAccountId: link.connectedAccountId,
-        status: "INITIATED",
-        accountEmail: null,
-        connectedAt: null,
-        lastVerifiedAt: null,
-      },
-      snapshotKeyFor(toolkit),
-    );
+    const key = snapshotKeyFor(toolkit);
+    const existing = await readConnectionSnapshot(key);
+    if (existing.status !== "ACTIVE") {
+      await writeConnectionSnapshot(
+        {
+          connectedAccountId: link.connectedAccountId,
+          status: "INITIATED",
+          accountEmail: null,
+          connectedAt: null,
+          lastVerifiedAt: null,
+        },
+        key,
+      );
+    }
     return NextResponse.json({
       ok: true,
       toolkit,
@@ -82,7 +90,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const mapped = composioErrorResponse(error);
     if (mapped) return mapped;
-    console.error("[google/composio/setup]", error);
+    console.warn("[google/composio/setup]", errorMessage(error));
     return NextResponse.json(
       { ok: false, code: "google_state_unavailable", error: "Google connection state unavailable" },
       { status: 503 },

@@ -8,6 +8,10 @@ import { clearDirectGoogleCache } from "@/lib/google/token-store";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : "unknown error";
+}
+
 export async function POST(req: NextRequest) {
   const gate = await authorizeAdminRequest(req);
   if (!gate.ok) {
@@ -22,7 +26,8 @@ export async function POST(req: NextRequest) {
     const snapshot = await readConnectionSnapshot();
     connectedAccountId = snapshot.connectedAccountId;
   } catch (error) {
-    console.error("[google/composio/disconnect] snapshot read failed", error);
+    console.warn("[google/composio/disconnect] snapshot read failed:", errorMessage(error));
+    return NextResponse.json({ ok: false, error: "google_state_unavailable" }, { status: 503 });
   }
 
   let remoteRevoked = !connectedAccountId;
@@ -31,7 +36,7 @@ export async function POST(req: NextRequest) {
       await deleteConnectedAccount(connectedAccountId);
       remoteRevoked = true;
     } catch (error) {
-      console.error("[google/composio/disconnect] remote delete failed", error);
+      console.warn("[google/composio/disconnect] remote delete failed:", errorMessage(error));
       remoteRevoked = false;
     }
   }
@@ -43,7 +48,7 @@ export async function POST(req: NextRequest) {
     invalidateGoogleIntegrationOperation();
     await clearDirectGoogleCache();
   } catch (error) {
-    console.error("[google/composio/disconnect]", error);
+    console.warn("[google/composio/disconnect]", errorMessage(error));
     return NextResponse.json(
       {
         ok: false,

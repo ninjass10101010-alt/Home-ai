@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => {
@@ -90,7 +90,12 @@ const spies = [
   mocks.invalidateGoogleIntegrationOperation,
 ];
 
+const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
 beforeEach(() => {
+  consoleWarn.mockClear();
+  consoleError.mockClear();
   for (const spy of spies) spy.mockReset();
   mocks.authorizeAdminRequest.mockResolvedValue({ ok: true });
   mocks.authorizeCurrentParentRequest.mockResolvedValue({
@@ -110,6 +115,10 @@ beforeEach(() => {
   mocks.clearDirectGoogleCache.mockResolvedValue(true);
   mocks.deleteConnectedAccount.mockResolvedValue(true);
   mocks.getConnectedAccount.mockResolvedValue(null);
+});
+
+afterEach(() => {
+  expect(consoleError).not.toHaveBeenCalled();
 });
 
 describe("POST /api/google/composio/setup", () => {
@@ -142,6 +151,23 @@ describe("POST /api/google/composio/setup", () => {
       expect.objectContaining({ connectedAccountId: "ca_1", status: "INITIATED" }),
       "google_composio_tasks",
     );
+  });
+
+  it("creates a fresh link without downgrading an ACTIVE snapshot", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValueOnce({
+      connectedAccountId: "ca_live",
+      status: "ACTIVE",
+      accountEmail: "family@example.com",
+      connectedAt: "2030-01-01T00:00:00.000Z",
+      lastVerifiedAt: "2030-01-02T00:00:00.000Z",
+    });
+
+    const response = await setup(post("/api/google/composio/setup"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, connected_account_id: "ca_1" });
+    expect(mocks.readConnectionSnapshot).toHaveBeenCalledWith(undefined);
+    expect(mocks.writeConnectionSnapshot).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown toolkit", async () => {
@@ -190,6 +216,16 @@ describe("POST /api/google/composio/setup", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ ok: false, code: "google_state_unavailable" });
+  });
+
+  it("returns 503 instead of risking an ACTIVE downgrade when the snapshot cannot be read", async () => {
+    mocks.readConnectionSnapshot.mockRejectedValueOnce(new Error("PB down"));
+
+    const response = await setup(post("/api/google/composio/setup"));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ ok: false, code: "google_state_unavailable" });
+    expect(mocks.writeConnectionSnapshot).not.toHaveBeenCalled();
   });
 });
 
@@ -295,6 +331,33 @@ describe("GET /api/google/composio/status", () => {
     expect(mocks.syncCalendar).not.toHaveBeenCalled();
   });
 
+  it("does not rewrite an unchanged non-active status on every poll", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValueOnce({
+      connectedAccountId: "ca_1",
+      status: "INITIATED",
+      accountEmail: null,
+      connectedAt: null,
+      lastVerifiedAt: null,
+    });
+    mocks.getConnectedAccount.mockResolvedValueOnce({
+      id: "ca_1",
+      status: "INITIATED",
+      toolkitSlug: "googlecalendar",
+      email: null,
+    });
+
+    const response = await status(get("/api/google/composio/status"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      connected: false,
+      status: "INITIATED",
+    });
+    expect(mocks.writeConnectionSnapshot).not.toHaveBeenCalled();
+    expect(mocks.syncCalendar).not.toHaveBeenCalled();
+  });
+
   it("polls the tasks snapshot when toolkit=googletasks", async () => {
     mocks.readConnectionSnapshot.mockResolvedValueOnce({
       connectedAccountId: "ca_tasks",
@@ -319,6 +382,7 @@ describe("GET /api/google/composio/status", () => {
       expect.objectContaining({ connectedAccountId: "ca_tasks", status: "ACTIVE" }),
       "google_composio_tasks",
     );
+    expect(mocks.syncCalendar).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown toolkit", async () => {
@@ -424,6 +488,23 @@ describe("POST /api/google/composio/disconnect", () => {
     expect(mocks.disconnectGoogle).toHaveBeenCalledTimes(1);
     expect(mocks.clearDirectGoogleCache).toHaveBeenCalledTimes(1);
     expect(mocks.invalidateGoogleIntegrationOperation).toHaveBeenCalledTimes(1);
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "[google/composio/disconnect] remote delete failed:",
+      "Composio error (500)",
+    );
+  });
+
+  it("returns 503 without touching the connection when the snapshot cannot be read", async () => {
+    mocks.readConnectionSnapshot.mockRejectedValueOnce(new Error("PB down"));
+
+    const response = await disconnect(post("/api/google/composio/disconnect"));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: "google_state_unavailable" });
+    expect(mocks.deleteConnectedAccount).not.toHaveBeenCalled();
+    expect(mocks.disconnectGoogle).not.toHaveBeenCalled();
+    expect(mocks.clearDirectGoogleCache).not.toHaveBeenCalled();
+    expect(mocks.invalidateGoogleIntegrationOperation).not.toHaveBeenCalled();
   });
 
   it("still clears locally when no account id is stored", async () => {
