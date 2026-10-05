@@ -1,5 +1,7 @@
-import { googleFetch } from "./oauth-client.ts";
 import { withAdmin } from "../pb-auth.ts";
+import { executeComposioAction, ComposioError } from "./composio.ts";
+import { COMPOSIO_ACTIONS } from "./composio-actions.ts";
+import { readConnectionSnapshot, TASKS_SNAPSHOT_KEY } from "./connection-state.ts";
 import type { GoogleTask, GoogleTaskList } from "./types.ts";
 
 const CONSUELA_LIST_TITLE = "Consuela";
@@ -14,50 +16,144 @@ export interface TaskSyncResult {
   deleted: number;
 }
 
-interface TasksListResponse {
-  items?: GoogleTask[];
-  nextPageToken?: string;
+export interface TaskSyncSkipped {
+  skipped: true;
+  reason: string;
 }
 
-interface TaskListsListResponse {
-  items?: GoogleTaskList[];
-  nextPageToken?: string;
+export type TaskSyncOutcome = TaskSyncResult | TaskSyncSkipped;
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
 
-async function getTasklists(): Promise<GoogleTaskList[]> {
+// Composio execute responses are `{ data, successful, error }`. A tool that
+// ran but failed reports HTTP 200 with `successful:false` — that must throw
+// rather than read as an empty page.
+function unwrapExecuteResult(payload: unknown): unknown {
+  const record = asRecord(payload);
+  if (record && record.successful === false) {
+    const error = asRecord(record.error);
+    const message =
+      typeof error?.message === "string" && error.message
+        ? error.message
+        : "Composio tasks action failed";
+    throw new ComposioError("api_error", message);
+  }
+  if (record && "data" in record) return record.data;
+  return payload;
+}
+
+function collectItems(root: unknown, keys: string[]): unknown[] {
+  if (Array.isArray(root)) return root;
+  const record = asRecord(root);
+  if (!record) return [];
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") return [value];
+  }
+  // A bare single resource (e.g. an INSERT_TASK response) has no list key.
+  if (typeof record.id === "string" || typeof record.id === "number") return [record];
+  return [];
+}
+
+function nextPageToken(payload: unknown): string | undefined {
+  const record = asRecord(unwrapExecuteResult(payload));
+  const token = record?.nextPageToken ?? record?.next_page_token;
+  return typeof token === "string" && token ? token : undefined;
+}
+
+// Pure mappers. Google keys tasklists under `items` and tasks under `tasks`;
+// every wrapper variant is normalized defensively before reaching the caches.
+export function mapTaskListsPayload(payload: unknown): GoogleTaskList[] {
+  const lists: GoogleTaskList[] = [];
+  for (const item of collectItems(unwrapExecuteResult(payload), ["items", "taskLists"])) {
+    const record = asRecord(item);
+    const id = typeof record?.id === "string" ? record.id : "";
+    if (!id) continue;
+    const list: GoogleTaskList = {
+      id,
+      title: typeof record?.title === "string" ? record.title : "",
+    };
+    if (typeof record?.updated === "string") list.updated = record.updated;
+    if (typeof record?.selfLink === "string") list.selfLink = record.selfLink;
+    lists.push(list);
+  }
+  return lists;
+}
+
+export function mapTasksPayload(payload: unknown): GoogleTask[] {
+  const tasks: GoogleTask[] = [];
+  for (const item of collectItems(unwrapExecuteResult(payload), ["tasks", "items", "task"])) {
+    const record = asRecord(item);
+    const id = typeof record?.id === "string" ? record.id : "";
+    if (!id) continue;
+    const task: GoogleTask = {
+      id,
+      title: typeof record?.title === "string" ? record.title : "",
+      status: record?.status === "completed" ? "completed" : "needsAction",
+    };
+    if (typeof record?.notes === "string") task.notes = record.notes;
+    if (typeof record?.due === "string") task.due = record.due;
+    if (typeof record?.completed === "string") task.completed = record.completed;
+    if (typeof record?.updated === "string") task.updated = record.updated;
+    if (typeof record?.etag === "string") task.etag = record.etag;
+    if (typeof record?.parent === "string") task.parent = record.parent;
+    if (typeof record?.position === "string") task.position = record.position;
+    if (Array.isArray(record?.links)) task.links = record.links as GoogleTask["links"];
+    tasks.push(task);
+  }
+  return tasks;
+}
+
+function firstTask(payload: unknown): GoogleTask {
+  const tasks = mapTasksPayload(payload);
+  if (tasks.length === 0) throw new ComposioError("api_error", "Composio did not return a task");
+  return tasks[0];
+}
+
+async function readTasksAccountId(): Promise<string> {
+  const snapshot = await readConnectionSnapshot(TASKS_SNAPSHOT_KEY);
+  if (!snapshot.connectedAccountId) {
+    throw new ComposioError("not_connected", "Google Tasks account is not connected");
+  }
+  return snapshot.connectedAccountId;
+}
+
+async function getTasklists(accountId: string): Promise<GoogleTaskList[]> {
   const all: GoogleTaskList[] = [];
   let pageToken: string | undefined;
   while (true) {
-    const q: Record<string, string> = { maxResults: "100" };
-    if (pageToken) q.pageToken = pageToken;
-    const res = await googleFetch<TaskListsListResponse>(
-      "https://tasks.googleapis.com/tasks/v1/users/@me/lists",
-      { method: "GET", query: q, endpoint: "/tasks/v1/users/@me/lists" },
+    const args: Record<string, unknown> = { maxResults: 100 };
+    if (pageToken) args.pageToken = pageToken;
+    const res = await executeComposioAction<unknown>(
+      COMPOSIO_ACTIONS.TASKS_LIST_TASKLISTS,
+      args,
+      accountId,
     );
-    if (res.data.items) all.push(...res.data.items);
-    if (res.data.nextPageToken) pageToken = res.data.nextPageToken;
+    all.push(...mapTaskListsPayload(res));
+    const next = nextPageToken(res);
+    if (next) pageToken = next;
     else break;
   }
   return all;
 }
 
-async function getOrCreateConsuelaListId(): Promise<string> {
-  const lists = await getTasklists();
+async function getOrCreateConsuelaListId(accountId: string): Promise<string> {
+  const lists = await getTasklists(accountId);
   const existing = lists.find((l) => l.title === CONSUELA_LIST_TITLE);
   if (existing) {
     await upsertTasklist(existing, true);
     return existing.id;
   }
-  const res = await googleFetch<GoogleTaskList>(
-    "https://tasks.googleapis.com/tasks/v1/users/@me/lists",
-    {
-      method: "POST",
-      body: { title: CONSUELA_LIST_TITLE },
-      endpoint: "/tasks/v1/users/@me/lists",
-    },
-  );
-  await upsertTasklist(res.data, true);
-  return res.data.id;
+  // COMPOSIO_ACTIONS pins no "create task list" action, so the dashboard can
+  // no longer mint its own list — fall back to the account's default list
+  // instead of hardcoding an unpinned slug.
+  const fallback = lists.find((l) => l.id === "@default") ?? lists[0];
+  if (!fallback) throw new ComposioError("api_error", "No Google Tasks list is available");
+  await upsertTasklist(fallback, false);
+  return fallback.id;
 }
 
 async function upsertTasklist(list: GoogleTaskList, ownedByDashboard: boolean): Promise<void> {
@@ -79,23 +175,26 @@ async function upsertTasklist(list: GoogleTaskList, ownedByDashboard: boolean): 
   });
 }
 
-async function listAllTasks(tasklistId: string): Promise<GoogleTask[]> {
+async function listAllTasks(accountId: string, tasklistId: string): Promise<GoogleTask[]> {
   const all: GoogleTask[] = [];
   let pageToken: string | undefined;
   while (true) {
-    const q: Record<string, string> = {
-      showCompleted: "true",
-      showDeleted: "true",
-      showHidden: "true",
-      maxResults: "100",
+    const args: Record<string, unknown> = {
+      tasklist_id: tasklistId,
+      showCompleted: true,
+      showDeleted: true,
+      showHidden: true,
+      maxResults: 100,
     };
-    if (pageToken) q.pageToken = pageToken;
-    const res = await googleFetch<TasksListResponse>(
-      `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(tasklistId)}/tasks`,
-      { method: "GET", query: q, endpoint: "/tasks/v1/lists/{id}/tasks" },
+    if (pageToken) args.pageToken = pageToken;
+    const res = await executeComposioAction<unknown>(
+      COMPOSIO_ACTIONS.TASKS_LIST_TASKS,
+      args,
+      accountId,
     );
-    if (res.data.items) all.push(...res.data.items);
-    if (res.data.nextPageToken) pageToken = res.data.nextPageToken;
+    all.push(...mapTasksPayload(res));
+    const next = nextPageToken(res);
+    if (next) pageToken = next;
     else break;
   }
   return all;
@@ -152,9 +251,17 @@ async function saveSyncState(token: string | null, error?: string): Promise<void
   });
 }
 
-export async function syncTasks(): Promise<TaskSyncResult> {
-  const consuelaListId = await getOrCreateConsuelaListId();
-  const allLists = await getTasklists();
+// Tasks is an optional second Composio connection: with no
+// `google_composio_tasks` snapshot this is a no-op (no Composio/Google call).
+// Failures reject — the caller's best-effort catch keeps them out of calendar
+// sync.
+export async function syncTasks(): Promise<TaskSyncOutcome> {
+  const snapshot = await readConnectionSnapshot(TASKS_SNAPSHOT_KEY);
+  const accountId = snapshot.connectedAccountId;
+  if (!accountId) return { skipped: true, reason: "tasks_not_connected" };
+
+  const consuelaListId = await getOrCreateConsuelaListId(accountId);
+  const allLists = await getTasklists(accountId);
   let upserted = 0;
   let deleted = 0;
 
@@ -162,7 +269,7 @@ export async function syncTasks(): Promise<TaskSyncResult> {
     if (list.id !== consuelaListId) {
       await upsertTasklist(list, false);
     }
-    const tasks = await listAllTasks(list.id);
+    const tasks = await listAllTasks(accountId, list.id);
     await withAdmin(async (pb) => {
       for (const t of tasks) {
         if (t.status === "completed" && !t.completed) {
@@ -220,19 +327,29 @@ export interface TaskInput {
   status?: "needsAction" | "completed";
 }
 
-export async function createTask(tasklistId: string, input: TaskInput): Promise<GoogleTask> {
-  const body: any = {
+async function createTaskForAccount(
+  accountId: string,
+  tasklistId: string,
+  input: TaskInput,
+): Promise<GoogleTask> {
+  const args: Record<string, unknown> = {
+    tasklist_id: tasklistId,
     title: input.title,
-    notes: input.notes,
     status: input.status || "needsAction",
   };
-  if (input.due) body.due = input.due;
+  if (input.notes !== undefined) args.notes = input.notes;
+  if (input.due) args.due = input.due;
 
-  const res = await googleFetch<GoogleTask>(
-    `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(tasklistId)}/tasks`,
-    { method: "POST", body, endpoint: "/tasks/v1/lists/{id}/tasks" },
+  const res = await executeComposioAction<unknown>(
+    COMPOSIO_ACTIONS.TASKS_CREATE_TASK,
+    args,
+    accountId,
   );
-  return res.data;
+  return firstTask(res);
+}
+
+export async function createTask(tasklistId: string, input: TaskInput): Promise<GoogleTask> {
+  return createTaskForAccount(await readTasksAccountId(), tasklistId, input);
 }
 
 export async function updateTask(
@@ -240,17 +357,25 @@ export async function updateTask(
   taskId: string,
   input: Partial<TaskInput>,
 ): Promise<GoogleTask> {
-  const res = await googleFetch<GoogleTask>(
-    `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(tasklistId)}/tasks/${encodeURIComponent(taskId)}`,
-    { method: "PATCH", body: input, endpoint: "/tasks/v1/lists/{id}/tasks/{taskId}" },
+  const accountId = await readTasksAccountId();
+  const args: Record<string, unknown> = { tasklist_id: tasklistId, task_id: taskId };
+  for (const [key, value] of Object.entries(input)) {
+    if (value !== undefined) args[key] = value;
+  }
+  const res = await executeComposioAction<unknown>(
+    COMPOSIO_ACTIONS.TASKS_UPDATE_TASK,
+    args,
+    accountId,
   );
-  return res.data;
+  return firstTask(res);
 }
 
 export async function deleteTask(tasklistId: string, taskId: string): Promise<void> {
-  await googleFetch(
-    `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(tasklistId)}/tasks/${encodeURIComponent(taskId)}`,
-    { method: "DELETE", endpoint: "/tasks/v1/lists/{id}/tasks/{taskId}" },
+  const accountId = await readTasksAccountId();
+  await executeComposioAction(
+    COMPOSIO_ACTIONS.TASKS_DELETE_TASK,
+    { tasklist_id: tasklistId, task_id: taskId },
+    accountId,
   );
 }
 
@@ -277,8 +402,9 @@ export async function createReminder(args: {
   due: string;
   notes?: string;
 }): Promise<{ listId: string; task: GoogleTask }> {
-  const listId = await getOrCreateConsuelaListId();
-  const task = await createTask(listId, {
+  const accountId = await readTasksAccountId();
+  const listId = await getOrCreateConsuelaListId(accountId);
+  const task = await createTaskForAccount(accountId, listId, {
     title: args.title,
     due: args.due,
     notes: args.notes,
@@ -287,7 +413,7 @@ export async function createReminder(args: {
 }
 
 export async function getConsuelaListId(): Promise<string> {
-  return getOrCreateConsuelaListId();
+  return getOrCreateConsuelaListId(await readTasksAccountId());
 }
 
 export { CONSUMELA_TAG };
