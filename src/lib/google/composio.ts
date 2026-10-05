@@ -83,19 +83,23 @@ export async function executeComposioAction<T>(
     body: JSON.stringify(body),
   });
   if (!res.ok) throw classify(res.status);
-  return (await res.json()) as T;
+  const data = await readJson(res);
+  if (data === null) throw new ComposioError("api_error", "Composio returned an empty response");
+  return data as T;
 }
 
 export async function ensureAuthConfig(toolkit: string): Promise<string> {
   const key = await getComposioKey();
   const listRes = await call(`${COMPOSIO_AUTH_CONFIGS_PATH}?toolkit_slug=${encodeURIComponent(toolkit)}`, {
     method: "GET", headers: { "X-API-Key": key },
-  }).catch(() => null);
-  if (listRes?.ok) {
+  });
+  if (listRes.ok) {
     const list = asRecord(await readJson(listRes));
     const items = Array.isArray(list?.items) ? list.items : Array.isArray(list?.data) ? list.data : [];
     const found = items.map((item) => firstId(asRecord(item)?.id)).find((id) => id !== null);
     if (found) return found;
+  } else if (listRes.status !== 404) {
+    throw classify(listRes.status);
   }
   const createRes = await call(COMPOSIO_AUTH_CONFIGS_PATH, {
     method: "POST",

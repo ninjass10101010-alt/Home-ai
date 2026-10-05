@@ -139,6 +139,33 @@ describe("google connection snapshot store", () => {
     );
   });
 
+  it("updates the existing row with the merged patch instead of creating", async () => {
+    const getFullList = vi.fn(async () => [activeRow({ status: "FAILED" })]);
+    const create = vi.fn();
+    const update = vi.fn(async (id: string, payload: unknown) => ({ id, ...(payload as object) }));
+    mocks.withAdmin.mockImplementation((fn: (pb: unknown) => Promise<unknown>) =>
+      fn({ collection: () => ({ getFullList, create, update, delete: vi.fn() }) })
+    );
+
+    await writeConnectionSnapshot({ status: "ACTIVE", lastVerifiedAt: "2030-02-01T00:00:00.000Z" });
+
+    expect(create).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(
+      "row-1",
+      expect.objectContaining({
+        key: "google_composio_connection",
+        data: expect.objectContaining({
+          connectedAccountId: "ca_calendar_1",
+          accountEmail: "family@example.com",
+          connectedAt: "2030-01-01T00:00:00.000Z",
+          status: "ACTIVE",
+          lastVerifiedAt: "2030-02-01T00:00:00.000Z",
+        }),
+      }),
+      expect.anything()
+    );
+  });
+
   it("clears the snapshot rows (disconnectGoogle)", async () => {
     const rows = [activeRow(), { id: "row-2", key: "google_composio_connection", data: {} }];
     const deleted: string[] = [];
