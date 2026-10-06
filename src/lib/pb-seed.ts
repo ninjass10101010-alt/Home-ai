@@ -1051,11 +1051,14 @@ export async function seedCollections() {
               return maxDrift ? { schemaField: s, liveField } : null;
             }
             if (s.type === "json" && s.options?.maxSize !== undefined) {
-              // Raise-only: a live field at PB's default (1 MiB) or smaller is
-              // patched up to the seed's maxSize; a field someone raised
-              // higher (or set unlimited, maxSize 0) is never lowered.
+              // Raise-only. PB json fields have no real "unlimited": an unset
+              // maxSize serializes as 0 and validation falls back to the
+              // built-in 1 MiB default — exactly the live state that fired the
+              // 2026-10-05 incident, so 0 MUST be treated as drift toward the
+              // target, not as an explicit unlimited. A value larger than the
+              // target (a deliberate raise) is never lowered.
               const liveMaxSize = Number(liveField.maxSize ?? 0);
-              const maxSizeDrift = liveMaxSize > 0 && liveMaxSize < s.options.maxSize;
+              const maxSizeDrift = liveMaxSize !== s.options.maxSize && liveMaxSize < s.options.maxSize;
               return maxSizeDrift ? { schemaField: s, liveField } : null;
             }
             if (s.type === "select" && s.options?.values) {

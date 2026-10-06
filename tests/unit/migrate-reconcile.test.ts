@@ -144,7 +144,7 @@ describe("create/tally (runFeatureMigration)", () => {
     });
     return {
       collections,
-      collection: () => ({ getList: async () => Promise.reject(PB_MISSING) }),
+      collection: () => ({ getList: async () => Promise.reject(PB_MISSING), authWithPassword: async () => ({ token: "t", record: {} }) }),
     };
   }
 
@@ -171,7 +171,7 @@ describe("create/tally (runFeatureMigration)", () => {
     const create = vi.fn();
     const pb = {
       collections: { ...collections, create },
-      collection: () => ({ getList: async () => Promise.reject(new Error("ECONNREFUSED")) }),
+      collection: () => ({ getList: async () => Promise.reject(new Error("ECONNREFUSED")), authWithPassword: async () => ({ token: "t", record: {} }) }),
     };
     mocks.getAdminPB.mockReturnValue(pb);
 
@@ -197,7 +197,7 @@ describe("create/tally (runFeatureMigration)", () => {
     );
     const pb = {
       collections,
-      collection: () => ({ getList: async () => ({ items: [] }) }),
+      collection: () => ({ getList: async () => ({ items: [] }), authWithPassword: async () => ({ token: "t", record: {} }) }),
     };
     mocks.getAdminPB.mockReturnValue(pb);
 

@@ -203,6 +203,32 @@ describe("pb-seed consuela_data_snapshots.data maxSize", () => {
     expect(fields.find((f: any) => f.name === "data").maxSize).toBe(SNAPSHOT_DATA_MAX_SIZE);
   });
 
+  it("treats an unset (0) live maxSize as drift — PB's json field has no real 'unlimited'", async () => {
+    // Live regression, 2026-10-05: the field was created without options, so
+    // PocketBase serializes maxSize as 0 and validation falls back to the
+    // built-in 1 MiB default. 0 must patch UP to the target, not be read as
+    // "deliberately unlimited" (a live PB read was verified flat-shaped:
+    // { name: 'data', type: 'json', maxSize: 0 }).
+    const live = {
+      id: "snap_live_unset",
+      name: "consuela_data_snapshots",
+      fields: liveFieldsFor(0),
+      indexes: snapshotsDef().indexes || [],
+      ...LOCKED,
+    };
+    const pb = makePb([live]);
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    await seedCollections();
+
+    const updateCall = (pb.collections.update as any).mock.calls.find(
+      (c: any[]) => c[0] === "snap_live_unset"
+    );
+    expect(updateCall).toBeDefined();
+    const fields = updateCall[1].fields as any[];
+    expect(fields.find((f: any) => f.name === "data").maxSize).toBe(SNAPSHOT_DATA_MAX_SIZE);
+  });
+
   it("leaves an already-raised data.maxSize untouched (idempotent)", async () => {
     const live = {
       id: "snap_live_2",

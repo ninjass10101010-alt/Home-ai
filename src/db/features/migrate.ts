@@ -107,7 +107,14 @@ function mapFieldType(type: string): string {
 }
 
 /**
- * Build a PocketBase-compatible field definition.
+ * Build a PocketBase-compatible field definition — in the ≥0.23 FLAT shape.
+ *
+ * The legacy nested `{ name, type, options: {...} }` payload sent under
+ * `schema:` is silently IGNORED by modern PocketBase on create: the collection
+ * materializes with ONLY its system fields, and any index referencing a schema
+ * column then fails with "no such column". (Probed live 2026-10-05: create
+ * with `schema:` returned 200 and produced a fields=["id"] collection.)
+ * So: flat field props, and only per-type options this PB accepts.
  */
 function buildPBField(field: PocketBaseField): Record<string, any> {
   const pbField: Record<string, any> = {
@@ -115,50 +122,22 @@ function buildPBField(field: PocketBaseField): Record<string, any> {
     type: mapFieldType(field.type),
     required: field.required || false,
   };
-
-  // Add type-specific options
-  const options: Record<string, any> = {};
-
   if (field.type === 'select' && field.values) {
-    options.values = field.values;
-    options.maxSelect = field.maxSelect ?? null; // null = allow multiple
+    pbField.values = field.values;
+    pbField.maxSelect = field.maxSelect ?? 1;
   }
-
   if (field.type === 'relation' && field.collectionId) {
-    options.collectionId = field.collectionId;
-    options.maxSelect = field.maxSelect ?? null;
-    options.cascadeDelete = field.cascadeDelete || false;
-    options.minSelect = null;
+    pbField.collectionId = field.collectionId;
+    pbField.maxSelect = field.maxSelect ?? 1;
+    pbField.cascadeDelete = field.cascadeDelete || false;
   }
-
-  if (field.type === 'number') {
-    options.min = null;
-    options.max = null;
-  }
-
-  if (field.type === 'text') {
-    options.min = null;
-    options.max = null;
-    options.pattern = '';
-  }
-
   if (field.type === 'file') {
-    options.maxSelect = 1;
-    options.maxSize = field.maxSize ?? 5242880; // 5MB unless the schema says otherwise
-    options.mimeTypes = field.mimeTypes ?? [];
-    options.thumbs = [];
-    options.protected = false;
+    pbField.maxSelect = 1;
+    pbField.maxSize = field.maxSize ?? 5242880; // 5MB unless the schema says otherwise
+    pbField.mimeTypes = field.mimeTypes ?? [];
+    pbField.thumbs = [];
+    pbField.protected = false;
   }
-
-  if (field.defaultValue !== undefined) {
-    pbField.presentable = false;
-    options.defaultValue = field.defaultValue;
-  }
-
-  if (Object.keys(options).length > 0) {
-    pbField.options = options;
-  }
-
   return pbField;
 }
 
@@ -179,18 +158,15 @@ async function createCollection(pb: any, schema: PocketBaseSchema): Promise<Crea
   }
 
   const fields = schema.fields.map(buildPBField);
-  
-  // Add required system fields
-  const systemFields = [
-    { name: 'created', type: 'autodate', options: { onGenerate: 'create' } },
-    { name: 'updated', type: 'autodate', options: { onGenerate: 'update' } },
-  ];
 
+  // No hand-rolled `created`/`updated` autodates: modern PocketBase adds the
+  // system fields (id/created/updated) itself, and adding our own both is a
+  // name conflict and was part of the legacy `schema:` payload this PB ignores.
   try {
     await pb.collections.create({
       name: schema.name,
       type: schema.type,
-      schema: [...fields, ...systemFields],
+      fields,
       indexes: schema.indexes || [],
       listRule: null,
       viewRule: null,
@@ -201,7 +177,10 @@ async function createCollection(pb: any, schema: PocketBaseSchema): Promise<Crea
     console.log(`  ✅ Created collection "${schema.name}"`);
     return "created";
   } catch (error: any) {
-    console.error(`  ❌ Failed to create "${schema.name}": ${error.message}`);
+    // Field-level validation detail lives in error.data.data on this PB —
+    // without it every failure prints the identical "Failed to create collection."
+    const detail = error?.data?.data ? ` — ${JSON.stringify(error.data.data).slice(0, 300)}` : "";
+    console.error(`  ❌ Failed to create "${schema.name}": ${error.message}${detail}`);
     return "failed";
   }
 }
@@ -286,6 +265,17 @@ export async function runFeatureMigration(): Promise<{ created: number; skipped:
       `Check NEXT_PUBLIC_PB_URL (currently: ${process.env.NEXT_PUBLIC_PB_URL || 'http://192.168.0.28:8090'})`
     );
   }
+
+  // The migration reads and writes collection schemas, which are locked to a
+  // superuser. pb.seed.mjs does this explicitly; this script historically did
+  // NOT (the feature schemas were only ever unit-tested against fakes), so
+  // every create/probe failed with "requires valid record authorization".
+  const adminEmail = process.env.PB_ADMIN_EMAIL;
+  const adminPass = process.env.PB_ADMIN_PASS;
+  if (!adminEmail || !adminPass) {
+    throw new Error('PB_ADMIN_EMAIL and PB_ADMIN_PASS are required (run via `npm run migrate:features`; values load from .env.local)');
+  }
+  await pb.collection('_superusers').authWithPassword(adminEmail, adminPass);
 
   let created = 0;
   let skipped = 0;
@@ -381,6 +371,13 @@ function getOrderedSchemas(): typeof ALL_FEATURE_SCHEMAS {
 
 async function main() {
   try {
+    // Real credentials live in .env.local (gitignored) — load like pb-seed.mjs does.
+    // Node's loadEnvFile never overrides keys already present in the environment.
+    try {
+      (process as any).loadEnvFile?.('.env.local');
+    } catch {
+      /* fine — the vars may already be in the environment */
+    }
     const result = await runFeatureMigration();
     
     if (result.failed > 0) {
