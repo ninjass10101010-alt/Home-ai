@@ -1,7 +1,7 @@
 {
-  "hash": "8dee42512fac5a506b3af2da4bf5417802ef6369",
-  "short": "8dee425",
-  "message": "fix(tasks): task-page integrity wave — TZ axis, snapshot cap incident, ledger actor/target, outbox lifecycle, week machinery, UI polish",
+  "hash": "59271810876d538e9204460344acccbcd4924d24",
+  "short": "5927181",
+  "message": "chore(version): stamp tasks-integrity build stamp",
   "date": "2026-10-05 19:54:13 -0400",
   "author": "GarciaFam"
 }
