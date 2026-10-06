@@ -640,7 +640,7 @@ export async function ensureCurrentTaskWeek(
         let prior: CanonicalRows;
         try {
           prior = canonicalizeRows(priorRows, priorStart);
-        } catch {
+        } catch (error) {
           // B7, the fail-soft contract `ensureCurrentWeekRow` already uses: ONE
           // unreadable prior week must not throw out of the rollover. A throw
           // here 503s every sync and fails `task_store_unavailable` on claim,
@@ -651,7 +651,9 @@ export async function ensureCurrentTaskWeek(
           // archive is retried on the next sync, and the category below is the
           // honest signal that it is still wrong.
           archiveFailures.push("week_archive:invalid");
-          console.warn("[task-week-rollover] week_archive:invalid");
+          console.warn(
+            `[task-week-rollover] week_archive:invalid weekStart=${priorStart} rows=${priorRows.length} error=${error instanceof Error ? error.message : String(error)}`,
+          );
           continue;
         }
         // A store that will not hold a write still throws, as it always did.
@@ -659,7 +661,9 @@ export async function ensureCurrentTaskWeek(
         const outcome = await archiveCanonicalWeek(pb, prior, archiveRows, now);
         if (!outcome.ok) {
           archiveFailures.push("week_archive:invalid");
-          console.warn("[task-week-rollover] week_archive:invalid");
+          console.warn(
+            `[task-week-rollover] week_archive:invalid weekStart=${priorStart} archive_failed`,
+          );
           continue;
         }
         archived = archived || outcome.changed;
