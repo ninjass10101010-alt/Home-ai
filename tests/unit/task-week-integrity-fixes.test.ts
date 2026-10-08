@@ -636,9 +636,13 @@ describe("B7 — an unreadable prior week fails soft and never throws", () => {
     expect(result.currentWeekData.weekStart).toBe(CURRENT);
     expect(harness.weekData(CURRENT)).toHaveLength(1);
     expect(harness.snapshotData()).toMatchObject({ taskWeekStart: CURRENT });
-    expect(warnSpy.mock.calls.map((call: unknown[]) => String(call[0]))).toContain(
-      "[task-week-rollover] week_archive:invalid",
-    );
+    // The category is the contract; the diagnostics appended after it
+    // (weekStart/rows/error, ad8bf8a) must not be able to break the pin.
+    expect(
+      warnSpy.mock.calls
+        .map((call: unknown[]) => String(call[0]))
+        .some((message: string) => message.includes("[task-week-rollover] week_archive:invalid")),
+    ).toBe(true);
   });
 
   it("the day sweep still runs on the same day (the board is not bricked)", async () => {

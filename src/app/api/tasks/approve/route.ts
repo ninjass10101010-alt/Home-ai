@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getLiveMemberById } from "@/lib/live-member";
 import { verifyPinFromPB } from "@/lib/server-auth";
 import { executeInternalTaskCommand } from "@/lib/task-commands";
+import { enqueueTaskCommandRow } from "@/lib/task-command-queue-server";
 import {
   ensureTaskApprovalHandlersRegistered,
   parseApproveCommand,
@@ -73,6 +74,26 @@ function rawOperationId(body: unknown): string {
   if (!body || typeof body !== "object" || Array.isArray(body)) return "";
   const value = (body as Record<string, unknown>).operationId;
   return typeof value === "string" ? value.trim() : "";
+}
+
+// Post-auth service failures the queue can hold — the parent PIN is verified
+// and the command replays through the internal approval seam.
+const QUEUEABLE_REASONS = new Set([
+  "task_store_unavailable",
+  "member_roster_unavailable",
+  "ledger_unavailable",
+  "snapshot_write_failed",
+]);
+
+function queuedResponse(operationId: string, reason: string, action?: ApproveAction) {
+  return NextResponse.json({
+    success: false,
+    queued: true,
+    operationId,
+    ...(action ? { action } : {}),
+    reason,
+    retryable: true,
+  }, { status: 202 });
 }
 
 export async function POST(request: NextRequest) {
@@ -155,6 +176,30 @@ export async function POST(request: NextRequest) {
         ? "task_store_unavailable"
         : rawReason
     ) as ApprovalFailureReason;
+    if (QUEUEABLE_REASONS.has(String(reason))) {
+      let queued = false;
+      try {
+        queued = await enqueueTaskCommandRow({
+          operationId: parsed.operationId,
+          route: "/api/tasks/approve",
+          action: parsed.action,
+          payload: taskApprovalInternalPayload(parsed),
+          actor: {
+            memberId: live.id,
+            name: live.name,
+            role: live.role,
+            authentication: "pin",
+          },
+          displayTarget: {
+            kind: "approval",
+            ...(typeof parsed.taskId === "number" ? { taskId: parsed.taskId } : {}),
+          },
+        });
+      } catch {
+        queued = false;
+      }
+      if (queued) return queuedResponse(parsed.operationId, String(reason), parsed.action);
+    }
     return errorResponse(result.operationId || parsed.operationId, reason, statusForReason(reason), parsed.action);
   }
 

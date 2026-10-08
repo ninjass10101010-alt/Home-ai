@@ -15,7 +15,7 @@ const warnTaskOutboxFlushFailure = vi.fn((error: unknown) => error);
 const warnTaskOutboxRefreshFailure = vi.fn((error: unknown) => error);
 vi.mock("@/db", () => ({ db: { refreshCaches: () => refreshCaches() } }));
 vi.mock("@/lib/pending-writes", () => ({ flushPendingWrites: () => flushPendingWrites() }));
-vi.mock("@/lib/task-operation-outbox", () => ({
+vi.mock("@/lib/task-command-store", () => ({
   requestTaskOutboxFlush: () => requestTaskOutboxFlush(),
   warnTaskOutboxFlushFailure: (error: unknown) => warnTaskOutboxFlushFailure(error),
   warnTaskOutboxRefreshFailure: (error: unknown) => warnTaskOutboxRefreshFailure(error),

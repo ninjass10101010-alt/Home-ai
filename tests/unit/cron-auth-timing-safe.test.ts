@@ -42,7 +42,7 @@ import {
   verifyPinAgainstAnyMember,
   __resetPinThrottleForTests,
 } from "@/lib/server-auth";
-import { sanitizeTaskOperationPayload } from "@/lib/task-operation-outbox";
+import { sanitizeTaskOperationPayload } from "@/lib/task-command-store";
 
 // Obvious dummies. The real family defaults live in pb-seed (server-only) and
 // are deliberately not reproduced here.

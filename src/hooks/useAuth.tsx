@@ -6,7 +6,7 @@ import { flushPendingWrites } from '@/lib/pending-writes';
 import {
   requestTaskOutboxFlush,
   warnTaskOutboxFlushFailure,
-} from '@/lib/task-operation-outbox';
+} from '@/lib/task-command-store';
 
 const AUTH_STORAGE_KEY = 'consuela-auth-user';
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;

@@ -175,8 +175,8 @@ describe("no-writer scan — the credential boundary", () => {
     // to the parser that route actually uses, and every case is PIN-credentialed
     // so the credential is part of what is asserted.
     const { queueTaskCommand } = await import("@/lib/task-command-queue");
-    const { buildTaskOperationRequestBody, resolveTaskOutboxCredential } =
-      await import("@/lib/task-operation-outbox");
+    const { buildTaskOperationRequestBody } = await import("@/lib/task-operation-payload");
+    const { resolveTaskOutboxCredential } = await import("@/lib/task-command-store");
     const { parseLedgerCommand } = await import("@/lib/task-ledger-command");
     const { parseClaimCommand } = await import("@/lib/task-claim");
 
@@ -278,8 +278,8 @@ describe("no-writer scan — the credential boundary", () => {
 
   it("a PIN-free ledger command is refused by the route parser, not silently accepted", async () => {
     const { queueTaskCommand } = await import("@/lib/task-command-queue");
-    const { buildTaskOperationRequestBody, resolveTaskOutboxCredential } =
-      await import("@/lib/task-operation-outbox");
+    const { buildTaskOperationRequestBody } = await import("@/lib/task-operation-payload");
+    const { resolveTaskOutboxCredential } = await import("@/lib/task-command-store");
     const { parseLedgerCommand } = await import("@/lib/task-ledger-command");
 
     // Defense in depth. The OUTBOX never sends a PIN-free ledger command:
@@ -300,7 +300,7 @@ describe("no-writer scan — the credential boundary", () => {
   });
 
   it("no outbox entry can carry a credential field", () => {
-    const source = read("lib/task-operation-outbox.ts");
+    const source = read("lib/task-command-store.ts");
     expect(lineNumbers(source, /payload:\s*\{\s*pin/)).toEqual([]);
   });
 });
@@ -321,7 +321,7 @@ describe("no-writer scan — the heuristic is gone", () => {
   });
 
   it("the outbox never compares history length to decide adoption", () => {
-    const source = read("lib/task-operation-outbox.ts");
+    const source = read("lib/task-command-store.ts");
     expect(lineNumbers(source, /history\.length\s*[<>]=?/)).toEqual([]);
   });
 });

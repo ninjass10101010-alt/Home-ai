@@ -8,7 +8,7 @@ import {
   requestTaskOutboxFlush,
   warnTaskOutboxFlushFailure,
   warnTaskOutboxRefreshFailure,
-} from '@/lib/task-operation-outbox';
+} from '@/lib/task-command-store';
 
 const REFRESH_INTERVAL_MS = 60_000;
 

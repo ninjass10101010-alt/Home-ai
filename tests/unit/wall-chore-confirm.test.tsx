@@ -48,7 +48,7 @@ vi.mock("@/db", () => ({
 }));
 
 import { useWallConfirm } from "@/hooks/useWallConfirm";
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 import { localWeekStartISO } from "@/lib/local-date";

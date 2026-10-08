@@ -28,7 +28,7 @@ vi.mock("@/db", () => ({
 
 import RewardSection from "@/components/settings/RewardSection";
 import { REWARDS_KEY, loadRewards } from "@/lib/task-utils";
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 
 const LEGACY_KEY = "consuela-rewards-catalog";

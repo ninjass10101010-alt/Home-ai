@@ -13,7 +13,7 @@ import {
   type TaskOutboxCredential,
   type TaskOutboxDisplayTarget,
   type TaskOutboxEntry,
-} from "@/lib/task-operation-outbox";
+} from "@/lib/task-command-store";
 
 export interface QueueTaskCommandInput {
   operationId?: string;
@@ -24,7 +24,7 @@ export interface QueueTaskCommandInput {
   credential?: TaskOutboxCredential;
 }
 
-export { onTaskOutboxAdopted } from "@/lib/task-operation-outbox";
+export { onTaskOutboxAdopted } from "@/lib/task-command-store";
 export {
   forgetTaskCommandCredential,
   listTaskCommandCredentialIds,
@@ -32,9 +32,16 @@ export {
   rememberTaskCommandCredential,
   resolveTaskOutboxCredential,
 };
-export { __resetTaskCommandCredentialsForTests } from "@/lib/task-operation-outbox";
+export { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-store";
 export type { TaskOutboxCredential };
 
+/**
+ * Enqueue a command. Synchronous by contract: the entry exists (and its
+ * operationId is final) before this returns, so optimistic marks and
+ * double-tap guards key on it immediately. The send fires in the background —
+ * the POST body carries the credential, the server either applies it, takes
+ * it into its PocketBase queue (202), or refuses it honestly.
+ */
 export function queueTaskCommand(input: QueueTaskCommandInput): TaskOutboxEntry {
   const operationId = input.operationId?.trim() || createTaskOperationId();
   rememberTaskCommandCredential(operationId, input.credential);
@@ -49,8 +56,7 @@ export function queueTaskCommand(input: QueueTaskCommandInput): TaskOutboxEntry 
   } catch (error) {
     // The entry never exists, so nothing would ever evict this credential and
     // nothing would ever release it — a PIN in memory keyed to an id with no
-    // record, which is exactly the leak `releaseEvictedCredentials` exists to
-    // prevent. The remembered credential is only safe once the enqueue that
+    // record. The remembered credential is only safe once the enqueue that
     // justifies it has landed.
     forgetTaskCommandCredential(operationId);
     throw error;
@@ -60,13 +66,9 @@ export function queueTaskCommand(input: QueueTaskCommandInput): TaskOutboxEntry 
 // The persist-then-send seam for callers that do not mount the hook (the
 // Settings config editors and the chat action runner): the command is durable
 // before the first request, and a flush is requested so a live page does not
-// wait for the next 60s CacheRefresher tick. The mount / interval /
-// visibility flushes remain the durability backstop when the send fails.
+// wait for the next 60s CacheRefresher tick.
 export function queueTaskCommandAndFlush(input: QueueTaskCommandInput): TaskOutboxEntry {
   const entry = queueTaskCommand(input);
-  // Drain on the next macrotask rather than inline: the caller is usually a
-  // click handler inside an act() scope, and an inline flush would resolve
-  // before React has finished committing the enqueue.
   scheduleFlush();
   return entry;
 }

@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import { listTaskOutbox, __resetTaskOutboxForTests } from "@/lib/task-operation-outbox";
+import { listTaskOutbox, __resetTaskOutboxForTests } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import { REWARDS_KEY, loadRewards, readRewardsStamp, loadWeeklyPrizes } from "@/lib/task-utils";
 import { CacheRefresher } from "@/components/ui/CacheRefresher";
@@ -286,9 +286,11 @@ describe("Settings surfaces report the queue honestly", () => {
     expect(document.querySelector('[data-testid="rewards-command-failures"]')).toBeNull();
   });
 
-  it("a refused command repairs the VISIBLE RewardSection list immediately", async () => {
-    // The 409 carries the authoritative catalog; the rendered list must show it
-    // at once, not on the next 60s pull.
+  it("a refused command surfaces the refusal and writes nothing to the visible RewardSection list", async () => {
+    // The NEW store contract: a 409 stale_config is a terminal refusal and its
+    // body is NOT adopted (the deferred config stale-replay nit — the
+    // authoritative repair belongs to the next config read). The list must not
+    // silently claim a write the server refused; the refusal must be visible.
     server.configStatus = 409;
     localStorage.setItem("consuela-rewards", JSON.stringify([{ id: 1, name: "Ghost", emoji: "👻", cost: 5 }]));
     const el = await mount(<RewardSection showToast={() => {}} />);
@@ -304,7 +306,7 @@ describe("Settings surfaces report the queue honestly", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     // The server answers with a DIFFERENT authoritative list than the harness
-    // default, so the swap is observable.
+    // default, so a spurious adoption would be observable.
     server.configBody = {
       success: false,
       error: "stale_config",
@@ -320,16 +322,18 @@ describe("Settings surfaces report the queue honestly", () => {
     });
     await settle(250);
 
-    // Adopted from the ack body, before the entry was marked failed.
-    expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Server truth"]);
-    expect(readRewardsStamp()).toBe("2026-09-24T10:00:00.000Z");
-    // And the list ON SCREEN says so.
-    expect(el.textContent).toContain("Server truth");
-    expect(el.textContent).not.toContain("Ghost");
+    expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Ghost"]);
+    expect(readRewardsStamp()).toBe("");
+    expect(el.textContent).toContain("Ghost");
+    expect(el.textContent).not.toContain("Server truth");
     expect(el.querySelector('[data-testid="rewards-command-failures"]')).not.toBeNull();
+    expect(listTaskOutbox()[0]).toMatchObject({ status: "failed", lastErrorReason: "stale_config" });
   });
 
-  it("a refused command repairs the VISIBLE WeeklyPrizesCard list immediately", async () => {
+  it("a refused command surfaces the refusal and leaves the store's prize list in place", async () => {
+    // Same NEW contract as the rewards case: a stale_config refusal is terminal
+    // and adopts nothing. The agent sees their unsaved edit plus the honest
+    // failure; the stored catalog is untouched until the next config read.
     server.configStatus = 409;
     localStorage.setItem("consuela-weekly-prizes", JSON.stringify([
       { id: "p1", rank: 1, emoji: "🥇", text: "Stale prize" },
@@ -362,9 +366,11 @@ describe("Settings surfaces report the queue honestly", () => {
     });
     await settle(250);
 
-    expect(loadWeeklyPrizes().map((p) => p.text)).toEqual(["Server prize"]);
-    expect(prizeField().value).toBe("Server prize");
+    expect(loadWeeklyPrizes().map((p) => p.text)).toEqual(["Stale prize"]);
+    // The parent's in-field edit is not silently overwritten by a refusal.
+    expect(prizeField().value).toBe("Picks the movie");
     expect(el.querySelector('[data-testid="prizes-command-failures"]')).not.toBeNull();
+    expect(listTaskOutbox()[0]).toMatchObject({ status: "failed", lastErrorReason: "stale_config" });
   });
 
   it("WeeklyPrizesCard shows the same honest queue surface", async () => {

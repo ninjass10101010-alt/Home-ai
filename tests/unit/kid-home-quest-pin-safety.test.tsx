@@ -162,7 +162,7 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
   }),
 }));
 
-import { __resetTaskOutboxForTests } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import KidHome from "@/modes/kid/KidHome";
 

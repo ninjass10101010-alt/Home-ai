@@ -6,6 +6,7 @@ import { ensureCurrentTaskWeek } from "@/lib/task-week-rollover";
 import { ensureCurrentTaskDay } from "@/lib/task-day-sweep";
 import { reconcileTaskProjectionLocked } from "@/lib/task-projection-reconciler";
 import { repairCategories } from "@/lib/task-repair-categories";
+import { drainDueTaskCommandQueue } from "@/lib/task-command-queue-server";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,17 @@ export async function GET(request: NextRequest) {
       },
       { status: live.status },
     );
+  }
+
+  // The command-queue drain runs BEFORE the rollover: a replayed command may
+  // change the week the rollover then archives, so the snapshot a family
+  // device reads includes everything the queue just applied. Fail-soft — a
+  // queue that cannot drain (PB outage) must not 503 the read with it; the
+  // rows are still due on the next pass.
+  try {
+    await drainDueTaskCommandQueue();
+  } catch {
+    console.warn("[tasks/sync] command queue drain unavailable");
   }
 
   let rollover: Awaited<ReturnType<typeof ensureCurrentTaskWeek>>;

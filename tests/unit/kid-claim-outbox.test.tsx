@@ -165,7 +165,7 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
 }));
 
 
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { TASK_OUTBOX_STORAGE_KEY, __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import KidHome from "@/modes/kid/KidHome";
 
@@ -338,11 +338,17 @@ describe("KidHome commands (durable outbox → notice → retry → confirm)", (
     await settle();
     await tapQuest(el, QUEST.title);
     const [entry] = listTaskOutbox();
+    // The new store persists ONE JSON array under TASK_OUTBOX_STORAGE_KEY.
+    // A reload wipes module memory, not the device's storage: carry the
+    // persisted array across the reset so the cold read rehydrates it.
+    const persisted = localStorage.getItem(TASK_OUTBOX_STORAGE_KEY);
+    expect(persisted).not.toBeNull();
 
     act(() => { activeRoot?.unmount(); });
     activeRoot = null;
     document.body.innerHTML = "";
     __resetTaskOutboxForTests();
+    localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, persisted!);
     await renderAsync(<KidHome />);
     await settle();
 

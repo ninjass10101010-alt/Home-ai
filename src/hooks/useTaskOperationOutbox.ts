@@ -7,20 +7,21 @@ import {
   cancelTaskOutboxEntry,
   getTaskOutboxServerSnapshot,
   getTaskOutboxSnapshot,
+  onTaskOutboxAcknowledged,
   pullTaskSnapshotDocument,
   registerTaskOutboxDriver,
   requestTaskOutboxFlush,
-  resolveTaskOutboxCredential,
-  onTaskOutboxAcknowledged,
   subscribeTaskOutbox,
   type FlushTaskOutboxResult,
   type SnapshotRead,
-  type TaskOutboxAcknowledgement,
   type TaskOutboxAcknowledgedEvent,
+  type TaskOutboxAcknowledgement,
   type TaskOutboxEntry,
-} from "@/lib/task-operation-outbox";
+} from "@/lib/task-command-store";
 
 export interface UseTaskOperationOutboxOptions {
+  /** Kept for call-site compatibility; credentials ride the queueTaskCommand
+   * input now, so this option is no longer read. */
   getCredential?: (entry: TaskOutboxEntry) => string | undefined;
   pullSnapshot?: () => Promise<SnapshotRead>;
   adoptSnapshot?: (read: SnapshotRead) => void | Promise<void>;
@@ -34,20 +35,22 @@ export interface UseTaskOperationOutboxResult {
   pending: number;
   queued: number;
   /**
-   * Entries sitting in a backoff — the request already went out and the server
-   * said "later". Exposed SEPARATELY from `queued` because a single entry can
-   * be five minutes from its next attempt, and "Sending N changes" is a
-   * different promise from "N will be retried".
+   * Entries sitting in a backoff — either the local replay buffer's ladder or
+   * the server queue's `nextAttemptAt`. "Sending N changes" and "N waiting to
+   * retry" stay different promises.
    */
   retrying: number;
   reconciling: number;
+  /** Always 0 in the server-queue world: a wrong PIN fails at tap time now.
+   * Kept so count consumers compile and render nothing for it. */
   authRequired: number;
   failed: number;
   flush: () => Promise<FlushTaskOutboxResult>;
   cancel: (operationId: string) => boolean;
 }
 
-export { adoptTaskOutboxAcknowledgement, adoptTaskOutboxSnapshot };
+export { adoptTaskOutboxAcknowledgement, adoptTaskOutboxSnapshot } from "@/lib/task-command-store";
+export { pullTaskSnapshotDocument } from "@/lib/task-command-store";
 
 export function useTaskOperationOutbox(
   options: UseTaskOperationOutboxOptions = {},
@@ -66,8 +69,6 @@ export function useTaskOperationOutbox(
 
   useEffect(() => {
     const unregister = registerTaskOutboxDriver({
-      getCredential: (entry) =>
-        optionsRef.current.getCredential?.(entry) ?? resolveTaskOutboxCredential(entry),
       pullSnapshot: () =>
         optionsRef.current.pullSnapshot
           ? optionsRef.current.pullSnapshot()
@@ -111,12 +112,6 @@ export function useTaskOperationOutbox(
     return {
       entries,
       pending: entries.length,
-      // `queued` stays "in flight or about to be": it deliberately still folds
-      // `retrying` in, because the banners that render it promise an imminent
-      // send and a 2-second backoff is imminent — and because a renderer that
-      // asked for "exactly queued" would show nothing at all during a normal
-      // transient failure. `retrying` is exposed above so a renderer can split
-      // the long waits out without guessing from `entries`.
       queued: entries.length - reconciling - authRequired - failed,
       retrying,
       reconciling,

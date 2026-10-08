@@ -10,9 +10,10 @@ import type { ReactElement } from "react";
 import { localWeekStartISO } from "@/lib/local-date";
 
 import {
+  TASK_OUTBOX_STORAGE_KEY,
   __resetTaskOutboxForTests,
   listTaskOutbox,
-} from "@/lib/task-operation-outbox";
+} from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import KidHome from "@/modes/kid/KidHome";
 
@@ -249,6 +250,11 @@ describe("under-10 PIN-free completion", () => {
     await tapQuest(el, "Feed the dog");
     await settle(150);
     const [entry] = listTaskOutbox();
+    // The new store persists ONE JSON array under TASK_OUTBOX_STORAGE_KEY.
+    // A reload wipes module memory, not the device's storage: carry the
+    // persisted array across the reset so the cold read rehydrates it.
+    const persisted = localStorage.getItem(TASK_OUTBOX_STORAGE_KEY);
+    expect(persisted).not.toBeNull();
 
     if (root) {
       await act(async () => { root!.unmount(); });
@@ -256,6 +262,7 @@ describe("under-10 PIN-free completion", () => {
     }
     document.body.innerHTML = "";
     __resetTaskOutboxForTests();
+    localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, persisted!);
     await mount(<KidHome />);
     await settle(120);
 

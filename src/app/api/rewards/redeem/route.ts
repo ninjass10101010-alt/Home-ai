@@ -8,6 +8,7 @@ import {
   persistSnapshotWeek,
   type SnapshotData,
 } from "@/lib/snapshot-tasks";
+import { enqueueTaskCommandRow } from "@/lib/task-command-queue-server";
 import { isRecord, normalizeOperationId } from "@/lib/task-operation-contract";
 import type { LedgerOperationInput } from "@/types/tasks";
 
@@ -64,6 +65,17 @@ function errorResponse(
   return NextResponse.json(
     { ok: false, operationId, reason, error },
     { status },
+  );
+}
+
+// The queue holds only the post-verification ledger failure — the member PIN
+// (and any parent approval for a high-cost reward) were verified, the ledger
+// operation is fully built, and the replay reuses it verbatim under the same
+// operation id, so a partially applied redemption can never apply twice.
+function queuedResponse(operationId: string, reason: string) {
+  return NextResponse.json(
+    { ok: false, queued: true, operationId, reason, retryable: true },
+    { status: 202 },
   );
 }
 
@@ -299,6 +311,25 @@ export async function POST(request: NextRequest) {
           "That redemption already went through — check your points.",
         );
       }
+      let queued = false;
+      try {
+        queued = await enqueueTaskCommandRow({
+          operationId,
+          route: "/api/rewards/redeem",
+          action: "redeem",
+          payload: { weekStart, operation, actorId: memberId },
+          actor: {
+            memberId,
+            name: member,
+            role: typeof verified.role === "string" ? verified.role : "",
+            authentication: "pin",
+          },
+          displayTarget: { kind: "config", title: reward.title },
+        });
+      } catch {
+        queued = false;
+      }
+      if (queued) return queuedResponse(operationId, "ledger_unavailable");
       return errorResponse(
         result.operationId,
         "ledger_unavailable",

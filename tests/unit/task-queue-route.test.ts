@@ -1,0 +1,84 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+
+const mocks = vi.hoisted(() => ({
+  requireLiveSession: vi.fn(),
+  listTaskCommandQueueState: vi.fn(),
+  cancelTaskCommandQueueRow: vi.fn(),
+}));
+
+vi.mock("@/lib/server-auth", () => ({ requireLiveSession: mocks.requireLiveSession }));
+vi.mock("@/lib/task-command-queue-server", () => ({
+  listTaskCommandQueueState: mocks.listTaskCommandQueueState,
+  cancelTaskCommandQueueRow: mocks.cancelTaskCommandQueueRow,
+}));
+
+import { DELETE, GET } from "@/app/api/tasks/queue/route";
+
+function get() {
+  return GET(new NextRequest("http://localhost/api/tasks/queue"));
+}
+function del(body: unknown) {
+  return DELETE(
+    new NextRequest("http://localhost/api/tasks/queue", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+beforeEach(() => {
+  mocks.requireLiveSession.mockReset();
+  mocks.listTaskCommandQueueState.mockReset();
+  mocks.cancelTaskCommandQueueRow.mockReset();
+});
+
+describe("GET /api/tasks/queue", () => {
+  it("refuses an unauthenticated caller with the session status", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: false, error: "unauthorized", status: 401 });
+    const res = await get();
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ ok: false, rows: [] });
+  });
+
+  it("returns the queue rows for a live session", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: true, identity: { memberId: "m1", role: "parent" } });
+    mocks.listTaskCommandQueueState.mockResolvedValue([{ operationId: "op-1", status: "pending" }]);
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, rows: [{ operationId: "op-1" }] });
+  });
+
+  it("answers 503, never an empty 200, when the queue store is down", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: true, identity: { memberId: "m1", role: "parent" } });
+    mocks.listTaskCommandQueueState.mockRejectedValue(new Error("pb_down"));
+    const res = await get();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ ok: false, error: "queue_unavailable" });
+  });
+});
+
+describe("DELETE /api/tasks/queue", () => {
+  it("rejects a malformed body", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: true, identity: { memberId: "m1", role: "child" } });
+    const res = await del({ nope: true });
+    expect(res.status).toBe(400);
+  });
+
+  it("maps a cancel refusal to its status", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: true, identity: { memberId: "m1", role: "child" } });
+    mocks.cancelTaskCommandQueueRow.mockResolvedValue({ ok: false, status: 403, reason: "not_allowed" });
+    const res = await del({ operationId: "op-1" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ ok: false, error: "not_allowed" });
+  });
+
+  it("cancels with the live identity and answers ok", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: true, identity: { memberId: "m1", role: "parent" } });
+    mocks.cancelTaskCommandQueueRow.mockResolvedValue({ ok: true });
+    const res = await del({ operationId: "op-1" });
+    expect(res.status).toBe(200);
+    expect(mocks.cancelTaskCommandQueueRow).toHaveBeenCalledWith("op-1", "m1", true);
+  });
+});

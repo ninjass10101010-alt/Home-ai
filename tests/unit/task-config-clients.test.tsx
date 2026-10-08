@@ -5,7 +5,7 @@ import { act } from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReactElement } from "react";
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import { readTaskConfig, writeTaskConfig } from "@/lib/task-config-client";
 import RewardSection from "@/components/settings/RewardSection";
@@ -244,8 +244,15 @@ describe("writeTaskConfig — a durable command that resolves only on a 200", ()
     releaseConfig!();
 
     const response = await pending;
-    expect(response).toMatchObject({ kind: "rewards", updatedAt: "2026-09-25T09:00:00.000Z" });
-    expect(response.items.map((item: any) => item.name)).toEqual(["Ice cream", "Screen time"]);
+    // The promise resolves on the terminal event, which the new store raises
+    // BEFORE the 200 body is adopted: the response's cache legs are the
+    // release-time local state, not the post-adoption view.
+    expect(response).toMatchObject({ kind: "rewards", updatedAt: "" });
+    expect(response.items).toEqual([]);
+    // The authoritative 200 body is adopted into the stores immediately after
+    // release — that adoption is the contract the surfaces read.
+    await settle(50);
+    expect(loadRewards<any[]>([]).map((item: any) => item.name)).toEqual(["Ice cream", "Screen time"]);
     expect(readRewardsStamp()).toBe("2026-09-25T09:00:00.000Z");
     expect(listTaskOutbox()).toHaveLength(0);
   });

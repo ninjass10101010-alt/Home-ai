@@ -24,7 +24,7 @@ import type { ReactElement } from "react";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { localWeekStartISO, localTodayISO } from "@/lib/local-date";
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 import SegmentedControl from "@/components/ui/SegmentedControl";

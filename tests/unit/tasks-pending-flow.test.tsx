@@ -13,7 +13,7 @@ import { localWeekStartISO } from "@/lib/local-date";
 import {
   __resetTaskOutboxForTests,
   listTaskOutbox,
-} from "@/lib/task-operation-outbox";
+} from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 

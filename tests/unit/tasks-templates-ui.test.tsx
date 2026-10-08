@@ -36,7 +36,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import { loadTaskTemplates, saveTaskTemplates } from "@/lib/task-utils";
 import type { TaskTemplateConfigItem } from "@/lib/task-config";

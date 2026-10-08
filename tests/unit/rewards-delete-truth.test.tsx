@@ -12,7 +12,7 @@ import type { ReactElement } from "react";
 import TasksPage from "@/app/tasks/page";
 import RewardSection from "@/components/settings/RewardSection";
 import { PENALTIES_KEY, REWARDS_KEY, loadPenalties, loadRewards } from "@/lib/task-utils";
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import { REWARDS_STAMP_KEY } from "@/modes/kid/kid-store";
 

@@ -834,6 +834,38 @@ export const COLLECTIONS = [
       { name: "tokenAdmin", type: "bool", required: false },
     ],
   },
+  // The server-side task command queue. When a command route's service call
+  // fails transiently (task store unreachable mid-write), the route writes the
+  // VERIFIED command here and answers 202 { queued: true } — the family's tap
+  // is durable across devices, reloads and reboots, and the sync drain
+  // replays it through the same service seam. NO raw PIN is ever stored: the
+  // row records the actor identity the route already verified. The payload
+  // maxSize admits the claim route's 1 MiB photo-assignee body ceiling.
+  {
+    name: "task_command_queue",
+    schema: [
+      { name: "operationId", type: "text", required: true },
+      { name: "route", type: "text", required: true },
+      { name: "action", type: "text", required: true },
+      { name: "payload", type: "json", options: { maxSize: 1_048_576 } },
+      { name: "actorMemberId", type: "text", required: true },
+      { name: "actorName", type: "text", required: true },
+      { name: "actorRole", type: "text", required: true },
+      { name: "actorAuthentication", type: "text" },
+      { name: "status", type: "text", required: true },
+      { name: "attemptCount", type: "number" },
+      { name: "nextAttemptAt", type: "date" },
+      { name: "lastErrorReason", type: "text" },
+      { name: "lastErrorMessage", type: "text" },
+      { name: "result", type: "json" },
+      { name: "displayTarget", type: "json" },
+      { name: "resolvedAt", type: "date" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_task_command_queue_operation ON task_command_queue (operationId)",
+      "CREATE INDEX idx_task_command_queue_status_next ON task_command_queue (status, nextAttemptAt)",
+    ],
+  },
 ];
 
 // All browser data traffic now flows through the sessioned /api/db/* gateway

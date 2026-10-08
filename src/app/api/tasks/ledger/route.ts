@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLiveMemberById } from "@/lib/live-member";
 import { verifyPinFromPB } from "@/lib/server-auth";
+import { enqueueTaskCommandRow } from "@/lib/task-command-queue-server";
 import {
   executeLedgerCommand,
   parseLedgerCommand,
@@ -39,6 +40,26 @@ const RETRYABLE = new Set<LedgerRouteReason>([
   "snapshot_write_failed",
   "member_roster_unavailable",
 ]);
+
+// The queue holds only POST-verification failures: the actor's PIN was
+// verified and the command replays on the recorded identity (`memberId`),
+// which `executeLedgerCommand` already trusts. The PIN itself is never stored.
+const QUEUEABLE = new Set<LedgerRouteReason>([
+  "ledger_unavailable",
+  "snapshot_write_failed",
+  "member_roster_unavailable",
+]);
+
+function queuedResponse(operationId: string, reason: LedgerRouteReason, action: LedgerCommandAction | "") {
+  return NextResponse.json({
+    success: false,
+    queued: true,
+    operationId,
+    ...(action ? { action } : {}),
+    reason,
+    retryable: true,
+  }, { status: 202 });
+}
 
 function errorResponse(
   operationId: string,
@@ -138,10 +159,40 @@ export async function POST(request: NextRequest) {
     memberId: live.id,
   });
   if (!result.ok) {
+    const reason = (result.reason ?? "ledger_unavailable") as LedgerRouteReason;
+    if (QUEUEABLE.has(reason)) {
+      let queued = false;
+      try {
+        queued = await enqueueTaskCommandRow({
+          operationId: parsed.command.operationId,
+          route: "/api/tasks/ledger",
+          action: parsed.command.action,
+          payload: {
+            memberName: parsed.command.memberName,
+            ...(parsed.command.targetMemberName !== undefined
+              ? { targetMemberName: parsed.command.targetMemberName }
+              : {}),
+            ...(parsed.command.itemId !== undefined ? { itemId: parsed.command.itemId } : {}),
+            ...(parsed.command.amount !== undefined ? { amount: parsed.command.amount } : {}),
+            ...(parsed.command.reason !== undefined ? { reason: parsed.command.reason } : {}),
+          },
+          actor: {
+            memberId: live.id,
+            name: live.name,
+            role: live.role,
+            authentication: "pin",
+          },
+          displayTarget: { kind: "config", title: parsed.command.action === "penalty" ? "Penalty" : "Points adjust" },
+        });
+      } catch {
+        queued = false;
+      }
+      if (queued) return queuedResponse(parsed.command.operationId, reason, parsed.command.action);
+    }
     return errorResponse(
       result.operationId,
       result.action,
-      result.reason ?? "ledger_unavailable",
+      reason,
       { member: result.member || undefined, points: result.points },
     );
   }

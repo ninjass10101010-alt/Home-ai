@@ -32,7 +32,7 @@ import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWe
 import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
-import { createTaskOperationId } from "@/lib/task-operation-outbox";
+import { createTaskOperationId } from "@/lib/task-operation-payload";
 import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 // Live readers + shared helpers were extracted to ./consuela/live-reads

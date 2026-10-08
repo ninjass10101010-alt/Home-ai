@@ -26,7 +26,7 @@ import {
   createTaskOperationId,
   listTaskOutbox,
   requestTaskOutboxFlush,
-} from "@/lib/task-operation-outbox";
+} from "@/lib/task-command-store";
 import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
 import { currentWeekPoints, verifyPinRemote, unreachableCopy } from "./kid-store";
 

@@ -42,8 +42,8 @@ vi.mock("@/lib/live-member", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/live-member")>();
   return { ...actual, getLiveMembers: mocks.getLiveMembers };
 });
-vi.mock("@/lib/task-operation-outbox", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/task-operation-outbox")>();
+vi.mock("@/lib/task-operation-payload", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/task-operation-payload")>();
   return { ...actual, createTaskOperationId: mocks.nextOperationId };
 });
 import { getTool } from "@/lib/hermes-tools";

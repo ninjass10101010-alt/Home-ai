@@ -6,7 +6,7 @@ import {
   pullTaskSnapshotDocument,
   subscribeTaskOutbox,
   type TaskOutboxEntry,
-} from "@/lib/task-operation-outbox";
+} from "@/lib/task-command-store";
 import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
 import {
   loadPenalties,

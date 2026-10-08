@@ -35,8 +35,8 @@ vi.mock("@/lib/task-commands", () => ({
 
 // The operation-id seam, so a "replayed" MUSE call can be driven to carry the
 // SAME id — otherwise every call gets a fresh one and a replay is untestable.
-vi.mock("@/lib/task-operation-outbox", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/task-operation-outbox")>();
+vi.mock("@/lib/task-operation-payload", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/task-operation-payload")>();
   return { ...actual, createTaskOperationId: mocks.nextOperationId };
 });
 

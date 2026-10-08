@@ -20,7 +20,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import WeeklyPrizesCard from "@/components/settings/WeeklyPrizesCard";
 import { raceGap, WEEKLY_PRIZES_KEY, DEFAULT_WEEKLY_PRIZES } from "@/lib/task-utils";
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;

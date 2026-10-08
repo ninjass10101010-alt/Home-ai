@@ -110,7 +110,7 @@ describe("the retired structured sync family is gone from production source", ()
       TASKS_PAGE,
       KID_HOME,
       MIGRATION_PUSH,
-      "lib/task-operation-outbox.ts",
+      "lib/task-command-store.ts",
     ]) {
       if (new RegExp(RETIRED_SYNC_HELPERS).test(source(file))) offenders.push(file);
     }

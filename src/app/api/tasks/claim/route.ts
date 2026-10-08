@@ -3,6 +3,7 @@ import { getLiveMemberById, type LiveMember } from "@/lib/live-member";
 import { verifyPinFromPB } from "@/lib/server-auth";
 import { SESSION_COOKIE, verifySession } from "@/lib/session";
 import { executeInternalTaskCommand } from "@/lib/task-commands";
+import { enqueueTaskCommandRow } from "@/lib/task-command-queue-server";
 import {
   ensureTaskClaimHandlersRegistered,
   parseClaimCommand,
@@ -181,6 +182,27 @@ function liveActor(
   };
 }
 
+// Post-authentication service failures the queue can hold: the actor is
+// verified and the command is replayable through the internal claim seam.
+// Pre-auth failures (roster/PB unreachable while verifying) are NOT queueable
+// — there is no verified identity to authorize a replay.
+const QUEUEABLE_REASONS = new Set(["task_store_unavailable", "member_roster_unavailable"]);
+
+function queuedResponse(operationId: string, reason: string, action?: string) {
+  // 202 + `queued: true` is the server-queue contract: the command is durable
+  // in PocketBase, the drain owns the retry ladder, and any device can watch
+  // or cancel it. Distinct from the route's existing 202 (applied, projection
+  // pending), which never carries `queued`.
+  return NextResponse.json({
+    success: false,
+    queued: true,
+    operationId,
+    ...(action ? { action } : {}),
+    reason,
+    retryable: true,
+  }, { status: 202 });
+}
+
 function successResponse(result: ClaimServiceResult) {
   return NextResponse.json({
     success: true,
@@ -251,6 +273,27 @@ export async function POST(request: NextRequest) {
   const result = internal as ClaimServiceResult;
   if (!result.ok) {
     const reason = normalizeRegistryReason(result.reason);
+    if (QUEUEABLE_REASONS.has(reason)) {
+      let queued = false;
+      try {
+        queued = await enqueueTaskCommandRow({
+          operationId: parsed.operationId,
+          route: "/api/tasks/claim",
+          action: parsed.action,
+          payload: taskClaimInternalPayload(parsed),
+          actor: {
+            memberId: auth.actor.memberId,
+            name: auth.actor.name,
+            role: auth.actor.role,
+            authentication: auth.actor.authentication === "pin" ? "pin" : "session",
+          },
+          displayTarget: { kind: "claim", ...(parsed.taskId ? { taskId: parsed.taskId } : {}) },
+        });
+      } catch {
+        queued = false;
+      }
+      if (queued) return queuedResponse(parsed.operationId, reason, parsed.action);
+    }
     return errorResponse(
       result.operationId || parsed.operationId,
       reason,

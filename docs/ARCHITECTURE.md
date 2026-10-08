@@ -242,29 +242,27 @@ still 401 at middleware, and a wrong role is 403 `adult_only`.
   server-authoritative (server-read cost + balance, appends the redeem tx, 60s
   dedupe → 409, unknown → 404, insufficient → 400, wrong/missing PIN → 401).
 
-**The browser outbox is how a device asks for a write (`consuela-task-operation-outbox-v1`).**
-Normal browser task/ledger writes are **retired** — no device pushes `tasks`,
-`weekData`, points or history anywhere, and no client surface POSTs a command
-route directly. `saveTasks`/`saveWeekData` are still called on the client, but
-they are the localStorage **cache** writers (they are what "adopt the
-authoritative state, then cache it" means), and `addTransaction` is a pure
-in-memory transformer that returns a new `WeekData` — none of the three reaches
-the network.
-Every task/ledger mutation leaves the device as a durable command queued in
-`src/lib/task-operation-outbox.ts`, persisted under the localStorage key
-**`consuela-task-operation-outbox-v1`** (one `:entry:<operationId>` record per
-command; a credential never enters the entry). An entry is queued — with its
-stable `operationId` and a display target — *before* any local state moves, is
-released only after a `200`/`202` acknowledgment has handed back authoritative
-`weekData`/`task` plus the snapshot revision for adoption, retries on the same
-`operationId`, and only clears on acknowledgment or an explicit user cancel of
-a non-applied operation. The queue carries the outbox-carrying command routes
-(`/api/tasks/claim`, `/api/tasks/approve`, `/api/tasks/manage`,
-`/api/tasks/config`, `/api/tasks/ledger`, `/api/rewards/redeem`);
-`/api/tasks/quarantine` is the one command route it does not carry, because that
-route writes nothing to the server. **Do not fork the key or the entry shape** —
-import `TASK_OUTBOX_STORAGE_KEY` and the queue helpers, never re-implement a
-localStorage command buffer.
+**A device asks for a write through the thin command store; the server queue
+owns durability (`task_command_queue`).** Normal browser task/ledger writes are
+retired — no device pushes `tasks`, `weekData`, points or history anywhere.
+Every task/ledger mutation leaves the device through
+`src/lib/task-command-store.ts` (localStorage key
+`consuela-task-operation-outbox-v1`, now a single JSON array; legacy index +
+`:entry:` rows rehydrate once on cold read), which POSTs the command route
+directly with the credential in the body from the ephemeral in-memory registry.
+Outcomes: 2xx ack → adopt + release; `202 { queued: true }` → the server wrote a
+`task_command_queue` row and the local entry mirrors it until
+`/api/tasks/queue` reports resolution; 4xx → immediate terminal refusal;
+network/5xx → local backoff (2s→5min, 8 attempts, 24h expiry) replaying on
+online/visibility/mount. `GET /api/tasks/queue` lists pending/recent rows for
+banners; `DELETE` cancels one (the original actor or any parent). The queue
+carries `/api/tasks/claim`, `/api/tasks/approve`, `/api/tasks/manage`,
+`/api/tasks/config`, `/api/tasks/ledger`, `/api/rewards/redeem`;
+`/api/tasks/quarantine` is not carried. A PIN never enters a queue row — intake
+verifies it and stores the verified actor identity
+(`actorMemberId`/`actorName`/`actorRole`, `actorAuthentication`). **Do not fork
+the key or the entry shape** — import `TASK_OUTBOX_STORAGE_KEY` and the
+store/server-queue helpers, never re-implement a command buffer.
 
 **A task id is only meaningful while the snapshot still holds it — so the
 snapshot's id is authority and a stale local id must be healed, never
@@ -289,10 +287,10 @@ kid's un-landed completion/pending stamps survive for the existing proof gates
 to arbitrate.
 
 **A terminal `unknown_task` self-heals device-side.** `404 unknown_task` on a
-command carrying a usable `taskId` means the id was stranded, so the outbox
-tombstones it **on that device** and acknowledges the entry instead of failing
-it forever (`strandedTaskId` → `acknowledge` in
-`src/lib/task-operation-outbox.ts`). The row cannot exist on the server, so
+command carrying a usable `taskId` means the id was stranded, so the command
+store tombstones it **on that device** and acknowledges the entry instead of
+failing it forever (the `404 unknown_task` branch of `processEntry` in
+`src/lib/task-command-store.ts`). The row cannot exist on the server, so
 dropping it locally is the user's actual intent and invents no server state —
 there was nothing to delete. A named refusal (`unknown_task_owner`), a config
 leg with no `taskId`, and every 401/403/409/5xx keep their existing
@@ -320,7 +318,7 @@ authority for the cost — never widen the allowlist to admit a client `cost` or
   the one place a server field is trusted outright, and it is intentional.
 - `body.error` is the **display channel** — normally a human sentence — and is
   honoured as a machine reason **only when it is a member of the closed
-  `ERROR_CHANNEL_MACHINE_CODES` vocabulary** in `task-operation-outbox.ts`. That
+  `ERROR_CHANNEL_MACHINE_CODES` vocabulary** in `src/lib/task-operation-payload.ts`. That
   exception exists because two command routes express their machine codes ONLY
   through `error`: `/api/tasks/config`, whose bodies are pinned by exact equality
   in `tests/unit/task-config-route.test.ts`, and `/api/tasks/manage`, whose bodies

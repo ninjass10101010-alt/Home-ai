@@ -2,7 +2,7 @@ import { db } from "@/db";
 import { upsertGroceryItem } from "./grocery-service";
 import { saveOrQueue } from "./pending-writes";
 import { queueTaskCommand } from "./task-command-queue";
-import { requestTaskOutboxFlush } from "./task-operation-outbox";
+import { requestTaskOutboxFlush } from "@/lib/task-command-store";
 
 export type LocalActionType =
   | "event"

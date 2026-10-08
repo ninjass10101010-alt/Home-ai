@@ -11,8 +11,9 @@ import { localWeekStartISO } from "@/lib/local-date";
 import {
   __resetTaskOutboxForTests,
   listTaskOutbox,
+  pollQueue,
   readTaskCommandCredential,
-} from "@/lib/task-operation-outbox";
+} from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 
@@ -67,6 +68,8 @@ const server = vi.hoisted(() => ({
   ledgerStatus: 200,
   echoReceipt: false,
   approveSeen: false,
+  queueOperationId: null as string | null,
+  queueResolved: false,
 }));
 
 function weekWithEarn(member: string, amount: number) {
@@ -122,6 +125,27 @@ function installFetch() {
         const visible = server.approveSeen ? server.snapshot : { tasks: [], weekData: null };
         return { ok: true, status: 200, json: async () => ({ snapshot: visible, reconciled: true }) };
       }
+      if (url === "/api/tasks/queue") {
+        // The server queue's view of the last 202 { queued: true } intake:
+        // pending until the test flips `queueResolved`, then a resolved row
+        // whose captured `result` is the authoritative ack body.
+        const operationId = server.queueOperationId;
+        const rows = operationId
+          ? [{
+              operationId,
+              route: "/api/tasks/approve",
+              action: "approve",
+              status: server.queueResolved ? "resolved" : "pending",
+              attemptCount: 0,
+              nextAttemptAt: null,
+              lastErrorReason: server.queueResolved ? null : "task_store_unavailable",
+              lastErrorMessage: null,
+              result: server.queueResolved ? { weekData: weekWithEarn("Jasmine Rose", 8) } : null,
+              displayTarget: { kind: "approval", taskId: 101 },
+            }]
+          : [];
+        return { ok: true, status: 200, json: async () => ({ rows }) };
+      }
       if (url === "/api/rewards/redeem") {
         server.requests.push({ route: url, body });
         return { ok: true, status: 200, json: async () => server.redeemBody ?? { ok: true } };
@@ -138,6 +162,9 @@ function installFetch() {
         }
         if (url === "/api/tasks/approve") {
           server.approveSeen = true;
+          if (server.approveBody?.queued === true && body?.operationId) {
+            server.queueOperationId = String(body.operationId);
+          }
           if (server.echoReceipt && body?.operationId) {
             server.snapshot = {
               ...(server.snapshot ?? {}),
@@ -316,6 +343,8 @@ beforeEach(() => {
   server.ledgerStatus = 200;
   server.echoReceipt = false;
   server.approveSeen = false;
+  server.queueOperationId = null;
+  server.queueResolved = false;
   mockAuth.currentUser = { name: "Rebecca", role: "parent", age: 40 };
   mockAuth.isLoggedIn = true;
   vi.stubGlobal("matchMedia", vi.fn(() => ({
@@ -386,14 +415,15 @@ describe("parent approval is a durable command, not a local pay", () => {
   });
 
   it("adopts 202 authoritative data before clearing the outbox", async () => {
+    // A 202 WITHOUT `queued` is a 2xx acknowledgment: it is the route's
+    // partial-projection answer (reconciled:false) and its body already
+    // carries the authoritative week, which is adopted before the entry goes.
     server.approveStatus = 202;
-    server.approveBody = { success: true, reconciled: false, repairRequired: true };
-    server.echoReceipt = true;
-    server.snapshot = {
-      tasks: [{ id: 101, title: "Dishes", completed: true, completedBy: "Jasmine Rose" }],
+    server.approveBody = {
+      success: true,
+      reconciled: false,
+      repairRequired: true,
       weekData: weekWithEarn("Jasmine Rose", 8),
-      operationReceipts: {},
-      configOperationReceipts: {},
     };
     seed([PENDING_TASK]);
     await openApprovalQueue();
@@ -401,14 +431,19 @@ describe("parent approval is a durable command, not a local pay", () => {
     await act(async () => { dialogButton("Approve").click(); });
     await settle(120);
 
+    expect(requestsFor("/api/tasks/approve")).toHaveLength(1);
     expect(listTaskOutbox()).toHaveLength(0);
     expect(storedWeek().points["Jasmine Rose"]).toBe(8);
+    expect(storedWeek().history).toHaveLength(1);
   });
 
-  it("retains a 202 whose pulled snapshot cannot prove it resolved", async () => {
+  it("mirrors a 202 { queued: true } as a server-owned entry until the queue poll resolves it", async () => {
+    // The NEW queue contract: 202 { queued: true } means the SERVER owns the
+    // command (a PocketBase queue row). The local entry stays as a live
+    // mirror — `serverQueued: true` — and never writes a local ledger; a later
+    // queue poll resolves it and adopts the authoritative week.
     server.approveStatus = 202;
-    server.approveBody = { success: true, reconciled: false };
-    server.snapshot = { tasks: [], weekData: null, operationReceipts: {}, configOperationReceipts: {} };
+    server.approveBody = { success: false, queued: true, reason: "task_store_unavailable", retryable: true };
     seed([PENDING_TASK]);
     await openApprovalQueue();
     await typePin("Parent PIN", PARENT_PIN);
@@ -416,8 +451,23 @@ describe("parent approval is a durable command, not a local pay", () => {
     await settle(120);
 
     expect(listTaskOutbox()).toHaveLength(1);
-    expect(listTaskOutbox()[0].status).toBe("reconciling");
+    expect(listTaskOutbox()[0]).toMatchObject({
+      status: "queued",
+      serverQueued: true,
+      serverStatus: "pending",
+    });
     expect(storedWeek().history).toHaveLength(0);
+    expect(storedWeek().points["Jasmine Rose"]).toBeUndefined();
+
+    // The queue drains: the resolution poll adopts the captured ack body and
+    // releases the mirror — the entry is not stuck `reconciling` forever.
+    server.queueResolved = true;
+    await act(async () => { await pollQueue(); });
+    await settle(60);
+
+    expect(listTaskOutbox()).toHaveLength(0);
+    expect(storedWeek().points["Jasmine Rose"]).toBe(8);
+    expect(storedWeek().history).toHaveLength(1);
   });
 
   it("retains the command on a 503 and reports a queued count instead of paying locally", async () => {

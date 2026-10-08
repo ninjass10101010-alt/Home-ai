@@ -60,7 +60,7 @@ vi.mock("@/lib/task-utils", () => ({
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
 import RewardsShop from "@/modes/kid/RewardsShop";
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 
 // The route's authoritative week ledger after a 150pt "Movie night" redeem.

@@ -59,8 +59,8 @@ import {
   normalizeSpeedBonus,
 } from "@/lib/task-utils";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
-import type { TaskOutboxAcknowledgedEvent } from "@/lib/task-operation-outbox";
-import { onTaskOutboxAdopted } from "@/lib/task-operation-outbox";
+import type { TaskOutboxAcknowledgedEvent } from "@/lib/task-command-store";
+import { onTaskOutboxAdopted } from "@/lib/task-command-store";
 import { writeTaskConfig } from "@/lib/task-config-client";
 import type { TaskConfigCommand, TaskTemplateConfigItem } from "@/lib/task-config";
 import {

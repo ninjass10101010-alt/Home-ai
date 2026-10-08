@@ -33,7 +33,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
-import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 
