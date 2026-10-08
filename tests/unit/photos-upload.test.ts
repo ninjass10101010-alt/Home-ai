@@ -14,6 +14,7 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifySession: vi.fn(),
+  pbCreate: vi.fn(),
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -26,7 +27,13 @@ vi.mock("@/lib/session", () => ({
 }));
 
 import { POST } from "@/app/api/photos/upload/route";
-import { ALLOWED_IMAGE_TYPES, MAX_ORIGINAL_BYTES } from "@/lib/photos/upload-limits";
+import {
+  ALLOWED_IMAGE_TYPES,
+  ALLOWED_ORIGINAL_TYPES,
+  isAllowedOriginalFile,
+  MAX_ORIGINAL_BYTES,
+} from "@/lib/photos/upload-limits";
+import { photosSchema } from "@/db/features/photos";
 
 const SESSION = "parent|Rebecca Garcia|m-reb";
 const MB = 1024 * 1024;
@@ -75,8 +82,10 @@ beforeEach(() => {
   mocks.verifySession.mockImplementation(async (token?: string) =>
     token && token !== "bogus" ? { role: "parent", name: "Rebecca Garcia", memberId: "m-reb" } : null,
   );
+  mocks.pbCreate.mockReset();
+  mocks.pbCreate.mockImplementation(async (data: Record<string, unknown>) => ({ id: "p1", ...data }));
   mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
-    fn({ collection: () => ({ create: async (data: Record<string, unknown>) => ({ id: "p1", ...data }) }) }),
+    fn({ collection: () => ({ create: mocks.pbCreate }) }),
   );
 });
 
@@ -139,6 +148,70 @@ describe("validation", () => {
   });
 });
 
+describe("RAW originals on the original field", () => {
+  it("accepts a .dng whose declared type is empty and puts it on the wall", async () => {
+    const form = new FormData();
+    form.set("original", new File([new Uint8Array([1, 2, 3])], "IMG_0001.dng", { type: "" }));
+    form.set("takenAt", "2026-09-30T12:00:00.000Z");
+
+    const res = await POST(uploadReq(form));
+
+    expect(res.status).toBe(201);
+    expect(mocks.pbCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.pbCreate.mock.calls[0][0].showOnWall).toBe(true);
+  });
+
+  it("stores a preview-less RAW off the wall when noWall=true", async () => {
+    const form = new FormData();
+    form.set("original", new File([new Uint8Array([1, 2, 3])], "IMG_0002.dng", { type: "" }));
+    form.set("noWall", "true");
+    form.set("takenAt", "2026-09-30T12:00:00.000Z");
+
+    const res = await POST(uploadReq(form));
+
+    expect(res.status).toBe(201);
+    expect(mocks.pbCreate.mock.calls[0][0].showOnWall).toBe(false);
+  });
+
+  it("still rejects a non-image original with unsupported_type", async () => {
+    const form = new FormData();
+    form.set("original", new File([new Uint8Array([1])], "x.gif", { type: "image/gif" }));
+    form.set("takenAt", "2026-09-30T12:00:00.000Z");
+
+    const res = await POST(uploadReq(form));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "unsupported_type" });
+    expect(mocks.pbCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("RAW originals — the wider original allowlist", () => {
+  it("accepts a .dng whose browser-declared type is empty", () => {
+    expect(isAllowedOriginalFile(new File([new Uint8Array([1])], "IMG_0001.dng", { type: "" }))).toBe(true);
+  });
+
+  it("accepts a declared RAW/tiff type", () => {
+    expect(isAllowedOriginalFile(new File([new Uint8Array([1])], "x.bin", { type: "image/x-adobe-dng" }))).toBe(true);
+    expect(isAllowedOriginalFile(new File([new Uint8Array([1])], "x.bin", { type: "image/tiff" }))).toBe(true);
+  });
+
+  it("still accepts the ordinary image types", () => {
+    expect(isAllowedOriginalFile(new File([new Uint8Array([1])], "x.jpg", { type: "image/jpeg" }))).toBe(true);
+    expect(isAllowedOriginalFile(new File([new Uint8Array([1])], "x.heic", { type: "image/heic" }))).toBe(true);
+  });
+
+  it("rejects non-images", () => {
+    expect(isAllowedOriginalFile(new File([new Uint8Array([1])], "x.gif", { type: "image/gif" }))).toBe(false);
+    expect(isAllowedOriginalFile(new File([new Uint8Array([1])], "notes.txt", { type: "text/plain" }))).toBe(false);
+  });
+
+  it("ALLOWED_ORIGINAL_TYPES keeps every base image type and adds image/tiff", () => {
+    expect(ALLOWED_ORIGINAL_TYPES).toContain("image/tiff");
+    for (const type of ALLOWED_IMAGE_TYPES) expect(ALLOWED_ORIGINAL_TYPES).toContain(type);
+  });
+});
+
 describe("shared-constant parity (spec §6: one export, no re-inlined literals)", () => {
   const root = process.cwd();
   const read = (rel: string) => readFileSync(join(root, rel), "utf8");
@@ -164,6 +237,12 @@ describe("shared-constant parity (spec §6: one export, no re-inlined literals)"
     expect(schemaSrc).toMatch(/name:\s*'original'[^}]*maxSize:\s*104857600/);
   });
 
+  it("the schema's original mimeTypes match the shared original allowlist", () => {
+    const fields = photosSchema.fields as Array<{ name: string; mimeTypes?: string[] }>;
+    const original = fields.find((field) => field.name === "original");
+    expect(original?.mimeTypes).toEqual([...ALLOWED_ORIGINAL_TYPES]);
+  });
+
   it("the upload route reads the shared constant (no local 20 MB copy left)", () => {
     expect(routeSrc).toMatch(/import\s*\{[^}]*MAX_ORIGINAL_BYTES[^}]*\}\s*from\s*"@\/lib\/photos\/upload-limits"/);
     expect(routeSrc).not.toMatch(/20\s*\*\s*1024\s*\*\s*1024/);
@@ -175,8 +254,9 @@ describe("shared-constant parity (spec §6: one export, no re-inlined literals)"
     expect(uploaderSrc).not.toMatch(/const\s+MAX_BYTES\s*=/);
     expect(uploaderSrc).toContain("Larger than 100MB");
     expect(uploaderSrc).not.toContain("Larger than 20MB");
-    // Client guard uses the exact allowlist, not a loose `image/` prefix.
-    expect(uploaderSrc).toMatch(/isAllowedImageType\(/);
+    // Client guard uses the exact original allowlist (+ RAW extension), not a
+    // loose `image/` prefix.
+    expect(uploaderSrc).toMatch(/isAllowedOriginalFile\(/);
     expect(uploaderSrc).not.toMatch(/startsWith\("image\/"\)/);
   });
 });

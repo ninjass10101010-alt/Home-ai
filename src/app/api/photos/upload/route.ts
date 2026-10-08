@@ -5,6 +5,7 @@ import {
   MAX_ORIGINAL_BYTES,
   MAX_WALL_BYTES,
   isAllowedImageType,
+  isAllowedOriginalFile,
 } from "@/lib/photos/upload-limits";
 
 export const dynamic = "force-dynamic";
@@ -54,7 +55,9 @@ export async function POST(request: NextRequest) {
   if (!(original instanceof File) || original.size === 0) {
     return NextResponse.json({ ok: false, error: "missing_file" }, { status: 400 });
   }
-  if (!isAllowedImageType(original.type)) {
+  // The archive accepts RAW originals too (DNG/CR2/NEF/…): the browser often
+  // declares no type for them, so the extension is part of the check.
+  if (!isAllowedOriginalFile(original)) {
     return NextResponse.json({ ok: false, error: "unsupported_type" }, { status: 400 });
   }
   if (original.size > MAX_ORIGINAL_BYTES) {
@@ -79,11 +82,15 @@ export async function POST(request: NextRequest) {
   const album = String(form.get("album") ?? "").trim();
   const width = Number(form.get("width")) || undefined;
   const height = Number(form.get("height")) || undefined;
+  // A RAW whose embedded preview could not be extracted has no displayable
+  // bytes; the client marks it so it is archived honestly and kept off the wall
+  // instead of rendering as a broken tile.
+  const noWall = String(form.get("noWall") ?? "") === "true";
 
   try {
     const data: Record<string, unknown> = {
       original: fileFrom(new Uint8Array(await original.arrayBuffer()), original.name, original.type),
-      showOnWall: true,
+      showOnWall: !noWall,
       uploadedBy: session.memberId,
     };
     if (wall instanceof File && wall.size > 0) {

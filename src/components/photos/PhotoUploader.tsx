@@ -3,7 +3,8 @@
 import { useCallback, useRef, useState } from "react";
 import SoftButton from "@/components/ui/SoftButton";
 import { resizeForWall } from "@/lib/photos/resize";
-import { MAX_ORIGINAL_BYTES, isAllowedImageType } from "@/lib/photos/upload-limits";
+import { extractRawPreview, isRawFileName } from "@/lib/photos/raw-preview";
+import { MAX_ORIGINAL_BYTES, isAllowedOriginalFile } from "@/lib/photos/upload-limits";
 
 /**
  * Add family photos from any device on the network.
@@ -23,6 +24,8 @@ interface QueueItem {
   state: ItemState;
   /** True when the resized copy could not be produced and only the original went up. */
   originalOnly: boolean;
+  /** True when the original is a RAW with no extractable preview — no wall copy exists. */
+  noWall?: boolean;
   /**
    * Caption/album frozen when the file was QUEUED. A retry runs through the
    * same closure path as a fresh upload, so reading the live inputs there
@@ -75,7 +78,7 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
       setBusy(true);
 
       for (const item of queue) {
-        if (!isAllowedImageType(item.file.type)) {
+        if (!isAllowedOriginalFile(item.file)) {
           patch(item.key, { state: "failed", error: "Not an image" });
           continue;
         }
@@ -85,7 +88,13 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
         }
 
         patch(item.key, { state: "resizing" });
-        const resized = await resizeForWall(item.file);
+        // A RAW (DNG/CR2/…) can't be decoded by the browser, so resize its
+        // embedded JPEG preview instead of the file. No preview → no wall copy;
+        // the original is archived off the wall rather than shown broken.
+        const isRaw = isRawFileName(item.file.name);
+        const preview = isRaw ? await extractRawPreview(item.file) : null;
+        const resized = preview ? await resizeForWall(preview) : isRaw ? null : await resizeForWall(item.file);
+        const noWall = isRaw && !resized;
 
         patch(item.key, { state: "uploading" });
         const form = new FormData();
@@ -95,6 +104,7 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
           form.set("width", String(resized.width));
           form.set("height", String(resized.height));
         }
+        if (noWall) form.set("noWall", "true");
         if (item.caption) form.set("caption", item.caption);
         if (item.album) form.set("album", item.album);
         // No EXIF reader in the bundle: the file's own clock is the best
@@ -107,7 +117,7 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
           if (!res.ok || body?.ok === false) {
             throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${res.status}`);
           }
-          patch(item.key, { state: "done", originalOnly: !resized });
+          patch(item.key, { state: "done", originalOnly: !resized, noWall });
         } catch (error) {
           patch(item.key, {
             state: "failed",
@@ -250,9 +260,15 @@ export default function PhotoUploader({ onUploaded }: { onUploaded?: () => void 
                       : "text-text-secondary"
                 }`}
               >
-                {label(item.state)}
-                {item.error ? ` — ${item.error}` : ""}
-                {item.originalOnly && item.state === "done" ? " (original only)" : ""}
+                {item.state === "done" && item.noWall ? (
+                  "Saved to archive — no wall preview"
+                ) : (
+                  <>
+                    {label(item.state)}
+                    {item.error ? ` — ${item.error}` : ""}
+                    {item.originalOnly && item.state === "done" ? " (original only)" : ""}
+                  </>
+                )}
               </span>
             </li>
           ))}

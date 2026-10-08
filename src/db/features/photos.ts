@@ -53,7 +53,10 @@ export const photosSchema = {
   name: 'photos',
   type: 'base',
   fields: [
-    { name: 'original', type: 'file', required: true, maxSize: 104857600, mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] },
+    // `original` accepts RAW too: every common RAW is TIFF-based, so PocketBase
+    // detects it as `image/tiff` by content magic. Keep this list in parity
+    // with `ALLOWED_ORIGINAL_TYPES` (tests/unit/photos-upload.test.ts pins it).
+    { name: 'original', type: 'file', required: true, maxSize: 104857600, mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'image/x-adobe-dng', 'image/dng', 'image/tiff', 'image/x-canon-cr2', 'image/x-nikon-nef', 'image/x-sony-arw'] },
     { name: 'wall', type: 'file', required: false, maxSize: 8388608, mimeTypes: ['image/jpeg', 'image/webp'] },
     { name: 'takenAt', type: 'date', required: false },
     { name: 'caption', type: 'text', required: false },

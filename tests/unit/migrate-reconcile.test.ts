@@ -19,8 +19,9 @@ vi.mock("@/lib/pb", () => ({
   getAdminPB: () => mocks.getAdminPB(),
 }));
 
-import { runFeatureMigration, reconcileFileFieldLimits } from "@/db/features/migrate";
+import { runFeatureMigration, reconcileFileFieldLimits, reconcileFileFieldMimeTypes } from "@/db/features/migrate";
 import { photosSchema } from "@/db/features/photos";
+import { ALLOWED_ORIGINAL_TYPES } from "@/lib/photos/upload-limits";
 import { ALL_FEATURE_SCHEMAS } from "@/db/features/index";
 
 const PB_MISSING = Object.assign(new Error("Missing or invalid collection name."), {
@@ -131,6 +132,75 @@ describe("reconcileFileFieldLimits — no drift", () => {
 
     expect(healed).toBe(0);
     expect(getOne).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("reconcileFileFieldMimeTypes — flat fields (PB ≥0.23)", () => {
+  it("heals a drifted flat mimeTypes list and leaves matching fields alone", async () => {
+    const log = vi.spyOn(console, "log");
+    const { collections, update } = collectionsStub(() => ({
+      id: "col-photos",
+      name: "photos",
+      fields: [
+        { id: "f1", name: "original", type: "file", maxSize: 104857600, mimeTypes: ["image/jpeg"] },
+        { id: "f2", name: "wall", type: "file", maxSize: 8388608, mimeTypes: ["image/jpeg", "image/webp"] },
+      ],
+    }));
+
+    const healed = await reconcileFileFieldMimeTypes({ collections }, photosSchema);
+
+    expect(healed).toBe(1);
+    expect(update).toHaveBeenCalledTimes(1);
+    const payload = update.mock.calls[0][1] as { fields: any[] };
+    expect(payload.fields[0].mimeTypes).toEqual([...ALLOWED_ORIGINAL_TYPES]);
+    expect(payload.fields[1].mimeTypes).toEqual(["image/jpeg", "image/webp"]);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("photos.original: mimeTypes"),
+    );
+  });
+});
+
+describe("reconcileFileFieldMimeTypes — nested fields (PB <0.23)", () => {
+  it("heals nested options.mimeTypes in place without adding a flat key", async () => {
+    const { collections, update } = collectionsStub(() => ({
+      id: "col-photos",
+      name: "photos",
+      fields: [
+        { id: "f1", name: "original", type: "file", options: { maxSize: 104857600, mimeTypes: ["image/jpeg"] } },
+      ],
+    }));
+
+    const healed = await reconcileFileFieldMimeTypes({ collections }, photosSchema);
+
+    expect(healed).toBe(1);
+    const payload = update.mock.calls[0][1] as { fields: any[] };
+    expect(payload.fields[0].options.mimeTypes).toEqual([...ALLOWED_ORIGINAL_TYPES]);
+    expect(payload.fields[0].options.maxSize).toBe(104857600);
+    expect(payload.fields[0].mimeTypes).toBeUndefined();
+  });
+});
+
+describe("reconcileFileFieldMimeTypes — no drift / no option", () => {
+  it("writes nothing when the live mimeTypes already match the schema", async () => {
+    const { collections, update } = collectionsStub(() => ({
+      id: "col-photos",
+      name: "photos",
+      fields: [{ id: "f1", name: "original", type: "file", mimeTypes: [...ALLOWED_ORIGINAL_TYPES] }],
+    }));
+
+    expect(await reconcileFileFieldMimeTypes({ collections }, photosSchema)).toBe(0);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("leaves a field that has no mimeTypes property alone (never invents options)", async () => {
+    const { collections, update } = collectionsStub(() => ({
+      id: "col-photos",
+      name: "photos",
+      fields: [{ id: "f1", name: "original", type: "file", maxSize: 104857600 }],
+    }));
+
+    expect(await reconcileFileFieldMimeTypes({ collections }, photosSchema)).toBe(0);
     expect(update).not.toHaveBeenCalled();
   });
 });

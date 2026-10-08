@@ -242,6 +242,65 @@ export async function reconcileFileFieldLimits(pb: any, schema: PocketBaseSchema
 }
 
 /**
+ * Heal `mimeTypes` drift on a collection that ALREADY exists — the sibling of
+ * {@link reconcileFileFieldLimits}. Adding an accepted format to a schema file
+ * changes nothing on a live database (`createCollection` skips existing
+ * collections), so the accepted-type list is written back in the shape it was
+ * read (PB <0.23 nested `options`, ≥0.23 flat).
+ *
+ * A field that does not express the option at all is left alone: an absent
+ * `mimeTypes` means "allow all" in PocketBase, and inventing an options block
+ * the field never had is a shape change this pass has no business making.
+ * Returns the number of fields healed.
+ */
+export async function reconcileFileFieldMimeTypes(pb: any, schema: PocketBaseSchema): Promise<number> {
+  const wanted = new Map<string, string[]>(
+    schema.fields
+      .filter((field) => field.type === 'file' && Array.isArray(field.mimeTypes))
+      .map((field) => [field.name, field.mimeTypes as string[]]),
+  );
+  if (wanted.size === 0) return 0;
+
+  const live = await pb.collections.getOne(schema.name);
+  const source: any = live ?? {};
+  const legacyShape = !Array.isArray(source.fields) && Array.isArray(source.schema);
+  const liveFields: any[] = legacyShape
+    ? source.schema
+    : Array.isArray(source.fields)
+      ? source.fields
+      : [];
+  if (liveFields.length === 0) return 0;
+
+  const sameList = (a: unknown, b: string[]) =>
+    Array.isArray(a) && a.length === b.length && a.every((v, i) => v === b[i]);
+
+  let healed = 0;
+  const updated = liveFields.map((field) => {
+    const wantedMimes = wanted.get(field.name);
+    if (!wantedMimes || field.type !== 'file') return field;
+    const readFlat = Array.isArray(field.mimeTypes);
+    const current = readFlat ? field.mimeTypes : field.options?.mimeTypes;
+    if (!Array.isArray(current)) return field; // option absent — leave the shape alone
+    if (sameList(current, wantedMimes)) return field;
+    healed++;
+    console.log(
+      `  🔧 ${schema.name}.${field.name}: mimeTypes [${current.join(', ')}] -> [${wantedMimes.join(', ')}]`,
+    );
+    return readFlat
+      ? { ...field, mimeTypes: wantedMimes }
+      : { ...field, options: { ...field.options, mimeTypes: wantedMimes } };
+  });
+
+  if (healed === 0) return 0;
+  await pb.collections.update(
+    String(source.id ?? schema.name),
+    legacyShape ? { schema: updated } : { fields: updated },
+  );
+  console.log(`  ✅ ${schema.name}: healed ${healed} file field mime list(s)`);
+  return healed;
+}
+
+/**
  * Run the full migration.
  */
 export async function runFeatureMigration(): Promise<{ created: number; skipped: number; failed: number }> {
@@ -297,6 +356,7 @@ export async function runFeatureMigration(): Promise<{ created: number; skipped:
     if (result === "skipped") {
       try {
         healed += await reconcileFileFieldLimits(pb, typed);
+        healed += await reconcileFileFieldMimeTypes(pb, typed);
       } catch (error: any) {
         // Not folded into `failed` (that tally counts collections): the create
         // result stands, but a reconcile that did not land is shouted about.
@@ -311,7 +371,7 @@ export async function runFeatureMigration(): Promise<{ created: number; skipped:
   console.log(`   ✅ Created: ${created}`);
   console.log(`   ⏭️  Skipped: ${skipped}`);
   console.log(`   ❌ Failed: ${failed}`);
-  if (healed > 0) console.log(`   🔧 File limits healed: ${healed}`);
+  if (healed > 0) console.log(`   🔧 File field options healed: ${healed}`);
   console.log('');
 
   return { created, skipped, failed };
