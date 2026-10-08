@@ -245,7 +245,7 @@ describe("listTaskCommandQueueState", () => {
     expect(rows.map((r) => r.operationId)).toEqual(["op-a"]);
   });
 
-  it("returns an empty list when PB throws (an outage is not an empty queue)", async () => {
+  it("propagates a PB read failure instead of masking an outage as an empty queue", async () => {
     mocks.withAdmin.mockImplementation((fn: any) =>
       fn({
         collection: () => ({
@@ -255,7 +255,7 @@ describe("listTaskCommandQueueState", () => {
         }),
       }),
     );
-    expect(await listTaskCommandQueueState()).toEqual([]);
+    await expect(listTaskCommandQueueState()).rejects.toThrow("pb_down");
   });
 });
 

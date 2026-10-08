@@ -427,7 +427,9 @@ async function replayQueueRow(row: Record<string, any>): Promise<ReplayOutcome> 
           return { kind: "duplicate", ack: { operationId, duplicate: true, reason: "operation_conflict" } };
         }
         if ("stale" in outcome) {
-          // A stale refusal carries the authoritative catalog — adopt, then fail.
+          // The stale outcome's authoritative catalog is discarded — only the
+          // refusal is stored. Catalog adoption at drain time is a tracked
+          // follow-up.
           return {
             kind: "failed",
             reason: "stale_config",
@@ -556,20 +558,16 @@ export async function drainDueTaskCommandQueue(): Promise<DrainTaskCommandQueueS
  * and terminal markers still inside their retention window. */
 export async function listTaskCommandQueueState(): Promise<TaskQueueStateRow[]> {
   return withAdmin(async (pb) => {
-    try {
-      const rows = await readQueueRows(pb, "");
-      const now = Date.now();
-      return rows
-        .filter((row) => {
-          const status = String(row.status ?? "");
-          if (status === "pending" || status === "failed") return true;
-          // Terminal markers only within the retention window.
-          return now - rowCreatedAtMs(row) < TASK_QUEUE_TERMINAL_RETENTION_MS;
-        })
-        .map(toStateRow);
-    } catch {
-      return [];
-    }
+    const rows = await readQueueRows(pb, "");
+    const now = Date.now();
+    return rows
+      .filter((row) => {
+        const status = String(row.status ?? "");
+        if (status === "pending" || status === "failed") return true;
+        // Terminal markers only within the retention window.
+        return now - rowCreatedAtMs(row) < TASK_QUEUE_TERMINAL_RETENTION_MS;
+      })
+      .map(toStateRow);
   });
 }
 

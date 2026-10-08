@@ -32,8 +32,10 @@ import type { Task, WeekData } from "@/types/tasks";
  * returns, so optimistic marks key on it immediately), but the send is now a
  * direct POST to the command route with the credential in the body:
  *
- *   · 2xx success            → the ack body is adopted, terminal event fires,
- *                              the entry leaves. No proof-polling — the body
+ *   · 2xx success            → the entry leaves and the terminal event fires
+ *                              FIRST, then the ack body is adopted (adoption
+ *                              runs after release; adopt-before-release is a
+ *                              tracked follow-up). No proof-polling — the body
  *                              already carries the authoritative week.
  *   · 202 { queued: true }   → the SERVER owns the command (a PocketBase
  *                              queue row): the entry stays as a live mirror

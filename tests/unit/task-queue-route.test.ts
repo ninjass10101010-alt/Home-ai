@@ -59,6 +59,29 @@ describe("GET /api/tasks/queue", () => {
   });
 });
 
+describe("GET /api/tasks/queue — real queue server", () => {
+  it("answers 503 when the real queue read fails, so an outage is never an empty 200", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: true, identity: { memberId: "m1", role: "parent" } });
+    const throwingPb = {
+      collection: () => ({
+        getFullList: async () => {
+          throw new Error("pb_down");
+        },
+      }),
+    };
+    vi.doMock("@/lib/pb-auth", () => ({
+      withAdmin: (fn: (pb: unknown) => Promise<unknown>) => fn(throwingPb),
+    }));
+    vi.doUnmock("@/lib/task-command-queue-server");
+    vi.resetModules();
+    const { GET: realGet } = await import("@/app/api/tasks/queue/route");
+    const res = await realGet(new NextRequest("http://localhost/api/tasks/queue"));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ ok: false, error: "queue_unavailable", rows: [] });
+    vi.doUnmock("@/lib/pb-auth");
+  });
+});
+
 describe("DELETE /api/tasks/queue", () => {
   it("rejects a malformed body", async () => {
     mocks.requireLiveSession.mockResolvedValue({ ok: true, identity: { memberId: "m1", role: "child" } });
