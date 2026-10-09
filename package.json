@@ -17,6 +17,7 @@
     "seed:features": "tsx src/db/features/seed.ts",
     "test": "vitest",
     "test:e2e": "playwright test",
+    "harness:tasks": "node scripts/tasks/symptom-harness.mjs",
     "ai:boot": "node scripts/write-ai-boot.mjs"
   },
   "dependencies": {

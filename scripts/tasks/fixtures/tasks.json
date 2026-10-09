@@ -1,0 +1,88 @@
+{
+  "tasks": [
+    {
+      "id": 101,
+      "title": "Sweep the kitchen floor",
+      "assignee": "Caspian Garcia",
+      "assigneeEmoji": "🧒",
+      "points": 5,
+      "recurring": null,
+      "category": "Chores",
+      "completed": false,
+      "priority": "medium",
+      "universal": false,
+      "stealable": false,
+      "crewSize": null,
+      "fixture": "assigned-young"
+    },
+    {
+      "id": 102,
+      "title": "Fold the laundry",
+      "assignee": "Aurora Garcia",
+      "assigneeEmoji": "🌈",
+      "points": 7,
+      "recurring": null,
+      "category": "Chores",
+      "completed": false,
+      "priority": "low",
+      "universal": false,
+      "stealable": false,
+      "crewSize": null,
+      "fixture": "assigned-teen"
+    },
+    {
+      "id": 103,
+      "title": "Unload the dishwasher",
+      "assignee": "Open",
+      "assigneeEmoji": "👤",
+      "points": 6,
+      "recurring": null,
+      "category": "Chores",
+      "completed": false,
+      "priority": "medium",
+      "universal": true,
+      "stealable": false,
+      "speedBonus": 3,
+      "crewSize": null,
+      "fixture": "universal-bonus"
+    },
+    {
+      "id": 104,
+      "title": "Clean the playroom",
+      "assignee": "Crew",
+      "assigneeEmoji": "🤝",
+      "points": 4,
+      "recurring": null,
+      "category": "Chores",
+      "completed": false,
+      "priority": "high",
+      "universal": false,
+      "stealable": false,
+      "crewSize": 2,
+      "crewCloseMode": "parent",
+      "crew": {
+        "members": [
+          { "name": "Caspian Garcia", "emoji": "🧒" },
+          { "name": "Jasmine Garcia", "emoji": "👧" }
+        ],
+        "removed": []
+      },
+      "fixture": "crew-two"
+    },
+    {
+      "id": 105,
+      "title": "Wipe the bathroom counters",
+      "assignee": "Jasmine Garcia",
+      "assigneeEmoji": "👧",
+      "points": 5,
+      "recurring": null,
+      "category": "Chores",
+      "completed": false,
+      "priority": "low",
+      "universal": false,
+      "stealable": false,
+      "crewSize": null,
+      "fixture": "open-assigned"
+    }
+  ]
+}

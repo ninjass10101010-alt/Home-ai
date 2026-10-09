@@ -1,0 +1,6 @@
+[
+  { "name": "Rebecca Garcia", "role": "parent", "age": 40, "pin": "1234" },
+  { "name": "Caspian Garcia", "role": "child", "age": 7, "pin": "2345" },
+  { "name": "Aurora Garcia", "role": "child", "age": 13, "pin": "3456" },
+  { "name": "Jasmine Garcia", "role": "child", "age": 9, "pin": "4567" }
+]
