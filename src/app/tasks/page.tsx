@@ -41,6 +41,7 @@ import {
   loadWeekData, saveWeekData,
   calculateRealStreak,
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks, isCompletedInWeek,
+  groupCompletedTasksByWeek,
   loadTasks, saveTasks,
   saveRewards, savePenalties,
   getPreviousWeekRanks, loadHallOfFame, loadHallOfFameMerged,
@@ -1436,7 +1437,11 @@ export default function TasksPage() {
           `Approving ${taskIds.length} tapped task${taskIds.length !== 1 ? "s" : ""} — points land when the family server confirms.`,
         );
       } else if (approvalMode === "approve" && approvalTaskId !== null) {
-        const target = tasks.find((x) => x.id === approvalTaskId);
+        // `pendingApprovals` IS the substituted queue (interactiveRows filtered
+        // to pending taps); this closure is declared above the `interactiveRows`
+        // memo, and capturing that memo here makes the React Compiler unable to
+        // preserve it — so the queue itself is the source, not the raw `tasks`.
+        const target = pendingApprovals.find((x) => x.id === approvalTaskId);
         const crew = target?.pendingApproval?.crew;
         const amt = target?.pendingApproval?.points ?? target?.points ?? 0;
         queueCommand({
@@ -1452,7 +1457,7 @@ export default function TasksPage() {
             : `Approving — +${amt}pts for ${(target?.pendingApproval?.byName ?? "").split(" ")[0]}.`,
         );
       } else if (approvalTaskId !== null) {
-        const target = tasks.find((x) => x.id === approvalTaskId);
+        const target = pendingApprovals.find((x) => x.id === approvalTaskId);
         const sendBack = queueCommand({
           route: "/api/tasks/approve",
           action: "send-back",
@@ -2175,7 +2180,15 @@ export default function TasksPage() {
   const filtered = showCompleted ? memberScoped : memberScoped.filter((t) => !t.completed);
 
   const pending = filtered.filter((t) => !t.completed && !hiddenByQueuedCommand.has(t.id));
-  const pendingApprovals = tasks.filter(isPendingApproval);
+  // The SAME substituted source every other surface reads (contract at
+  // `visibleTasks` below): a queued edit's copy is what the parent is shown,
+  // and a queued delete's row is already gone. `interactiveRows` is built from
+  // `serverTasks` (which filters `optimisticRemoved`) and from
+  // `optimisticUpdates` (de-duplicated LAST-WINS by id), so this array carries
+  // no queued-deleted id and no duplicate id. Approve-all's `taskIds` selection
+  // is B1a's line, which already filters `optimisticRemoved` at the selection
+  // site; F2 changes the queue's SOURCE, not that contract.
+  const pendingApprovals = interactiveRows.filter(isPendingApproval);
   // The Open board: unclaimed "up for grabs" tasks (universal or late-stealable)
   // PLUS crew tasks with space — shown only when the viewer isn't on a
   // specific-member filter, sorted by points (biggest race first). Plain
@@ -2201,6 +2214,11 @@ export default function TasksPage() {
   // expanded — this is the array the card gates on AND maps over, so nothing on
   // screen reconciles against anything else.
   const completed = memberScoped.filter((t) => t.completed);
+  // DISPLAY-ONLY: regroup + relabel, never recompute a total. Plain
+  // computation, no useMemo — the same call the Open board above makes on
+  // purpose: a filter+sort+group over the family's small task list is cheaper
+  // than the manual memo the compiler could not preserve.
+  const completedGroups = groupCompletedTasksByWeek(completed);
   // Everything that reads "the family's chores" reads the SUBSTITUTED copy, so
   // a queued edit is reflected on the completed list, the streaks, the leaderboard
   // and the member sheet until the acknowledgment replaces it with the real row.
@@ -3050,89 +3068,189 @@ export default function TasksPage() {
                 and is reachable only from a rendered row, so gating on the week
                 count made the whole undo path dead on a Monday morning. */}
             {completed.length > 0 && (
+              <div data-completed-card="">
               <SectionCard headingLevel="h2" title="Completed" description={`${completed.length} done`} icon="✅">
                 <button type="button" onClick={() => setShowCompleted(!showCompleted)} aria-expanded={showCompleted} className="mb-3 flex min-h-[44px] w-full items-center justify-between rounded-xl px-1 text-sm font-semibold text-text-secondary">
                   <span>{showCompleted ? "Hide completed" : "Show completed"}</span>
                   <span>{showCompleted ? "↑" : "↓"}</span>
                 </button>
                 {showCompleted && (
-                  <div className="space-y-2">
-                    {completed.map((task) => {
-                        if (isPendingApproval(task)) {
-                          const owner = task.pendingApproval!;
-                          // Same-kid check in the resolved-ledger space (a
-                          // session first name and a fullName byName agree).
-                          const mine = isLoggedIn && currentUser?.role === "child" && resolveMemberName(membersData, owner.byName) === resolveMemberName(membersData, currentUser.name);
-                          return (
-                          <div
-                            key={task.id}
-                            role={mine ? "button" : undefined}
-                            tabIndex={mine ? 0 : undefined}
-                            aria-label={mine ? `Cancel completion of ${task.title}` : `${task.title} waiting for parent approval`}
-                            onClick={mine ? () => openPinEntry(task.id) : undefined}
-                            onKeyDown={mine ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPinEntry(task.id); } } : undefined}
-                            className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
-                            style={{
-                              backgroundImage: rowTint("var(--color-accent-amber)"),
-                            }}
-                          >
+                  <div className="space-y-4">
+                    {/* ── PINNED: awaiting a decision, not history ─────────── */}
+                    {completedGroups.pending.length > 0 && (
+                      <section className="space-y-2" aria-labelledby="completed-pending">
+                        <h3 id="completed-pending" className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
+                          Waiting on approval
+                          {/* A COUNT, never a points total: summing this group's
+                              rows would be client-side points arithmetic, and
+                              `task.points` is exactly the field the approval
+                              pipeline rewrites (task-claim.ts:1366 vs
+                              task-approval.ts:1270). */}
+                          <span className="ml-2 font-normal text-text-muted">
+                            {completedGroups.pending.length} chore{completedGroups.pending.length === 1 ? "" : "s"}
+                          </span>
+                        </h3>
+                        <div className="space-y-2">
+                          {completedGroups.pending.map((task) => {
+                            const owner = task.pendingApproval!;
+                            // Same-kid check in the resolved-ledger space (a
+                            // session first name and a fullName byName agree).
+                            const mine = isLoggedIn && currentUser?.role === "child" && resolveMemberName(membersData, owner.byName) === resolveMemberName(membersData, currentUser.name);
+                            return (
                             <div
-                              className="h-8 w-0.5 shrink-0 rounded-full"
-                              style={{ backgroundColor: "var(--color-accent-amber)", boxShadow: `0 0 8px var(--color-accent-amber)` }}
-                            />
-                            <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
-                            <div className="min-w-0 flex-1">
-                              <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
-                              <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{owner.byName.split(" ")[0]} · tapped {formatDueLabel(owner.at.split("T")[0])} · {task.awardedPoints ?? task.pendingApproval!.points ?? baseTaskPoints(task)}pts on the way</div>
-                            </div>
-                            <span
-                              className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
+                              key={task.id}
+                              role={mine ? "button" : undefined}
+                              tabIndex={mine ? 0 : undefined}
+                              aria-label={mine ? `Cancel completion of ${task.title}` : `${task.title} waiting for parent approval`}
+                              onClick={mine ? () => openPinEntry(task.id) : undefined}
+                              onKeyDown={mine ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPinEntry(task.id); } } : undefined}
+                              className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
                               style={{
-                                background: chipFill("var(--color-accent-amber)"),
+                                backgroundImage: rowTint("var(--color-accent-amber)"),
                               }}
                             >
-                              ⏳ On the way
-                            </span>
-                          </div>
-                          );
-                        }
-                        const rowColor = "var(--color-accent-mint)";
-                        return (
-                        // INERT row: the undo `<button>` below is the single
-                        // affordance. A `role="button"` row with a button inside
-                        // it is two controls with two names doing one action, and
-                        // a nested-interactive ARIA violation.
-                        <div
-                          key={task.id}
-                          className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
-                          style={{
-                            backgroundImage: rowTint(rowColor),
-                          }}
-                        >
-                          <div
-                            className="h-8 w-0.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: rowColor, boxShadow: `0 0 8px ${rowColor}` }}
-                          />
-                          <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
-                          <div className="min-w-0 flex-1">
-                            <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
-                            <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]} · {task.completedInWeek === weekData.weekStart ? "This week" : "Past"}</div>
-                          </div>
-                          <span
-                            className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
-                            style={{
-                              background: chipFill(rowColor),
-                            }}
-                          >
-                            Done
-                          </span>
-                          <IconButton size="sm" variant="ghost" aria-label={`Undo completion of ${task.title}`} className="hit-44" onClick={() => openPinEntry(task.id)}>↩</IconButton>
+                              <div
+                                className="h-8 w-0.5 shrink-0 rounded-full"
+                                style={{ backgroundColor: "var(--color-accent-amber)", boxShadow: `0 0 8px var(--color-accent-amber)` }}
+                              />
+                              <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
+                              <div className="min-w-0 flex-1">
+                                <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                                <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{owner.byName.split(" ")[0]} · tapped {formatDueLabel(owner.at.split("T")[0])} · {task.awardedPoints ?? task.pendingApproval!.points ?? baseTaskPoints(task)}pts on the way</div>
+                              </div>
+                              <span
+                                className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
+                                style={{
+                                  background: chipFill("var(--color-accent-amber)"),
+                                }}
+                              >
+                                ⏳ On the way
+                              </span>
+                            </div>
+                            );
+                          })}
                         </div>
-                        );
-                      })}
+                      </section>
+                    )}
+
+                    {/* ── Week groups: this week, then newest-first ────────── */}
+                    {completedGroups.weeks.map((group) => (
+                      <section key={group.key} className="space-y-2" aria-labelledby={`completed-week-${group.key}`}>
+                        {/* A HEADING, not a control: the 44px tap rule covers
+                            buttons and role="button" only. The `id` derives
+                            from the stable week key, never from an index. */}
+                        <h3 id={`completed-week-${group.key}`} className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
+                          {group.label}
+                          <span className="ml-2 font-normal text-text-muted">
+                            {group.tasks.length} chore{group.tasks.length === 1 ? "" : "s"}
+                          </span>
+                        </h3>
+                        <div className="space-y-2">
+                          {group.tasks.map((task) => {
+                            const rowColor = "var(--color-accent-mint)";
+                            return (
+                            // INERT row: the undo `<button>` below is the single
+                            // affordance. A `role="button"` row with a button inside
+                            // it is two controls with two names doing one action, and
+                            // a nested-interactive ARIA violation.
+                            <div
+                              key={task.id}
+                              className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                              style={{
+                                backgroundImage: rowTint(rowColor),
+                              }}
+                            >
+                              <div
+                                className="h-8 w-0.5 shrink-0 rounded-full"
+                                style={{ backgroundColor: rowColor, boxShadow: `0 0 8px ${rowColor}` }}
+                              />
+                              <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
+                              <div className="min-w-0 flex-1">
+                                <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                                {/* The week is the header directly above; the
+                                    old per-row week token mislabelled every
+                                    unstamped this-week row as last week's. */}
+                                <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]}</div>
+                              </div>
+                              <span
+                                className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
+                                style={{
+                                  background: chipFill(rowColor),
+                                }}
+                              >
+                                Done
+                              </span>
+                              <IconButton size="sm" variant="ghost" aria-label={`Undo completion of ${task.title}`} className="hit-44" onClick={() => openPinEntry(task.id)}>↩</IconButton>
+                            </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    ))}
+
+                    {/* ── Honest null: never dated, never guessed ──────────── */}
+                    {completedGroups.unattributed.length > 0 && (
+                      <section className="space-y-2" aria-labelledby="completed-undated">
+                        <h3 id="completed-undated" className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
+                          Earlier
+                          <span className="ml-2 font-normal text-text-muted">
+                            {completedGroups.unattributed.length} chore{completedGroups.unattributed.length === 1 ? "" : "s"}
+                          </span>
+                        </h3>
+                        {/* Names the missing data instead of inventing a date. */}
+                        <p className="text-xs text-text-muted">
+                          Finished, but the family server never recorded a day for these.
+                        </p>
+                        <div className="space-y-2">
+                          {completedGroups.unattributed.map((task) => {
+                            const rowColor = "var(--color-accent-mint)";
+                            return (
+                            <div
+                              key={task.id}
+                              className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                              style={{
+                                backgroundImage: rowTint(rowColor),
+                              }}
+                            >
+                              <div
+                                className="h-8 w-0.5 shrink-0 rounded-full"
+                                style={{ backgroundColor: rowColor, boxShadow: `0 0 8px ${rowColor}` }}
+                              />
+                              <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
+                              <div className="min-w-0 flex-1">
+                                <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                                <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]}</div>
+                              </div>
+                              <span
+                                className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
+                                style={{
+                                  background: chipFill(rowColor),
+                                }}
+                              >
+                                Done
+                              </span>
+                              <IconButton size="sm" variant="ghost" aria-label={`Undo completion of ${task.title}`} className="hit-44" onClick={() => openPinEntry(task.id)}>↩</IconButton>
+                            </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    )}
+
+                    {/* Defensive empty branch, reachable only if the helper
+                        returns nothing while `completed` is non-empty. The card
+                        is gated on `completed.length > 0`, so this is a named
+                        state, not the normal path. */}
+                    {completedGroups.pending.length === 0 &&
+                     completedGroups.weeks.length === 0 &&
+                     completedGroups.unattributed.length === 0 && (
+                      <EmptyState icon="✅" title="Nothing finished yet"
+                                  description="Chores you complete show up here, newest week first." />
+                    )}
                   </div>
                 )}
               </SectionCard>
+              </div>
             )}
 
             {/* AI chore ideas — parents-only and BELOW the chore lists. The
@@ -3655,7 +3773,7 @@ aria-describedby="parent-approval-dialog-error"               onChange={(e) => {
             if (approvalMode === "approve-all") {
               return `Pay all ${pendingApprovals.length} tapped task${pendingApprovals.length !== 1 ? "s" : ""} now? Rows already paid elsewhere just clear.`;
             }
-            const target = tasks.find((x) => x.id === approvalTaskId);
+            const target = interactiveRows.find((x) => x.id === approvalTaskId);
             return approvalMode === "approve"
               ? `"${target?.title}" tapped by ${target?.pendingApproval?.byName} — award +${target?.points ?? 0}pts?`
               : `"${target?.title}" goes back on the list with no points.`;

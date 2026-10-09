@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { localDateOf, localTodayISO, localWeekStartISO } from "@/lib/local-date";
-import { weekStartForDate } from "@/lib/meals-week-utils";
+import { weekLabel, weekStartForDate } from "@/lib/meals-week-utils";
 import { isRecord } from "@/lib/task-operation-contract";
 import type { TaskTemplateConfigItem } from "@/lib/task-config";
 import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, WeeklyPrize, CrewMember, CrewCloseMode } from "@/types/tasks";
@@ -427,6 +427,109 @@ export function getThisWeeksCompletedTasks(tasks: Task[]): Task[] {
   const monday = localWeekStartISO();
   const now = localTodayISO();
   return tasks.filter((t) => isCompletedInWeek(t, monday, now));
+}
+
+export interface CompletedWeekGroup {
+  key: string;
+  label: string;
+  tasks: Task[];
+}
+
+export interface CompletedWeekGroups {
+  pending: Task[];
+  weeks: CompletedWeekGroup[];
+  unattributed: Task[];
+}
+
+function completedWeekKeyOf(task: Task): string | null {
+  // 1. The server stamp WINS and short-circuits: a row approved in a later
+  //    week keeps the week it was completed in, and the instant below is
+  //    never consulted against it.
+  if (typeof task.completedInWeek === "string" && task.completedInWeek !== "") return task.completedInWeek;
+  // 2. Unstamped: the LOCAL day of the instant, then that day's LOCAL Monday.
+  //    `localDateOf` first — slicing the instant yields the UTC date, which
+  //    disagrees for four hours either side of UTC midnight (see
+  //    `getThisWeeksCompletedDates` above).
+  if (typeof task.completedAt === "string" && task.completedAt !== "") {
+    return weekStartForDate(localDateOf(task.completedAt));
+  }
+  // 3. Neither: an honest null, never guessed into a week.
+  return null;
+}
+
+function mostRecentFirst(rows: Task[], instantOf: (task: Task) => string): Task[] {
+  // Sort a COPY: `completed` derives from `memberScoped`, and mutating the
+  // caller's array would turn a display-only change into a data bug. "" sorts
+  // last under descending, so an undated row is never treated as newest.
+  return rows.slice().sort((a, b) => {
+    const aAt = instantOf(a);
+    const bAt = instantOf(b);
+    if (aAt !== bAt) return aAt < bAt ? 1 : -1;
+    return a.id - b.id;
+  });
+}
+
+/**
+ * DISPLAY-ONLY week grouping for the Completed card. Three contracts, in
+ * order:
+ *
+ * 1. The server `completedInWeek` stamp wins and short-circuits, so F1 and
+ *    `isCompletedInWeek` can never disagree about which rows are this week's.
+ * 2. An unstamped row is attributed by `localDateOf` then `weekStartForDate`
+ *    — never by slicing the UTC instant (the trap at `task-utils.ts:400-404`).
+ * 3. A row with neither stamp nor instant is reported in `unattributed` —
+ *    never dated and never guessed.
+ *
+ * DISPLAY-ONLY — this reorders, regroups and relabels rows. It reads no
+ * points field, writes no store, and derives no total.
+ */
+export function groupCompletedTasksByWeek(
+  completedTasks: Task[],
+  today: string = localTodayISO()
+): CompletedWeekGroups {
+  const currentWeek = weekStartForDate(today);
+  const pending: Task[] = [];
+  const byWeek = new Map<string, Task[]>();
+  const unattributed: Task[] = [];
+
+  for (const task of completedTasks) {
+    if (isPendingApproval(task)) {
+      pending.push(task); // awaiting a decision, not history
+      continue;
+    }
+    const key = completedWeekKeyOf(task);
+    if (key === null) {
+      unattributed.push(task);
+      continue;
+    }
+    const bucket = byWeek.get(key);
+    if (bucket) bucket.push(task);
+    else byWeek.set(key, [task]);
+  }
+
+  const weeks: CompletedWeekGroup[] = [];
+  const currentTasks = byWeek.get(currentWeek);
+  if (currentTasks) {
+    weeks.push({ key: currentWeek, label: "This week", tasks: mostRecentFirst(currentTasks, (t) => t.completedAt ?? "") });
+  }
+  // Newest week first, and this week is already in front BY IDENTITY — a
+  // corrupt future-dated key sorts below it rather than displacing it.
+  const otherKeys = [...byWeek.keys()]
+    .filter((key) => key !== currentWeek)
+    .sort((a, b) => (a < b ? 1 : -1));
+  for (const key of otherKeys) {
+    weeks.push({
+      key,
+      label: `Week of ${weekLabel(key)}`,
+      tasks: mostRecentFirst(byWeek.get(key)!, (t) => t.completedAt ?? ""),
+    });
+  }
+
+  return {
+    pending: mostRecentFirst(pending, (t) => t.pendingApproval?.at ?? ""),
+    weeks,
+    unattributed: mostRecentFirst(unattributed, (t) => t.completedAt ?? ""),
+  };
 }
 
 export function loadTasks(): Task[] {
