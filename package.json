@@ -18,6 +18,7 @@
     "test": "vitest",
     "test:e2e": "playwright test",
     "harness:tasks": "node scripts/tasks/symptom-harness.mjs",
+    "visual:review:tasks": "npm run build && node scripts/visual-review/tasks-review.mjs --route /tasks --out /tmp/warmglass/tasks-review",
     "ai:boot": "node scripts/write-ai-boot.mjs"
   },
   "dependencies": {

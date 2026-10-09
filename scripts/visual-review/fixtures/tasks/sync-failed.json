@@ -1,0 +1,13 @@
+{
+  "status": 503,
+  "body": {
+    "ok": false,
+    "error": "rollover_unavailable",
+    "reconciled": false,
+    "repaired": [],
+    "failed": [
+      "rollover:pending"
+    ],
+    "snapshot": null
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "snapshot": {
+    "revision": "20261008002",
+    "tasks": [],
+    "weekData": {
+      "weekStart": "2026-10-05",
+      "points": {},
+      "streak": {},
+      "lastActive": {},
+      "history": []
+    }
+  },
+  "reconciled": true,
+  "repaired": [],
+  "failed": [],
+  "warnings": []
+}

@@ -1,0 +1,341 @@
+{
+  "ok": true,
+  "snapshot": {
+    "revision": "20261008001",
+    "tasks": [
+      {
+        "id": 201,
+        "title": "Feed the dog and refill the water bowl",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-10-08",
+        "points": 3,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-10-08T11:00:00.000Z",
+        "completedInWeek": "2026-10-05"
+      },
+      {
+        "id": 202,
+        "title": "Set the table for dinner",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-10-07",
+        "points": 2,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-10-07T22:10:00.000Z",
+        "completedInWeek": "2026-10-05"
+      },
+      {
+        "id": 203,
+        "title": "Put away the clean laundry and match the socks",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-10-07",
+        "points": 6,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-10-07T18:20:00.000Z",
+        "completedInWeek": "2026-10-05"
+      },
+      {
+        "id": 204,
+        "title": "Take out the kitchen compost",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-10-06",
+        "points": 3,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-10-06T19:05:00.000Z",
+        "completedInWeek": "2026-10-05"
+      },
+      {
+        "id": 205,
+        "title": "Sweep the front porch",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-10-03",
+        "points": 4,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-10-03T15:30:00.000Z",
+        "completedInWeek": "2026-09-28"
+      },
+      {
+        "id": 206,
+        "title": "Clean the bathroom mirrors",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-10-01",
+        "points": 5,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-10-01T20:00:00.000Z",
+        "completedInWeek": "2026-09-28"
+      },
+      {
+        "id": 207,
+        "title": "Match and fold the socks",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-09-29",
+        "points": 3,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-09-29T17:45:00.000Z",
+        "completedInWeek": "2026-09-28"
+      },
+      {
+        "id": 208,
+        "title": "Water the porch plants",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-09-26",
+        "points": 2,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-09-26T13:00:00.000Z",
+        "completedInWeek": "2026-09-21"
+      },
+      {
+        "id": 209,
+        "title": "Vacuum the stairs",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-09-23",
+        "points": 6,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-09-23T19:30:00.000Z",
+        "completedInWeek": "2026-09-21"
+      },
+      {
+        "id": 210,
+        "title": "Wipe the kitchen cabinets",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-09-19",
+        "points": 4,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-09-19T16:20:00.000Z",
+        "completedInWeek": "2026-09-14"
+      },
+      {
+        "id": 211,
+        "title": "Organize the board game shelf",
+        "assignee": "Rebecca (Mom)",
+        "assigneeEmoji": "🧑",
+        "due": "2026-09-16",
+        "points": 5,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Rebecca (Mom)",
+        "completedAt": "2026-09-16T14:10:00.000Z",
+        "completedInWeek": "2026-09-14"
+      },
+      {
+        "id": 9,
+        "title": "Sort the recycling into the blue bins",
+        "assignee": "Jasmine Garcia",
+        "assigneeEmoji": "👧",
+        "due": "2026-10-08",
+        "points": 4,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Jasmine Garcia",
+        "completedAt": "2026-10-08T12:59:00.000Z",
+        "completedInWeek": "2026-10-05",
+        "pendingApproval": {
+          "byName": "Jasmine Garcia",
+          "at": "2026-10-08T13:00:00.000Z",
+          "points": 4
+        }
+      },
+      {
+        "id": 3,
+        "title": "Deep clean the family room",
+        "assignee": "All",
+        "assigneeEmoji": "🤝",
+        "due": "2026-10-07",
+        "points": 5,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "high",
+        "completedBy": "Aurora Garcia",
+        "completedAt": "2026-10-07T17:59:00.000Z",
+        "completedInWeek": "2026-10-05",
+        "universal": true,
+        "crewSize": 3,
+        "crewCloseMode": "parent",
+        "crew": {
+          "members": [
+            {
+              "name": "Aurora Garcia",
+              "emoji": "🧒",
+              "joinedAt": "2026-10-06T15:00:00.000Z",
+              "checkedInAt": "2026-10-07T17:50:00.000Z"
+            },
+            {
+              "name": "Caspian Garcia",
+              "emoji": "🧒",
+              "joinedAt": "2026-10-06T15:05:00.000Z",
+              "checkedInAt": "2026-10-07T17:55:00.000Z"
+            },
+            {
+              "name": "Jasmine Garcia",
+              "emoji": "👧",
+              "joinedAt": "2026-10-06T15:10:00.000Z",
+              "checkedInAt": "2026-10-07T17:57:00.000Z"
+            }
+          ],
+          "removed": []
+        },
+        "pendingApproval": {
+          "byName": "Aurora Garcia",
+          "at": "2026-10-07T18:00:00.000Z",
+          "points": 5,
+          "crew": [
+            "Aurora Garcia",
+            "Caspian Garcia",
+            "Jasmine Garcia"
+          ]
+        }
+      },
+      {
+        "id": 12,
+        "title": "Drain the sink, wipe down all the kitchen counters, scrub the stovetop and take the rubbish out to the big bin",
+        "assignee": "Aurora Garcia",
+        "assigneeEmoji": "🧒",
+        "due": "2026-10-08",
+        "points": 9,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "high",
+        "completedBy": "Aurora Garcia",
+        "completedAt": "2026-10-08T14:29:00.000Z",
+        "completedInWeek": "2026-10-05",
+        "pendingApproval": {
+          "byName": "Aurora Garcia",
+          "at": "2026-10-08T14:30:00.000Z",
+          "points": 9
+        }
+      },
+      {
+        "id": 11,
+        "title": "Wash and vacuum the family car",
+        "assignee": "All",
+        "assigneeEmoji": "🤝",
+        "due": "2026-10-06",
+        "points": 7,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Jasmine Garcia",
+        "completedAt": "2026-10-06T16:44:00.000Z",
+        "completedInWeek": "2026-10-05",
+        "universal": true,
+        "crewSize": 3,
+        "crewCloseMode": "parent",
+        "crew": {
+          "members": [
+            {
+              "name": "Jasmine Garcia",
+              "emoji": "👧",
+              "joinedAt": "2026-10-06T09:00:00.000Z",
+              "checkedInAt": "2026-10-06T16:40:00.000Z"
+            },
+            {
+              "name": "Aurora Garcia",
+              "emoji": "🧒",
+              "joinedAt": "2026-10-06T09:05:00.000Z",
+              "checkedInAt": "2026-10-06T16:42:00.000Z"
+            }
+          ],
+          "removed": []
+        },
+        "pendingApproval": {
+          "byName": "Jasmine Garcia",
+          "at": "2026-10-06T16:45:00.000Z",
+          "points": 7,
+          "crew": [
+            "Jasmine Garcia",
+            "Aurora Garcia"
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "title": "Wipe the kitchen table after dinner",
+        "assignee": "Caspian Garcia",
+        "assigneeEmoji": "🧒",
+        "due": "2026-10-07",
+        "points": 6,
+        "recurring": null,
+        "category": "Chores",
+        "completed": true,
+        "priority": "medium",
+        "completedBy": "Caspian Garcia",
+        "completedAt": "2026-10-07T20:14:00.000Z",
+        "completedInWeek": "2026-10-05",
+        "universal": true,
+        "speedBonus": 3,
+        "pendingApproval": {
+          "byName": "Caspian Garcia",
+          "at": "2026-10-07T20:15:00.000Z",
+          "points": 9
+        }
+      }
+    ],
+    "weekData": {
+      "weekStart": "2026-10-05",
+      "points": {},
+      "streak": {},
+      "lastActive": {},
+      "history": []
+    }
+  },
+  "reconciled": true,
+  "repaired": [],
+  "failed": [],
+  "warnings": []
+}

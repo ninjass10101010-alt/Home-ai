@@ -47,6 +47,17 @@ const mockAuth = vi.hoisted(() => ({ currentUser: null as null | any, isLoggedIn
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => mockAuth }));
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
+// The U3-0 gate imports scripts/visual-review/harness.mjs, which imports the
+// probe-env map. probe-env resolves a file URL from `import.meta.url`, which
+// vitest rewrites to a non-file URL — mock the map so the contract pins can
+// import the gate without touching a browser or a real font path.
+vi.mock("../../scripts/consuela/probe-env.mjs", () => ({
+  NEXT_FONT_MOCK_PATH: "/tmp/next-font-mock.json",
+  PROBE_RUNTIME_KEYS: [],
+  SAFE_PROBE_ENV: {},
+  buildProbeEnv: () => ({}),
+}));
+
 vi.mock("@/db", () => {
   const roster = [
     { id: 1, name: "Rebecca", fullName: "Rebecca Garcia", role: "parent", emoji: "👩", color: "violet" },
@@ -252,6 +263,132 @@ describe("Tasks accent ink (visual critic 2026-10-05)", () => {
     ]) {
       const raw = read(file).match(/text-\[var\(--color-accent-(?!ink-)(amber|mint|rose|cyan|nori|violet)\)\]/g) ?? [];
       expect(raw, `${file} has no raw accent used as 12px ink`).toEqual([]);
+    }
+  });
+});
+
+// ─── U3-0: the machine gate's JSON contract ─────────────────────────────────
+// These pins keep `scripts/visual-review/tasks-review.mjs` itself under test:
+// the key surfaces a critic reads must not drift, the defaults must stay the
+// plan's flag surface, and the measurement method strings must stay in the
+// source (a critic never hand-writes a driver or a ratio table — §B).
+
+describe("the visual gate's JSON contract (U3-0)", () => {
+  const loadGate = async () => await import("../../scripts/visual-review/tasks-review.mjs");
+
+  it("pins the entry key surface and the gate keys", async () => {
+    const gate: any = await loadGate();
+    expect([...gate.GATE_KEYS]).toEqual([
+      "fixtureRendered",
+      "contrast",
+      "typeFloor",
+      "tap",
+      "overflow320",
+      "clipped",
+      "clsTwoWay",
+      "focusRing",
+      "baselineDrift",
+      "keyboard",
+    ]);
+    const skeleton = gate.buildEntrySkeleton({ role: "parent", viewport: "320x568", theme: "dark" });
+    expect(Object.keys(skeleton).sort()).toEqual([...gate.ENTRY_KEYS].sort());
+    expect(Object.keys(skeleton.gates).sort()).toEqual([...gate.GATE_KEYS].sort());
+    expect(skeleton.exitCode).toBe(1);
+    expect(skeleton.redirected).toBe(false);
+    expect(skeleton.cls).toEqual({});
+    expect(skeleton.fixture).toEqual({});
+    expect(skeleton.motion).toEqual({});
+  });
+
+  it("pins the run key surface", async () => {
+    const gate: any = await loadGate();
+    expect([...gate.RUN_KEYS]).toEqual([
+      "schema",
+      "generatedAt",
+      "route",
+      "state",
+      "wall",
+      "matrix",
+      "fixture",
+      "entries",
+      "states",
+      "summary",
+      "problems",
+      "problemsBySeverity",
+      "consoleErrors",
+      "pageErrors",
+      "failedRequests",
+      "unstubbed",
+      "gates",
+      "exitCode",
+    ]);
+  });
+
+  it("phoneSmall is required in every pass and wide1536 is a real register", async () => {
+    const gate: any = await loadGate();
+    expect(gate.resolveViewportNames("all")).toContain("phoneSmall");
+    expect(gate.resolveViewportNames("all")).toContain("wide1536");
+    expect(gate.resolveViewportNames("desktop")).toContain("phoneSmall");
+    expect(gate.VIEWPORT_REGISTER.wide1536).toEqual({ width: 1536, height: 900, label: expect.any(String) });
+  });
+
+  it("defaults match the plan's flag surface", async () => {
+    const gate: any = await loadGate();
+    const args = gate.parseArgs([]);
+    expect(args.route).toBe("/tasks");
+    expect(args.role).toBe("parent,child,guest");
+    expect(args.theme).toBe("dark,light");
+    expect(args.viewport).toBe("all");
+    expect(args.state).toBe("populated");
+    expect(args.updateBaselines).toBe(false);
+  });
+
+  it("requires the live-DOM fixture counts for the parent persona only", async () => {
+    const gate: any = await loadGate();
+    const counts = { pending: 5, solo: 3, crew: 2, bonus: 1, settled: 11, weeks: 4 };
+    expect(gate.requiredCountsFor("populated", "parent", counts)).toEqual({
+      renderedCompletedRows: 11,
+      renderedWeekGroups: 4,
+      renderedApprovalRows: 5,
+    });
+    expect(gate.requiredCountsFor("populated", "guest", counts)).toEqual({});
+    expect(gate.requiredCountsFor("sync-failed", "parent", counts)).toEqual({});
+  });
+
+  it("classifies the fixture's pending rows without touching the DOM", async () => {
+    const gate: any = await loadGate();
+    const classified = gate.classifyFixtureTasks([
+      { id: 1, points: 5, pendingApproval: { points: 5 } },
+      { id: 2, points: 6, pendingApproval: { points: 9 } },
+      { id: 3, points: 4, pendingApproval: { points: 4, crew: ["A", "B"] } },
+      { id: 4, completed: true },
+      { id: 5, completed: true, completedInWeek: "2026-10-05" },
+    ]);
+    expect(classified.counts).toEqual({ pending: 3, solo: 2, crew: 1, bonus: 1, settled: 2, weeks: 1 });
+  });
+
+  it("keeps the frame's measurement methods in the source", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.join(process.cwd(), "scripts/visual-review/tasks-review.mjs"), "utf8");
+    for (const token of [
+      "hidden-glyph-recapture",
+      "p05Luminance",
+      "hadRecentInput",
+      "forcedLayoutDisclosure",
+      "forcedLayoutResize",
+      "reducedMotionMaxTransitionMs",
+      "baselineDiffPx",
+      "renderedQueueOrder",
+      "renderedTitlesEllipsised",
+      "computeFocusRing",
+      "clsForcedSummary",
+      "getImageData",
+      "createImageBitmap",
+      "motion-baseline.json",
+      "keyboard.json",
+    ]) {
+      expect(src, token).toContain(token);
     }
   });
 });

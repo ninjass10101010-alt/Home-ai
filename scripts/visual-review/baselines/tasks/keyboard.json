@@ -1,0 +1,1426 @@
+{
+  "route": "/tasks",
+  "role": "parent",
+  "viewport": "390x844",
+  "theme": "dark",
+  "recordedAt": "2026-10-09T22:20:37.557Z",
+  "steps": [
+    {
+      "i": 1,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Add task",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 2,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Tasks",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 3,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Leaderboard",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 4,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show My Tasks's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 5,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Rebecca (Mom)'s chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 6,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Aurora's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 7,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Jeffery (Dad)'s chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 8,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Emily's chores",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 9,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Bailey's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 10,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Jasmine's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 11,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Caspian's chores",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 12,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Open's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 13,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "✓ Approve all (5)",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 14,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Sort the recycling into the blue bins",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 15,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Sort the recycling into the blue bins",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 16,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Deep clean the family room",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 17,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Deep clean the family room",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 18,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 19,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 20,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Wash and vacuum the family car",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 21,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Wash and vacuum the family car",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 22,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Wipe the kitchen table after dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 23,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Wipe the kitchen table after dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 24,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Hide completed↑",
+      "ringPx": 2,
+      "inViewport": false,
+      "ariaExpanded": "true"
+    },
+    {
+      "i": 25,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Feed the dog and refill the water bowl",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 26,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Set the table for dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 27,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Put away the clean laundry and match the socks",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 28,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Take out the kitchen compost",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 29,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Sweep the front porch",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 30,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Clean the bathroom mirrors",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 31,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Match and fold the socks",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 32,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Water the porch plants",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 33,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Vacuum the stairs",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 34,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Wipe the kitchen cabinets",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 35,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Organize the board game shelf",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 36,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "✨ Get chore ideas from Consuela",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 37,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Home",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 38,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Ask",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 39,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Meals",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 40,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Tasks",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 41,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Calendar",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 42,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "House",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 43,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Settings",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 44,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Add task",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 45,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Tasks",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 46,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Leaderboard",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 47,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show My Tasks's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 48,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Rebecca (Mom)'s chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 49,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Aurora's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 50,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Jeffery (Dad)'s chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 51,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Emily's chores",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 52,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Bailey's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 53,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Jasmine's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 54,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Caspian's chores",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 55,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Open's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 56,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "✓ Approve all (5)",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 57,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Sort the recycling into the blue bins",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 58,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Sort the recycling into the blue bins",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 59,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Deep clean the family room",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 60,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Deep clean the family room",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 61,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 62,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 63,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Wash and vacuum the family car",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 64,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Wash and vacuum the family car",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 65,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Wipe the kitchen table after dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 66,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Wipe the kitchen table after dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 67,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Hide completed↑",
+      "ringPx": 2,
+      "inViewport": false,
+      "ariaExpanded": "true"
+    },
+    {
+      "i": 68,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Feed the dog and refill the water bowl",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 69,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Set the table for dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 70,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Put away the clean laundry and match the socks",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 71,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Take out the kitchen compost",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 72,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Sweep the front porch",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 73,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Clean the bathroom mirrors",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 74,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Match and fold the socks",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 75,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Water the porch plants",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 76,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Vacuum the stairs",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 77,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Wipe the kitchen cabinets",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 78,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Organize the board game shelf",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 79,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "✨ Get chore ideas from Consuela",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 80,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Home",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 81,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Ask",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 82,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Meals",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 83,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Tasks",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 84,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Calendar",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 85,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "House",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 86,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Settings",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 87,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Add task",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 88,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Tasks",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 89,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Leaderboard",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 90,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show My Tasks's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 91,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Rebecca (Mom)'s chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 92,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Aurora's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 93,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Jeffery (Dad)'s chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 94,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Emily's chores",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 95,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Bailey's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 96,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Jasmine's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 97,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Caspian's chores",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 98,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Open's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 99,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "✓ Approve all (5)",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 100,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Sort the recycling into the blue bins",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 101,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Sort the recycling into the blue bins",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 102,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Deep clean the family room",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 103,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Deep clean the family room",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 104,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 105,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 106,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Wash and vacuum the family car",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 107,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Wash and vacuum the family car",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 108,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Wipe the kitchen table after dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 109,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Wipe the kitchen table after dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 110,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Hide completed↑",
+      "ringPx": 2,
+      "inViewport": false,
+      "ariaExpanded": "true"
+    },
+    {
+      "i": 111,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Feed the dog and refill the water bowl",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 112,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Set the table for dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 113,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Put away the clean laundry and match the socks",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 114,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Take out the kitchen compost",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 115,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Sweep the front porch",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 116,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Clean the bathroom mirrors",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 117,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Match and fold the socks",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 118,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Water the porch plants",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 119,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Vacuum the stairs",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 120,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Wipe the kitchen cabinets",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 121,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Organize the board game shelf",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 122,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "✨ Get chore ideas from Consuela",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 123,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Home",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 124,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Ask",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 125,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Meals",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 126,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Tasks",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 127,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Calendar",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 128,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "House",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 129,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Settings",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 130,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Add task",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 131,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Tasks",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 132,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Leaderboard",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 133,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show My Tasks's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 134,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Rebecca (Mom)'s chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 135,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Aurora's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 136,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Jeffery (Dad)'s chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 137,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Emily's chores",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 138,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Bailey's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 139,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Jasmine's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 140,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Caspian's chores",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 141,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Show Open's chores",
+      "ringPx": 0,
+      "inViewport": true,
+      "ariaExpanded": null
+    },
+    {
+      "i": 142,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "✓ Approve all (5)",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 143,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Sort the recycling into the blue bins",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 144,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Sort the recycling into the blue bins",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 145,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Deep clean the family room",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 146,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Deep clean the family room",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 147,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 148,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 149,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Wash and vacuum the family car",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 150,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Wash and vacuum the family car",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 151,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Approve Wipe the kitchen table after dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 152,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Send back Wipe the kitchen table after dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 153,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Hide completed↑",
+      "ringPx": 2,
+      "inViewport": false,
+      "ariaExpanded": "true"
+    },
+    {
+      "i": 154,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Feed the dog and refill the water bowl",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 155,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Set the table for dinner",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 156,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Put away the clean laundry and match the socks",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    },
+    {
+      "i": 157,
+      "key": "Tab",
+      "activeElement": "button",
+      "accessibleName": "Undo completion of Take out the kitchen compost",
+      "ringPx": 0,
+      "inViewport": false,
+      "ariaExpanded": null
+    }
+  ],
+  "escapeReturnsFocus": true,
+  "orderViolations": [],
+  "unreachable": [],
+  "unlabelled": []
+}

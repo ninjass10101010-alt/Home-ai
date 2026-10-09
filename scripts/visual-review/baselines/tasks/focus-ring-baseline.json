@@ -1,0 +1,774 @@
+{
+  "route": "/tasks",
+  "recordedAt": "2026-10-09T22:20:39.404Z",
+  "rings": {
+    "parent|320x568|dark": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.39,
+        "deltaLuminanceBorderOut": 95.82
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.01,
+        "deltaLuminanceBorderOut": 98.14
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.39,
+        "deltaLuminanceBorderOut": 98.39
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.02,
+        "deltaLuminanceBorderOut": 98.23
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.48,
+        "deltaLuminanceBorderOut": 98.42
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.61,
+        "deltaLuminanceBorderOut": 98.71
+      }
+    },
+    "parent|320x568|light": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 95.39,
+        "deltaLuminanceBorderOut": 23
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 15.53,
+        "deltaLuminanceBorderOut": 13.85
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 14.32,
+        "deltaLuminanceBorderOut": 13.09
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      }
+    },
+    "parent|390x844|dark": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.39,
+        "deltaLuminanceBorderOut": 95.86
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.28,
+        "deltaLuminanceBorderOut": 20.43
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.76,
+        "deltaLuminanceBorderOut": 20.78
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.09,
+        "deltaLuminanceBorderOut": 98.23
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.5,
+        "deltaLuminanceBorderOut": 98.5
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.18,
+        "deltaLuminanceBorderOut": 98.32
+      }
+    },
+    "parent|390x844|light": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 95.36,
+        "deltaLuminanceBorderOut": 22.4
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 75.98,
+        "deltaLuminanceBorderOut": 75.08
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 11.49,
+        "deltaLuminanceBorderOut": 10.9
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      }
+    },
+    "parent|768x1024|dark": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 14.76,
+        "deltaLuminanceBorderOut": 18.66
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.56,
+        "deltaLuminanceBorderOut": 20.85
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.93,
+        "deltaLuminanceBorderOut": 21.05
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.64,
+        "deltaLuminanceBorderOut": 20.92
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.94,
+        "deltaLuminanceBorderOut": 21.06
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.66,
+        "deltaLuminanceBorderOut": 98.79
+      }
+    },
+    "parent|768x1024|light": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 8.81,
+        "deltaLuminanceBorderOut": 65.59
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 76.57,
+        "deltaLuminanceBorderOut": 74.48
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.41,
+        "deltaLuminanceBorderOut": 75.55
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      }
+    },
+    "parent|1280x900|dark": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 14.76,
+        "deltaLuminanceBorderOut": 18.65
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.58,
+        "deltaLuminanceBorderOut": 20.92
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 21.01,
+        "deltaLuminanceBorderOut": 21.01
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.66,
+        "deltaLuminanceBorderOut": 21
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 21.06,
+        "deltaLuminanceBorderOut": 21.08
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.67,
+        "deltaLuminanceBorderOut": 21.05
+      }
+    },
+    "parent|1280x900|light": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 8.81,
+        "deltaLuminanceBorderOut": 66.92
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.29,
+        "deltaLuminanceBorderOut": 74.72
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 78.07,
+        "deltaLuminanceBorderOut": 75.79
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      }
+    },
+    "parent|1536x900|dark": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.39,
+        "deltaLuminanceBorderOut": 96.15
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.18,
+        "deltaLuminanceBorderOut": 98.48
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.64,
+        "deltaLuminanceBorderOut": 98.62
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.26,
+        "deltaLuminanceBorderOut": 98.55
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.71,
+        "deltaLuminanceBorderOut": 98.69
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.64,
+        "deltaLuminanceBorderOut": 20.93
+      }
+    },
+    "parent|1536x900|light": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 95.29,
+        "deltaLuminanceBorderOut": 20.2
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 10.96,
+        "deltaLuminanceBorderOut": 11.85
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.95,
+        "deltaLuminanceBorderOut": 10.78
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      }
+    },
+    "parent|1920x1080|dark": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.39,
+        "deltaLuminanceBorderOut": 96.19
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.18,
+        "deltaLuminanceBorderOut": 98.55
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.64,
+        "deltaLuminanceBorderOut": 98.64
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.27,
+        "deltaLuminanceBorderOut": 98.63
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.71,
+        "deltaLuminanceBorderOut": 98.71
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.27,
+        "deltaLuminanceBorderOut": 98.68
+      }
+    },
+    "parent|1920x1080|light": {
+      "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 95.29,
+        "deltaLuminanceBorderOut": 20.43
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 10.78,
+        "deltaLuminanceBorderOut": 11.85
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Deep clean the family room\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Send back Deep clean the family room\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.95,
+        "deltaLuminanceBorderOut": 10.78
+      },
+      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 0,
+        "deltaLuminanceBorderIn": 0,
+        "deltaLuminanceBorderOut": 0
+      }
+    },
+    "guest|320x568|dark": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.9,
+        "deltaLuminanceBorderOut": 18.01
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.71,
+        "deltaLuminanceBorderOut": 20.72
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.53,
+        "deltaLuminanceBorderOut": 93.54
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.79,
+        "deltaLuminanceBorderOut": 20.88
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.61,
+        "deltaLuminanceBorderOut": 93.62
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.86,
+        "deltaLuminanceBorderOut": 20.88
+      }
+    },
+    "guest|320x568|light": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.33,
+        "deltaLuminanceBorderOut": 63.64
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 75.4,
+        "deltaLuminanceBorderOut": 74.33
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 75.4,
+        "deltaLuminanceBorderOut": 75.76
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 69.79,
+        "deltaLuminanceBorderOut": 66.45
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 75.93,
+        "deltaLuminanceBorderOut": 75.76
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 70.53,
+        "deltaLuminanceBorderOut": 66.56
+      }
+    },
+    "guest|390x844|dark": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.79,
+        "deltaLuminanceBorderOut": 18.03
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.98,
+        "deltaLuminanceBorderOut": 92.91
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.79,
+        "deltaLuminanceBorderOut": 20.86
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.05,
+        "deltaLuminanceBorderOut": 92.99
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.86,
+        "deltaLuminanceBorderOut": 20.86
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.06,
+        "deltaLuminanceBorderOut": 93
+      }
+    },
+    "guest|390x844|light": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 81.19,
+        "deltaLuminanceBorderOut": 62.87
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 76.17,
+        "deltaLuminanceBorderOut": 75.4
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 70.59,
+        "deltaLuminanceBorderOut": 66.62
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 76.17,
+        "deltaLuminanceBorderOut": 76
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 71.34,
+        "deltaLuminanceBorderOut": 66.56
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 76.71,
+        "deltaLuminanceBorderOut": 76.17
+      }
+    },
+    "guest|768x1024|dark": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.92,
+        "deltaLuminanceBorderOut": 18.03
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.83,
+        "deltaLuminanceBorderOut": 20.92
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.91,
+        "deltaLuminanceBorderOut": 20.93
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.93,
+        "deltaLuminanceBorderOut": 20.99
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.98,
+        "deltaLuminanceBorderOut": 21
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.98,
+        "deltaLuminanceBorderOut": 20.99
+      }
+    },
+    "guest|768x1024|light": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 81.19,
+        "deltaLuminanceBorderOut": 64.34
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.58,
+        "deltaLuminanceBorderOut": 60.78
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.58,
+        "deltaLuminanceBorderOut": 60.78
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.63,
+        "deltaLuminanceBorderOut": 60.94
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.51,
+        "deltaLuminanceBorderOut": 61.4
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.74,
+        "deltaLuminanceBorderOut": 61.42
+      }
+    },
+    "guest|1280x900|dark": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.93,
+        "deltaLuminanceBorderOut": 18.09
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.11,
+        "deltaLuminanceBorderOut": 93.11
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.11,
+        "deltaLuminanceBorderOut": 93.11
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.11,
+        "deltaLuminanceBorderOut": 93.19
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.18,
+        "deltaLuminanceBorderOut": 93.19
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.19,
+        "deltaLuminanceBorderOut": 93.19
+      }
+    },
+    "guest|1280x900|light": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 79.47,
+        "deltaLuminanceBorderOut": 64.88
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 76.64,
+        "deltaLuminanceBorderOut": 77.24
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.24,
+        "deltaLuminanceBorderOut": 77.85
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.24,
+        "deltaLuminanceBorderOut": 77.85
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.36,
+        "deltaLuminanceBorderOut": 77.96
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.36,
+        "deltaLuminanceBorderOut": 77.96
+      }
+    },
+    "guest|1536x900|dark": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.89,
+        "deltaLuminanceBorderOut": 17.98
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.84,
+        "deltaLuminanceBorderOut": 20.91
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.91,
+        "deltaLuminanceBorderOut": 20.93
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.91,
+        "deltaLuminanceBorderOut": 21
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.98,
+        "deltaLuminanceBorderOut": 21.01
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.99,
+        "deltaLuminanceBorderOut": 21.01
+      }
+    },
+    "guest|1536x900|light": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 79.47,
+        "deltaLuminanceBorderOut": 64.95
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.8,
+        "deltaLuminanceBorderOut": 60.78
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.8,
+        "deltaLuminanceBorderOut": 60.94
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.8,
+        "deltaLuminanceBorderOut": 60.94
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.57,
+        "deltaLuminanceBorderOut": 62
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.8,
+        "deltaLuminanceBorderOut": 61.47
+      }
+    },
+    "guest|1920x1080|dark": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.93,
+        "deltaLuminanceBorderOut": 18.09
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.37,
+        "deltaLuminanceBorderOut": 92.52
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.43,
+        "deltaLuminanceBorderOut": 92.52
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.44,
+        "deltaLuminanceBorderOut": 92.52
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.44,
+        "deltaLuminanceBorderOut": 92.57
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.5,
+        "deltaLuminanceBorderOut": 92.59
+      }
+    },
+    "guest|1920x1080|light": {
+      "button.mb-3.flex.min-h-[44px] \"Hide completed↑\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.94,
+        "deltaLuminanceBorderOut": 64.88
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.92,
+        "deltaLuminanceBorderOut": 17.53
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.75,
+        "deltaLuminanceBorderOut": 17.37
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.75,
+        "deltaLuminanceBorderOut": 17.43
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 10.66,
+        "deltaLuminanceBorderOut": 17.53
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.81,
+        "deltaLuminanceBorderOut": 16.84
+      }
+    }
+  }
+}
