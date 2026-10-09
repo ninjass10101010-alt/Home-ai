@@ -5,6 +5,8 @@ import { act } from "react";
 import type { ReactElement } from "react";
 import { localWeekStartISO } from "@/lib/local-date";
 import { todayISO } from "@/lib/task-utils";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-command-store";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -95,6 +97,8 @@ function storedTasks(): any[] { return JSON.parse(localStorage.getItem("consuela
 beforeEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
+  __resetTaskOutboxForTests();
+  __resetTaskCommandCredentialsForTests();
   vi.unstubAllGlobals();
   CLAIM_CALLS.length = 0;
   mockAuth.currentUser = null;
@@ -143,7 +147,7 @@ describe("Crew tasks — open board + join/check-in", () => {
     await settle(1800);
   });
 
-  it("accepts a 202 reconciled crew projection without treating it as a claim failure", async () => {
+  it("retries a 202 that did not reconcile without calling it a claim failure", async () => {
     mockAuth.currentUser = { name: "Caspian Garcia", role: "child", age: 5 };
     mockAuth.isLoggedIn = true;
     seed([CREW]);
@@ -176,6 +180,9 @@ describe("Crew tasks — open board + join/check-in", () => {
 
     expect(CLAIM_CALLS[0]).toMatchObject({ action: "crew-join", taskId: 40 });
     expect(document.body.textContent || "").not.toContain("Couldn't reach");
+    // B1a D4: unreconciled 2xx answers are retried, never banked.
+    expect(listTaskOutbox()[0]?.status).toBe("retrying");
+    expect(listTaskOutbox()[0]?.lastErrorReason).toBe("projection_pending");
     await settle(1800);
   });
 

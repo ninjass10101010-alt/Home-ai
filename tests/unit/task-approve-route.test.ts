@@ -1612,6 +1612,34 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(body.cleared).toBe(0);
     expect(points()["Caspian Garcia"]).toBeUndefined();
   });
+
+  it("the response's clearedTasks carries the awarded amount for each row", async () => {
+    // A speed-bonus claim: the row's base is 5, the pending record will pay 7.
+    // The ack persists the paid amount on the row it names, so the card can
+    // stay honest after approval clears `pendingApproval` (B1a D3).
+    const bonusTask = pendingTaskRow({
+      points: 5,
+      pendingApproval: { byName: "Caspian Garcia", at: "2026-09-19T18:00:00.000Z", points: 7 },
+    });
+    const { pb, history } = makePb({ snapshotTasks: [bonusTask], collectionTask: null });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+
+    const res = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-award-amount",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.clearedTasks).toHaveLength(1);
+    expect(body.clearedTasks[0].awardedPoints).toBe(7);
+    const earned = history().filter((transaction: any) => transaction.type === "earn");
+    expect(earned).toHaveLength(1);
+    expect(earned[0].amount).toBe(7);
+  });
 });
 
 describe("POST /api/tasks/approve — action:send-back", () => {

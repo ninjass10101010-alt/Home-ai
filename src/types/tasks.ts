@@ -14,6 +14,10 @@ export interface Task {
   completedBy?: string;
   completedAt?: string;
   completedInWeek?: string;
+  // The amount approval actually paid for this occurrence, persisted so the
+  // card stays honest after `pendingApproval` is cleared. Cleared by the next
+  // tap / reopen / recurring clone — it describes ONE occurrence's award.
+  awardedPoints?: number | null;
   universal?: boolean;
   stealable?: boolean;
   pendingApproval?: PendingApproval;

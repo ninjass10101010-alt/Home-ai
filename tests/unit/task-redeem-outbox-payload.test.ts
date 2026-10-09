@@ -379,8 +379,9 @@ describe("one operation id is one redemption (the double-tap window)", () => {
   });
 });
 
-describe("a redemption is adopted only on a 200 or a 202", () => {
-  it("a 202 (canonical write landed, projection repair pending) is acknowledged and adopted once", async () => {    const harness = makePb({ snapshotFails: true });
+describe("a redemption is adopted only on a fully reconciled response", () => {
+  it("a 202 whose projection repair is pending is a RETRY, not a banked success", async () => {
+    const harness = makePb({ snapshotFails: true });
     mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
     const posted: PostedRequest[] = [];
     redeemEntry("op-202-1", { parentName: PARENT });
@@ -388,22 +389,21 @@ describe("a redemption is adopted only on a 200 or a 202", () => {
 
     const result = await withDriver(harnessDriver(harness, posted), () => flushTaskOutbox());
 
-    expect(result).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    // B1a D4: a 2xx that did not reconcile must not be acknowledged — the
+    // kitchen display never received it — so the entry stays durable and
+    // retries instead of vanishing as a silent success.
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
     expect(posted).toHaveLength(1);
     expect(harness.snapshotWrites()).toBeGreaterThan(0);
-    expect(harness.readPoints()[MEMBER]).toBe(350);
-    expect(listTaskOutbox()).toHaveLength(0);
-
-    const adopted = localWeek();
-    expect(adopted.points[MEMBER]).toBe(350);
-    expect(
-      adopted.history.filter((tx: any) => tx.meta?.operationId === "op-202-1"),
-    ).toHaveLength(1);
-    expect(adopted.history.filter((tx: any) => tx.type === "redeem")).toHaveLength(1);
-    expect(adopted.history.filter((tx: any) => tx.operationId !== undefined)).toHaveLength(0);
+    const entry = listTaskOutbox()[0];
+    expect(entry.status).toBe("retrying");
+    expect(entry.lastErrorReason).toBe("projection_pending");
+    // Nothing is banked device-side until a reconciled answer lands.
+    expect(localWeek().points[MEMBER]).toBe(500);
+    expect(localWeek().history).toHaveLength(0);
   });
 
-  it("a non-queued 202 is an acknowledgement — the local projection-retention path is gone", async () => {
+  it("a non-queued 202 with reconciled:false stays retryable with the server's sentence", async () => {
     const harness = makePb();
     mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
     const posted: PostedRequest[] = [];
@@ -412,12 +412,23 @@ describe("a redemption is adopted only on a 200 or a 202", () => {
 
     const result = await withDriver(harnessDriver(harness, posted, async () => ({
       status: 202,
-      body: { ok: true, operationId: "op-202-bare-1", applied: true, duplicate: false, reconciled: false, repairRequired: true },
+      body: {
+        ok: true,
+        operationId: "op-202-bare-1",
+        applied: true,
+        duplicate: false,
+        reconciled: false,
+        repairRequired: true,
+        error: "1 approval did not reach the kitchen display yet. Consuela is still retrying.",
+      },
     })), () => flushTaskOutbox());
 
-    expect(result).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
     expect(posted).toHaveLength(1);
-    expect(listTaskOutbox()).toHaveLength(0);
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(listTaskOutbox()[0].status).toBe("retrying");
+    expect(listTaskOutbox()[0].lastErrorReason).toBe("projection_pending");
+    expect(listTaskOutbox()[0].lastErrorMessage).toContain("did not reach the kitchen display");
     expect(localWeek().points[MEMBER]).toBe(500);
     expect(localWeek().history).toHaveLength(0);
   });

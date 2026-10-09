@@ -191,6 +191,7 @@ export const COLLECTIONS = [
       { name: "completedInWeek", type: "text" },
       { name: "completedBy", type: "text" },
       { name: "completedAt", type: "text" },
+      { name: "awardedPoints", type: "number" },
       { name: "assigned", type: "text" },
       { name: "crewSize", type: "number" },
       // crew = { members: [{ name, emoji, joinedAt, checkedInAt? }], removed?: string[] }

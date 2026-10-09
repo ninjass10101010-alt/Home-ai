@@ -46,6 +46,12 @@ export type ApproveAction = "approve" | "approve-all" | "send-back";
 
 const APPROVAL_REPAIR_ACTIONS = new Set<string>(["approve", "approve-all", "send-back"]);
 
+// The claim stamp and the approval proof are both server-authored, so the only
+// drift between them is a clock step (NTP). A pending stamped within this
+// window after the proof is the same tap this command paid — not a re-tap
+// (the re-tap hazard this guard exists for is minutes-to-hours later).
+const APPROVAL_PROOF_SKEW_MS = 5_000;
+
 export interface ApproveCommand {
   operationId: string;
   action: ApproveAction;
@@ -61,6 +67,8 @@ export interface ApproveResponse {
   weekData: WeekData;
   paid: number;
   cleared: number;
+  /** Every row this command cleared, one leg per task (approve-all names all). */
+  clearedTasks?: SnapshotTask[];
   /** Award-list members dropped between close and approval (0 ⇒ omitted). */
   skipped?: number;
   reconciled: boolean;
@@ -95,6 +103,7 @@ export interface ApprovalServiceResult {
   weekData: WeekData;
   paid: number;
   cleared: number;
+  clearedTasks?: SnapshotTask[];
   skipped: number;
   reconciled: boolean;
   repairRequired: boolean;
@@ -789,7 +798,9 @@ function hasLaterPending(task: SnapshotTask, transactions: Transaction[]): boole
     (latest, transaction) => Date.parse(transaction.timestamp) > latest ? Date.parse(transaction.timestamp) : latest,
     0,
   );
-  return Date.parse(pendingAt) > proofAt;
+  // Same skew window as approvalPatch's replay gate: a pending stamped just
+  // after the proof is this command's own tap, not a newer re-tap.
+  return Date.parse(pendingAt) > proofAt + APPROVAL_PROOF_SKEW_MS;
 }
 
 async function resolveTasks(
@@ -1020,6 +1031,10 @@ interface SnapshotPatch {
   allowInsert: boolean;
   receiptOnly?: boolean;
   shouldApply: (task: SnapshotTask) => boolean;
+  /** True when the row already sits in this patch's desired end state — a
+   *  writer between prepare and write cleared it. The write is idempotent and
+   *  the row still counts as cleared (that IS the state this command wanted). */
+  alreadySatisfied?: (task: SnapshotTask) => boolean;
 }
 
 interface SnapshotWriteOutcome {
@@ -1136,7 +1151,7 @@ async function writeApprovalSnapshot(
           cleared += 1;
           continue;
         }
-        if (!patch.shouldApply(current)) continue;
+        if (!patch.shouldApply(current) && !patch.alreadySatisfied?.(current)) continue;
         const index = tasks.findIndex((task) => Number(task.id) === patch.id);
         tasks[index] = { ...current, ...patch.values } as SnapshotTask;
         cleared += 1;
@@ -1245,6 +1260,8 @@ function approvalPatch(prepared: PreparedTask, sendBack: boolean): SnapshotPatch
         completedInWeek: null,
         pendingApproval: null,
         sentBackAt: new Date().toISOString(),
+        // Nothing was given, so no award may describe this reopen.
+        awardedPoints: null,
         ...(crew !== undefined ? { crew } : {}),
       },
       shouldApply: (current) => {
@@ -1267,7 +1284,13 @@ function approvalPatch(prepared: PreparedTask, sendBack: boolean): SnapshotPatch
       shouldApply: () => false,
     };
   }
-  const values = { pendingApproval: null, sentBackAt: null };
+  const values = {
+    pendingApproval: null,
+    sentBackAt: null,
+    // The amount approval is paying, persisted so the card stays honest after
+    // `pendingApproval` is cleared. The send-back arm above clears it.
+    awardedPoints: prepared.intent?.amount ?? task.points,
+  };
   return {
     id: prepared.id,
     task,
@@ -1281,10 +1304,16 @@ function approvalPatch(prepared: PreparedTask, sendBack: boolean): SnapshotPatch
           (latest, transaction) => Date.parse(transaction.timestamp) > latest ? Date.parse(transaction.timestamp) : latest,
           0,
         );
-        return pendingAt !== null && Date.parse(pendingAt) <= proofAt;
+        // The skew window: both stamps are server time, so a pending a few
+        // seconds "after" the proof is a clock step, not a newer tap.
+        return pendingAt !== null && Date.parse(pendingAt) <= proofAt + APPROVAL_PROOF_SKEW_MS;
       }
       return taskIsPending(current as any);
     },
+    alreadySatisfied: (current) =>
+      (current as any).completed === true &&
+      ((current as any).pendingApproval ?? null) === null &&
+      ((current as any).sentBackAt ?? null) === null,
   };
 }
 
@@ -1346,6 +1375,7 @@ function success(
   duplicate = false,
   task?: SnapshotTask | null,
   noCurrentTask = false,
+  clearedTasks: SnapshotTask[] = [],
 ): ApprovalServiceResult {
   return {
     ok: true,
@@ -1354,6 +1384,7 @@ function success(
     weekData,
     paid,
     cleared,
+    clearedTasks,
     skipped,
     reconciled,
     repairRequired: !reconciled,
@@ -1380,6 +1411,7 @@ async function executeSendBack(
     return success(command, prepared.week, 0, 0, 0, true);
   }
   let cleared = 0;
+  let clearedTasks: SnapshotTask[] = [];
   let projectionFailures: number[] = [];
   let snapshotDurable = true;
   let projectedTask: SnapshotTask | null = null;
@@ -1397,9 +1429,11 @@ async function executeSendBack(
     const failed: number[] = [];
     for (const item of activeItems) {
       const patch = patches.find((candidate) => candidate.id === item.id);
+      const target = projectedTaskForPatch(item, patch);
+      if (target) clearedTasks.push(target);
       const projected = await projectCanonicalTaskToPB(
         pb,
-        projectedTaskForPatch(item, patch),
+        target,
         item.id,
         preloadedTaskRows,
       );
@@ -1423,9 +1457,9 @@ async function executeSendBack(
     return failure(command.operationId, command.action, "snapshot_write_failed", prepared.week);
   }
   if (!outcome) {
-    return success(command, prepared.week, 0, cleared, 0, false, projectionFailures, false, projectedTask, noCurrentTask);
+    return success(command, prepared.week, 0, cleared, 0, false, projectionFailures, false, projectedTask, noCurrentTask, clearedTasks);
   }
-  return success(command, prepared.week, 0, cleared, 0, true, [], false, projectedTask, noCurrentTask);
+  return success(command, prepared.week, 0, cleared, 0, true, [], false, projectedTask, noCurrentTask, clearedTasks);
 }
 
 function hasUnreplayedSemanticDuplicate(
@@ -1473,6 +1507,7 @@ async function executeApproval(
   const entries = replayEntries.entries;
   const beforeIds = new Set(prepared.week.history.map((transaction) => transaction.id));
   let cleared = 0;
+  let clearedTasks: SnapshotTask[] = [];
   let projectionFailures: number[] = [];
   let projectedTask: SnapshotTask | null = null;
   let noCurrentTask = false;
@@ -1497,6 +1532,9 @@ async function executeApproval(
     for (const item of active) {
       const patch = patches.find((candidate) => candidate.id === item.id);
       const target = projectedTaskForPatch(item, patch);
+      // Every ACTIVE row gets a leg in the ack, cleared or not: the device's
+      // own freshness guard decides whether it may wipe its local pending.
+      if (target) clearedTasks.push(target);
       const projected = await projectCanonicalTaskToPB(pb, target, item.id, preloadedTaskRows);
       if (!projected) failed.push(item.id);
     }
@@ -1555,21 +1593,13 @@ async function executeApproval(
     } catch {
       projectionFailures = active.map((item) => item.id);
     }
-    try {
-      const current = await withAdmin((pb) => readProjectedTask(pb, active[0].id));
-      projectedTask = current.task;
-      noCurrentTask = current.noCurrentTask;
-    } catch {
-      noCurrentTask = active[0].task === null;
-    }
-  } else {
-    try {
-      const current = await withAdmin((pb) => readProjectedTask(pb, active[0].id));
-      projectedTask = current.task;
-      noCurrentTask = current.noCurrentTask;
-    } catch {
-      noCurrentTask = active[0].task === null;
-    }
+  }
+  try {
+    const current = await withAdmin((pb) => readProjectedTask(pb, active[0].id));
+    projectedTask = current.task;
+    noCurrentTask = current.noCurrentTask;
+  } catch {
+    noCurrentTask = active[0].task === null;
   }
 
   const paid = replayOnly ? 0 : result?.weekData.history.filter(
@@ -1589,6 +1619,7 @@ async function executeApproval(
     result?.duplicate ?? false,
     projectedTask,
     noCurrentTask,
+    clearedTasks,
   );
 }
 

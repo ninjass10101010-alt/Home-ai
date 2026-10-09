@@ -421,8 +421,8 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     expect(listTaskOutbox()).toHaveLength(1);
 
     redeemResult = {
-      status: 202,
-      body: { ok: true, applied: true, duplicate: false, reconciled: false, weekData: REDEEMED_WEEK },
+      status: 200,
+      body: { ok: true, applied: true, duplicate: false, reconciled: true, weekData: REDEEMED_WEEK },
     };
     await pressButton("Redeem", () => expect(listTaskOutbox()).toHaveLength(0));
 
@@ -444,10 +444,10 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     expect(dump).not.toContain("0000");
   });
 
-  it("adopts 202 and never creates a second local transaction", async () => {
+  it("adopts a reconciled redemption and never creates a second local transaction", async () => {
     redeemResult = {
-      status: 202,
-      body: { ok: true, applied: true, duplicate: false, reconciled: false, weekData: REDEEMED_WEEK },
+      status: 200,
+      body: { ok: true, applied: true, duplicate: false, reconciled: true, weekData: REDEEMED_WEEK },
     };
     stubFetch();
     await renderAsync(<RewardsShop />);

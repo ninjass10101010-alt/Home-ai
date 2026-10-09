@@ -48,11 +48,11 @@ export type TaskOutboxErrorCategory =
   | "projection";
 
 /**
- * The command statuses a client store entry can hold. The legacy client outbox
- * also had `auth-required`; the server-queue world refuses a bad PIN at TAP
- * time instead of parking the command, so that status is never set anymore —
- * it stays in the union only so existing consumer filters keep compiling, and
- * every producer now maps it to `failed` with the server's reason.
+ * The command statuses a client store entry can hold. A wrong PIN answers at
+ * TAP time (a terminal `failed`), so `auth-required` is only ever set when a
+ * PIN-requiring command has NO credential at all — the reload case: the entry
+ * survives in localStorage, the in-memory PIN does not, so the send asks the
+ * family for the PIN again instead of dying as an anonymous refusal.
  */
 export type TaskOutboxStatus =
   | "queued"
@@ -117,6 +117,14 @@ export interface TaskOutboxAcknowledgement {
   operationId: string;
   weekData?: WeekData;
   task?: Task;
+  /** Every row a batched command (approve-all) cleared, one leg per task. */
+  clearedTasks?: Task[];
+  /**
+   * The instant the command this ack answers was created (the client entry's
+   * `createdAt`, or the server queue row's `created`). The ack-clear guard
+   * refuses to clear a local row that was tapped AFTER this instant.
+   */
+  commandCreatedAt?: string;
   /** The tombstoned task on a delete ack (attached by the store). */
   taskId?: number;
   revision?: SnapshotRevision;
@@ -157,6 +165,8 @@ export interface TaskOutboxAcknowledgedEvent {
   evicted?: boolean;
   reason?: string;
   category?: TaskOutboxErrorCategory;
+  /** The server's own sentence on a 2xx that still needs to be told (D4). */
+  error?: string;
 }
 
 const CLAIM_PAYLOAD_KEYS: Record<string, readonly string[]> = {
@@ -426,6 +436,25 @@ const CREDENTIAL_BODY_KEYS: Record<string, readonly (keyof TaskOutboxCredential)
   "/api/rewards/redeem": ["pin", "parentPin"],
 };
 
+/**
+ * Operations whose route parser refuses a credential-less body outright
+ * (`/api/tasks/approve` and `/api/tasks/ledger` both `requireCredentials`).
+ * A stored entry for one of these can only ever send with a credential, so a
+ * 401 with no credential in memory means "the PIN is gone, ask again" — never
+ * a terminal refusal and never a network expiry.
+ */
+const CREDENTIAL_REQUIRED_OPERATIONS: ReadonlySet<string> = new Set([
+  "/api/tasks/approve:approve",
+  "/api/tasks/approve:approve-all",
+  "/api/tasks/approve:send-back",
+  "/api/tasks/ledger:penalty",
+  "/api/tasks/ledger:adjust",
+]);
+
+export function taskOperationRequiresCredential(route: string, action: string): boolean {
+  return CREDENTIAL_REQUIRED_OPERATIONS.has(`${route}:${action}`);
+}
+
 function normalizeCredentialBundle(value: TaskOutboxCredential | undefined): TaskOutboxCredential | null {
   if (!value || typeof value !== "object") return null;
   const pin = typeof value.pin === "string" && value.pin.trim() ? value.pin.trim() : "";
@@ -493,10 +522,9 @@ function normalizeIso(value: unknown): string | null {
 }
 
 /**
- * Parse one persisted entry. The legacy `auth-required` status maps to
- * `failed` — the server-queue world never parks a command on a missing PIN,
- * so an old row carrying it is surfaced as an honest refusal the family can
- * cancel or retry.
+ * Parse one persisted entry. `auth-required` survives a reload verbatim: the
+ * entry is waiting for a PIN the process no longer holds, which is a state the
+ * family can act on — not a terminal refusal.
  */
 export function parseTaskOperationEntry(value: unknown): TaskOutboxEntry | null {
   if (!isRecord(value) || value.version !== 1) return null;
@@ -506,7 +534,7 @@ export function parseTaskOperationEntry(value: unknown): TaskOutboxEntry | null 
   const createdAt = normalizeIso(value.createdAt);
   if (!operationId || !createdAt || !isSupportedTaskOperation(route, action)) return null;
   const rawStatus = String(value.status);
-  const status = rawStatus === "auth-required" ? "failed" : STATUSES.has(rawStatus) ? rawStatus : "queued";
+  const status = STATUSES.has(rawStatus) ? rawStatus : "queued";
   const attemptCount = Math.max(
     0,
     Math.min(1_000, Math.floor(typeof value.attemptCount === "number" ? value.attemptCount : 0)),

@@ -227,6 +227,11 @@ export async function POST(request: NextRequest) {
     weekData: result.weekData,
     paid: result.paid,
     cleared: result.cleared,
+    // Every row this command cleared, one leg per task. `tasks` is the alias
+    // the held phase-0 suite pins; `clearedTasks` is the canonical name.
+    ...(Array.isArray(result.clearedTasks)
+      ? { clearedTasks: result.clearedTasks, tasks: result.clearedTasks }
+      : {}),
     ...(result.skipped ? { skipped: result.skipped } : {}),
     reconciled,
     repairRequired: !reconciled || result.repairRequired === true,

@@ -271,37 +271,36 @@ describe("B1 — GET /api/tasks/sync is authorized BEFORE any of its three write
   });
 });
 
-describe("B2 — an UNRECONCILED sync read never answers 200", () => {
-  it("does not answer 200 and still carries the full body", async () => {
+describe("B1a — a projection-repair pending sync read still hands over its snapshot", () => {
+  it("answers 200 with the full body when only the projection leg is unreconciled", async () => {
     mocks.reconcileTaskProjectionLocked.mockResolvedValue(
       happyReconcile({ ok: false, reconciled: false, failed: ["tasks:read"] }),
     );
 
     const res = await SYNC_GET(syncRequest());
 
-    expect(res.status).not.toBe(200);
-    expect(res.status).toBe(503);
+    // B1a (2026-10-09): the snapshot was read successfully and is the family's
+    // truth; a pending mirror repair is a warning, not a withheld read.
+    expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       ok: false,
       error: "projection_reconcile_pending",
       retryable: true,
-      // The partial truth still ships on the non-200, so a caller that wants
-      // it can read it — the STATUS is what no longer lies.
       snapshot: { tasks: [{ id: "t1" }] },
       reconciled: false,
       repaired: [],
-      failed: ["tasks:read"],
-      warnings: [],
+      failed: [],
+      warnings: ["projection_reconcile_pending", "tasks:read"],
     });
   });
 
-  it("a reconciled read is the ONLY shape that answers 200", async () => {
+  it("a reconciled read answers 200 with clean categories", async () => {
     const res = await SYNC_GET(syncRequest());
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, reconciled: true });
+    expect(await res.json()).toMatchObject({ ok: true, reconciled: true, failed: [], warnings: [] });
   });
 
-  it("an unreconciled ROLLOVER is not 200 either", async () => {
+  it("an unreconciled ROLLOVER is still not 200", async () => {
     mocks.ensureCurrentTaskWeek.mockResolvedValue(
       happyRollover({ reconciled: false, failed: ["week_archive:invalid"] }),
     );

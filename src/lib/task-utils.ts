@@ -548,6 +548,30 @@ export function unionCrewMembers(a: CrewMember[], b: CrewMember[]): CrewMember[]
 }
 
 /**
+ * May this acknowledgement's clear be adopted for `local`?
+ * TRUE  — the local tap is at or before the command that is answering it.
+ * FALSE — the local row was tapped AFTER the command was created, so this ack
+ *         answers an older tap and must not wipe the newer one.
+ * When either instant is unreadable, returns `pullGateWouldClear`, i.e. the
+ * caller's pre-B1a decision — never a silent refusal, and never a blind clear.
+ *
+ * Deliberately the same arithmetic as the pull gate's send-back proof and the
+ * approval replay gate: all three "did this pre-date that" tests read the same
+ * way. A tie ALLOWS the clear: a re-tap necessarily carries a strictly later
+ * stamp, so equality means "same tap".
+ */
+export function ackClearIsFreshEnough(
+  local: { pendingApproval?: { at?: string } | null; completedAt?: string } | undefined,
+  commandCreatedAt: string | undefined,
+  pullGateWouldClear: boolean,
+): boolean {
+  const tapMs = Date.parse(String(local?.pendingApproval?.at ?? local?.completedAt ?? ""));
+  const cmdMs = Date.parse(String(commandCreatedAt ?? ""));
+  if (Number.isNaN(tapMs) || Number.isNaN(cmdMs)) return pullGateWouldClear;
+  return tapMs <= cmdMs;
+}
+
+/**
  * Pure merge of a /api/tasks/sync snapshot into local task/week state — the
  * same guards the Tasks page's restoreFromSnapshot uses: adopt only richer/
  * longer server state (new tasks by id-or-title, a different or richer week),
@@ -580,6 +604,9 @@ export function mergeTasksSnapshot(
       completedInWeek: t.completedInWeek ?? undefined,
       pendingApproval: (t as any).pendingApproval ?? undefined,
       sentBackAt: (t as any).sentBackAt ?? undefined,
+      // The persisted award survives approval; a blob without it keeps
+      // undefined (never a fabricated 0 — a 0-point approval is legitimate).
+      awardedPoints: (t as any).awardedPoints ?? undefined,
       // Normalize crew fields on fresh rows too (PB returns 0 for unset
       // numbers; 0 is not a valid crew size / speed bonus).
       crewSize: normalizeCrewSize((t as any).crewSize),
@@ -762,6 +789,7 @@ export function mergeTasksSnapshot(
             completedInWeek: snapRow.completedInWeek ?? undefined,
             pendingApproval: snapshotPending,
             sentBackAt: (snapRow as any).sentBackAt ?? undefined,
+            awardedPoints: (snapRow as any).awardedPoints ?? undefined,
           }
         : p
     );

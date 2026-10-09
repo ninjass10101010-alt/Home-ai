@@ -35,6 +35,8 @@ export function recurringClone(task: SnapshotTask, id: number, due: string): Sna
     completedInWeek: undefined,
     pendingApproval: undefined,
     sentBackAt: undefined,
+    // The award belonged to the previous occurrence; next week starts clean.
+    awardedPoints: undefined,
     crew: crew ? { members: [], removed: [] } : task.crew,
     assignee: task.universal ? "All" : task.assignee,
     assigneeEmoji: task.universal ? "🤝" : task.assigneeEmoji,

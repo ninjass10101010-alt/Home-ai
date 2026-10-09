@@ -164,24 +164,26 @@ export async function GET(request: NextRequest) {
   // coarse `rollover:pending` threw that away — the caller was told something
   // was wrong and never which week. `repairCategories` filters the list through
   // REPAIR_CATEGORY, so a PocketBase error string can never ride out of here.
+  //
+  // B1a: the projection-repair leg is a WARNING, not a withheld read. The
+  // snapshot was read successfully and IS the family's truth; answering 503
+  // because the PB mirror still needs a repair threw the whole readable body
+  // away (both consumers branch on status alone), so a kid's tap never landed.
+  // The read-blocking legs — rollover and the day sweep — still 503 below.
   const failedCategories = [
     ...repairCategories(rollover.reconciled ? [] : ["rollover:pending", ...(rollover.failed ?? [])]),
     ...repairCategories(daysweep.reconciled ? [] : daysweep.failed),
-    ...repairCategories(reconciliation.failed),
   ];
-  const warningCategories = repairCategories(reconciliation.warnings);
+  const warningCategories = repairCategories([
+    ...(reconciliation.reconciled
+      ? []
+      : ["projection_reconcile_pending", ...(Array.isArray(reconciliation.failed) ? reconciliation.failed : [])]),
+    ...(Array.isArray(reconciliation.warnings) ? reconciliation.warnings : []),
+  ]);
   const reconciled = rollover.reconciled && daysweep.reconciled && reconciliation.reconciled && failedCategories.length === 0;
-  // B2: an explicitly UNRECONCILED read must not answer 200. Every other
-  // failure arm here already answers 503, and BOTH consumers branch on the
-  // status alone (`src/db/index.ts:220` `if (!res.ok) return` and
-  // `src/app/tasks/page.tsx:558` `return r.ok ? r.json() : null`) — so a 200
-  // here meant the 60s refresh and the page restore both APPLIED a snapshot
-  // this handler had just declared unreconciled. Only the outbox read the
-  // bespoke `reconciled` flag.
-  //
-  // The FULL body still ships on the 503, snapshot included: a caller that
-  // wants the partial truth can read it off a non-200, and the status no longer
-  // lies about it.
+  // The snapshot is withheld (503) only when a READ-BLOCKING leg failed; an
+  // unreconciled projection still ships the readable snapshot on a 200 with
+  // `reconciled:false` and its categories on `warnings`.
   return NextResponse.json(
     {
       ok: reconciled,
@@ -192,7 +194,7 @@ export async function GET(request: NextRequest) {
       failed: failedCategories,
       warnings: warningCategories,
     },
-    { status: reconciled ? 200 : 503 },
+    { status: failedCategories.length > 0 ? 503 : 200 },
   );
 }
 

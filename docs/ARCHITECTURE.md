@@ -250,19 +250,62 @@ Every task/ledger mutation leaves the device through
 `consuela-task-operation-outbox-v1`, now a single JSON array; legacy index +
 `:entry:` rows rehydrate once on cold read), which POSTs the command route
 directly with the credential in the body from the ephemeral in-memory registry.
-Outcomes: 2xx ack → adopt + release; `202 { queued: true }` → the server wrote a
-`task_command_queue` row and the local entry mirrors it until
-`/api/tasks/queue` reports resolution; 4xx → immediate terminal refusal;
-network/5xx → local backoff (2s→5min, 8 attempts, 24h expiry) replaying on
-online/visibility/mount. `GET /api/tasks/queue` lists pending/recent rows for
-banners; `DELETE` cancels one (the original actor or any parent). The queue
-carries `/api/tasks/claim`, `/api/tasks/approve`, `/api/tasks/manage`,
-`/api/tasks/config`, `/api/tasks/ledger`, `/api/rewards/redeem`;
-`/api/tasks/quarantine` is not carried. A PIN never enters a queue row — intake
-verifies it and stores the verified actor identity
-(`actorMemberId`/`actorName`/`actorRole`, `actorAuthentication`). **Do not fork
-the key or the entry shape** — import `TASK_OUTBOX_STORAGE_KEY` and the
-store/server-queue helpers, never re-implement a command buffer.
+Outcomes: a FULLY RECONCILED 2xx ack → adopt + release; a 2xx whose body says
+`reconciled:false`/`repairRequired:true` is retryable `projection_pending` (the
+change may have paid while the kitchen display never received it), never a
+banked success; `202 { queued: true }` → the server wrote a `task_command_queue`
+row and the local entry mirrors it until `/api/tasks/queue` reports resolution;
+4xx → immediate terminal refusal, EXCEPT a credential-requiring operation
+(`/api/tasks/approve`, `/api/tasks/ledger`) re-sent with no credential in
+memory (the reload case) — both the 401/403 answer and the parser's `400
+invalid_body` refusal park it `auth-required` (`pin_required`) for a re-prompt
+instead of killing it, and a past-expiry sweep parks it the same way rather than
+reporting a network/`queue_expired` loss; network/5xx → local backoff
+(2s→5min, 8 attempts, 24h expiry) replaying on online/visibility/mount.
+`GET /api/tasks/queue` lists pending/recent rows for banners; `DELETE` cancels
+one (the original actor or any parent). The queue carries `/api/tasks/claim`,
+`/api/tasks/approve`, `/api/tasks/manage`, `/api/tasks/config`,
+`/api/tasks/ledger`, `/api/rewards/redeem`; `/api/tasks/quarantine` is not
+carried. A PIN never enters a queue row — intake verifies it and stores the
+verified actor identity (`actorMemberId`/`actorName`/`actorRole`,
+`actorAuthentication`). **Do not fork the key or the entry shape** — import
+`TASK_OUTBOX_STORAGE_KEY` and the store/server-queue helpers, never
+re-implement a command buffer.
+
+**The approve acknowledgement clears its rows by id, gated by freshness.** A
+snapshot may be stale, so a snapshot's clear needs proof (an earn for the row in
+`weekData.history`, or a send-back stamp that does not pre-date the tap — the
+pull gate in `mergeTasksSnapshot`, unchanged). An acknowledgement is the
+server's own receipt for a command this device issued, so its clear needs only
+to be newer than the tap it claims to clear: `ackClearIsFreshEnough` refuses a
+local tap stamped after the command's creation instant (the entry's `createdAt`,
+or the queue row's `created` for a cross-device poll) and falls back to the
+pull-gate decision when either instant is unreadable. The path is contained by
+`ACK_CLEAR_AUTHORITATIVE` (default `true`) in `src/lib/task-command-store.ts`;
+`false` restores the pre-B1a pull-gate-only clear. An unreconciled ack
+(`reconciled:false`/`repairRequired:true`) never clears anything.
+
+**The approve route names every row it cleared and persists the paid award.**
+`POST /api/tasks/approve` success bodies carry `clearedTasks` (one row per
+active task) plus the `tasks` alias; `task` keeps its single-row meaning and
+`cleared` stays the numeric count. Each cleared row carries `awardedPoints` —
+the amount `approvalPatch` writes from the parsed pending intent (base + speed
+bonus), persisted on the task row so a card stays honest after `pendingApproval`
+is cleared. `awardedPoints` is cleared by every meaning-reset (`completedFields`,
+`reopenTask`, `recurringClone`, the send-back arm) and is tolerated in BOTH PB
+projection matchers (`taskProjectionMatches` and the reconciler's
+`projectionMatches`), so a missing/0 mirror value never triggers a perpetual
+projection repair. Schema: `tasks.awardedPoints` (number) — the NAS needs
+`npm run pb:seed` BEFORE the image that expects it.
+
+**`GET /api/tasks/sync` hands over a readable snapshot even when the projection
+repair is pending.** Only a READ-BLOCKING leg withholds it: the rollover, the
+day sweep, the snapshot read itself, or a reconciler that threw — each answers
+503 with `snapshot:null`. An unreconciled projection answers 200 with the
+snapshot, `reconciled:false`, its categories on `warnings`, and `failed`
+reserved for the read-blocking legs. Both consumers (`src/db/index.ts`, the
+tasks page's `pullSnapshot`) branch on status alone, so this is what lets a
+kid's tap land on a parent's device instead of being thrown away with the body.
 
 **A task id is only meaningful while the snapshot still holds it — so the
 snapshot's id is authority and a stale local id must be healed, never

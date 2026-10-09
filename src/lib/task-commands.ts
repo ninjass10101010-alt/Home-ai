@@ -1,4 +1,4 @@
-import type { SnapshotRevision } from "@/lib/snapshot-tasks";
+import type { SnapshotRevision, SnapshotTask } from "@/lib/snapshot-tasks";
 import type { Task, WeekData } from "@/types/tasks";
 import {
   hasForbiddenTaskCommandPayloadKey,
@@ -41,6 +41,7 @@ export interface InternalTaskCommandResult {
   reconciled: boolean;
   paid?: number;
   cleared?: number;
+  clearedTasks?: SnapshotTask[];
   skipped?: number;
   duplicate?: boolean;
   deleted?: boolean;

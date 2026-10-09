@@ -3,6 +3,7 @@
 // costs ONE parent-PIN confirmation instead of a PIN per row, and the Add
 // modal gets progressive disclosure (points stepper, recurring select).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
@@ -223,6 +224,94 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     expect(el.textContent).toContain("Needs approval");
     // Task 8: a wrong PIN never reaches the server.
     expect(approveCalls).toHaveLength(0);
+  });
+
+  it("approve-all excludes a row with a queued delete", async () => {
+    // D8: a parent deleted the open chore, then the kid's tap landed before
+    // the delete drained. Sending the removed id in the batch earns a 404 and
+    // the stranded-id self-heal makes the queued removal permanent.
+    localStorage.setItem("consuela-tasks", JSON.stringify([
+      { id: 101, title: "Quest A", assignee: "Caspian Garcia", assigneeEmoji: "🧒", due: todayISO(), points: 6, recurring: null, category: "Chores", completed: false, priority: "low" },
+      { id: 102, title: "Quest B", assignee: "Aurora Garcia", assigneeEmoji: "🌈", due: todayISO(), points: 8, recurring: null, category: "Chores", completed: true, completedBy: "Aurora Garcia", completedAt: "2026-09-19T18:30:00.000Z", completedInWeek: MONDAY, priority: "low", pendingApproval: { byName: "Aurora Garcia", at: "2026-09-19T18:30:00.000Z", points: 8 } },
+    ]));
+    localStorage.setItem("consuela-week-data", JSON.stringify({ weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] }));
+
+    let syncBody: any = null;
+    const calls: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/members/verify")) {
+        const body = JSON.parse(String(init?.body || "{}"));
+        const ok = body.memberName === "Rebecca (Mom)" && body.pin === "0202";
+        return { ok, status: ok ? 200 : 401, json: async () => (ok ? { member: { name: "Rebecca (Mom)", role: "parent", emoji: "👩" } } : { error: "Invalid PIN" }) } as any;
+      }
+      if (url.includes("/api/tasks/sync")) {
+        if (!syncBody) return { ok: false, status: 401, json: async () => ({}) } as any;
+        return { ok: true, status: 200, json: async () => syncBody } as any;
+      }
+      if (url.includes("/api/tasks/")) {
+        calls.push(JSON.parse(String(init?.body || "{}")));
+        return { ok: false, status: 503, json: async () => ({ ok: false, reason: "task_store_unavailable", error: "The family server could not apply this change just yet." }) } as any;
+      }
+      return { ok: false, status: 401, json: async () => ({}) } as any;
+    }));
+
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+
+    // Select the member so the open row is in the visible Pending list.
+    const memberTile = el.querySelector('button[aria-label="Show Caspian Garcia\'s chores"]') as HTMLButtonElement;
+    await act(async () => { memberTile.click(); });
+    await settle();
+
+    // Queue a delete for the open row through the real UI.
+    const edit = el.querySelector('button[aria-label="Edit Quest A"]') as HTMLButtonElement;
+    expect(edit).not.toBeNull();
+    await act(async () => { edit.click(); });
+    await settle();
+    const editDialog = document.querySelector('[role="dialog"]');
+    const deleteButton = [...editDialog!.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Delete");
+    await act(async () => { deleteButton!.click(); });
+    await settle();
+    const confirmDialog = [...document.querySelectorAll('[role="dialog"]')].find((d) => d.textContent?.includes("Delete this task?"));
+    const confirmDelete = [...confirmDialog!.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Delete");
+    await act(async () => { confirmDelete!.click(); });
+    await settle();
+
+    // The kid's tap lands server-side while the delete is still queued.
+    syncBody = {
+      reconciled: true,
+      snapshot: {
+        revision: "2",
+        deletedTaskIds: [],
+        weekData: { weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] },
+        tasks: [
+          { id: 101, title: "Quest A", assignee: "Caspian Garcia", assigneeEmoji: "🧒", points: 6, completed: true, completedBy: "Caspian Garcia", completedAt: "2026-10-08T15:00:00.000Z", completedInWeek: MONDAY, pendingApproval: { byName: "Caspian Garcia", at: "2026-10-08T15:00:00.000Z", points: 6 } },
+          { id: 102, title: "Quest B", assignee: "Aurora Garcia", assigneeEmoji: "🌈", points: 8, completed: true, completedBy: "Aurora Garcia", completedAt: "2026-09-19T18:30:00.000Z", completedInWeek: MONDAY, pendingApproval: { byName: "Aurora Garcia", at: "2026-09-19T18:30:00.000Z", points: 8 } },
+        ],
+      },
+    };
+    act(() => { window.dispatchEvent(new Event("consuela-data-refreshed")); });
+    await settle(200);
+
+    const approveAllButton = [...el.querySelectorAll("button")].find((b) => /Approve all/i.test(b.textContent || ""));
+    await act(async () => { approveAllButton!.click(); });
+    await settle();
+    const pinInput = document.querySelector('input[aria-label="Parent PIN"]') as HTMLInputElement;
+    await act(async () => { setInput(pinInput, "0202"); });
+    const confirm = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Approve all");
+    await act(async () => { confirm!.click(); });
+    await settle();
+
+    const approveAllEntry = listTaskOutbox().find((entry) => entry.action === "approve-all");
+    expect(approveAllEntry).toBeTruthy();
+    expect(approveAllEntry!.payload.taskIds).toEqual([102]);
+    expect(approveAllEntry!.payload.taskIds).not.toContain(101);
+    // F2 owns the SOURCE (`pendingApprovals`); B1a only filters the ids it
+    // selects. The selection still starts from the raw pending array.
+    const source = readFileSync("src/app/tasks/page.tsx", "utf8");
+    expect(source).toContain("pendingApprovals");
+    expect(source).toContain(".map((p) => p.id)");
   });
 });
 

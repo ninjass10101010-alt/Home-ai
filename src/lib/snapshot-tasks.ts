@@ -715,6 +715,7 @@ export async function mirrorTaskToCollection(
         completedInWeek: t.completedInWeek ?? null,
         pendingApproval: t.pendingApproval ?? null,
         sentBackAt: t.sentBackAt ?? null,
+        awardedPoints: t.awardedPoints ?? null,
         crewSize: t.crewSize ?? null,
         // Crew member emojis ride the same PB json field — photo avatars
         // from members.emoji must be gated exactly like assigneeEmoji.
@@ -789,6 +790,7 @@ function snapshotTaskFromCollection(record: Record<string, any>): SnapshotTask |
     completedInWeek: record.completedInWeek ?? null,
     pendingApproval: parseJSON<SnapshotTask["pendingApproval"]>(record.pendingApproval, null),
     sentBackAt: record.sentBackAt ?? null,
+    awardedPoints: record.awardedPoints ?? null,
     crewCloseMode: record.crewCloseMode ?? null,
     expiresAfterDays: record.expiresAfterDays ?? null,
   };
@@ -904,6 +906,7 @@ export function taskProjectionRecord(task: SnapshotTask): Record<string, unknown
     completedInWeek: task.completedInWeek ?? null,
     pendingApproval: task.pendingApproval ?? null,
     sentBackAt: task.sentBackAt ?? null,
+    awardedPoints: task.awardedPoints ?? null,
     crewSize: task.crewSize ?? null,
     crew: persistedCrewEmoji(task.crew as any),
     speedBonus: task.speedBonus ?? null,
@@ -927,11 +930,14 @@ function taskProjectionMatches(row: Record<string, any>, expected: Record<string
       ? projectionValue(row[key])
       : row[key];
     if (["crew", "pendingApproval"].includes(key)) return sameProjectionValue(actualValue, expectedValue);
-    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due", "crewCloseMode", "expiresAfterDays"].includes(key)) {
+    if (["crewSize", "speedBonus", "awardedPoints", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due", "crewCloseMode", "expiresAfterDays"].includes(key)) {
       const leftEmpty = actualValue === null || actualValue === undefined || actualValue === "";
       const rightEmpty = expectedValue === null || expectedValue === undefined || expectedValue === "";
       if (leftEmpty && rightEmpty) return true;
-      if ((key === "crewSize" || key === "speedBonus" || key === "expiresAfterDays") && Number(actualValue) === 0 && Number(expectedValue) === 0) {
+      // PocketBase coerces an unset number to 0, so "no award" reads back as 0
+      // on the mirror. Treating 0 as empty on BOTH sides stops that mismatch
+      // from rewriting (and then failing) the projection on every pass.
+      if ((key === "crewSize" || key === "speedBonus" || key === "expiresAfterDays" || key === "awardedPoints") && Number(actualValue) === 0 && Number(expectedValue) === 0) {
         return true;
       }
     }

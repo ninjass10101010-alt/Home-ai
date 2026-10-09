@@ -9,6 +9,7 @@ import {
   sanitizeDisplayTarget,
   sanitizeTaskOperationPayload,
   serverMessageOf,
+  taskOperationRequiresCredential,
   taskOutboxBackoffMs,
   type FlushTaskOutboxResult,
   type SnapshotRead,
@@ -51,7 +52,8 @@ import type { Task, WeekData } from "@/types/tasks";
  *
  * Entries persist in localStorage under the SAME key the old outbox used, so
  * every family device rehydrates its old rows on first load: parked sends are
- * re-sent best-effort, old `auth-required` rows surface as honest refusals.
+ * re-sent best-effort, and a PIN-requiring command whose credential died with
+ * the page is parked `auth-required` so the family can enter the PIN again.
  */
 export const TASK_OUTBOX_STORAGE_KEY = "consuela-task-operation-outbox-v1";
 export const TASK_COMMAND_STORE_STORAGE_KEY = TASK_OUTBOX_STORAGE_KEY;
@@ -64,6 +66,14 @@ export const TASK_OUTBOX_STORAGE_WRITE_ATTEMPTS = 2;
 export const TASK_STORE_LOCAL_EXPIRY_MS = 24 * 60 * 60 * 1000;
 /** Poll cadence while the store knows about server-queue rows. */
 export const TASK_QUEUE_POLL_INTERVAL_MS = 30_000;
+
+/**
+ * Containment for the wave's riskiest change. `false` restores the pre-B1a
+ * pull-gate clear path exactly: an acknowledgement merges through
+ * `mergeTasksSnapshot` and its clear is refused unless it carries ledger proof
+ * (a paid earn for the row, or a send-back stamp newer than the tap). One edit.
+ */
+export const ACK_CLEAR_AUTHORITATIVE = true;
 
 export type {
   FlushTaskOutboxResult,
@@ -269,8 +279,8 @@ function readLegacyPerEntryEntries(ids: string[]): TaskOutboxEntry[] {
 }
 
 /** The per-device one-time rehydration: the old outbox's index + per-entry
- * rows fold into the store's array format. `auth-required` rows become
- * honest failures (they can never be sent — the PIN is gone by design). */
+ * rows fold into the store's array format. `auth-required` rows survive as
+ * themselves — the PIN is gone by design, so the family re-enters it. */
 function rehydrateLegacyOnce(): void {
   if (legacyRehydrated || !isBrowser()) return;
   legacyRehydrated = true;
@@ -435,6 +445,11 @@ interface QueueStateRow {
   result: Record<string, unknown> | null;
   displayTarget: TaskOutboxDisplayTarget | null;
   attemptCount: number;
+  /** The server row's own `created` — exists on the wire (the queue route
+   * returns rows verbatim); stamped onto a resolved ack as `commandCreatedAt`
+   * so the freshness guard compares against the command's instant, not the
+   * poll's. */
+  createdAt?: string;
 }
 
 function rowToEntryPatch(row: QueueStateRow): Partial<TaskOutboxEntry> {
@@ -507,6 +522,10 @@ export async function pollQueue(): Promise<void> {
         const ack: TaskOutboxAcknowledgement = {
           ...(isRecord(row.result) ? (row.result as Record<string, unknown>) : {}),
           operationId: row.operationId,
+          // The queue row's OWN creation instant. A mirror minted at poll time
+          // would date a cross-device ack "now" and make the freshness test
+          // meaningless.
+          ...(row.createdAt ? { commandCreatedAt: row.createdAt } : {}),
         };
         await adoptTaskOutboxAcknowledgement(ack);
         const known = current.some((entry) => entry.operationId === row.operationId);
@@ -706,6 +725,23 @@ function markRetryable(entry: TaskOutboxEntry, reason: string, message = ""): Fl
   return { acknowledged: 0, retryable: 1, permanent: 0 };
 }
 
+/**
+ * A PIN-requiring command whose credential is gone is WAITING, not refused:
+ * park it for a re-prompt. It never auto-retries (nothing on this device can
+ * answer the 401 until a PIN is entered again) and it is not terminal, so no
+ * failed/queue_expired banner can bury a tap the family can still save.
+ */
+function markAuthRequired(entry: TaskOutboxEntry, reason: string, message = ""): FlushTaskOutboxResult {
+  patchEntry(entry.operationId, {
+    status: "auth-required",
+    lastErrorCategory: undefined,
+    lastErrorReason: reason || "pin_required",
+    ...(message ? { lastErrorMessage: message } : {}),
+    nextAttemptAt: undefined,
+  });
+  return { acknowledged: 0, retryable: 1, permanent: 0 };
+}
+
 async function acknowledgeEntry(
   entry: TaskOutboxEntry,
   body: TaskOutboxAcknowledgement,
@@ -714,7 +750,14 @@ async function acknowledgeEntry(
   forgetTaskCommandCredential(entry.operationId);
   notifyAcknowledged({ action: entry.action, ...body, operationId: entry.operationId });
   try {
-    await (driver.onAcknowledged ?? adoptTaskOutboxAcknowledgement)({ ...body, operationId: entry.operationId });
+    // The ack answers the command this entry represents, so the entry's own
+    // `createdAt` is the freshness proof the by-id clear compares a local tap
+    // against (a server-supplied stamp, when present, wins).
+    await (driver.onAcknowledged ?? adoptTaskOutboxAcknowledgement)({
+      ...body,
+      operationId: entry.operationId,
+      commandCreatedAt: body.commandCreatedAt ?? entry.createdAt,
+    });
   } catch {
     /* adoption is best-effort display state */
   }
@@ -750,9 +793,18 @@ async function processEntry(entry: TaskOutboxEntry): Promise<FlushTaskOutboxResu
   const reason = reasonOf(body);
   const message = serverMessageOf(body);
   const queued = body.queued === true;
+  // A 2xx that did not reconcile is NOT a success the client may bank: the
+  // ledger may hold the change while the kitchen display never received it.
+  // Retry it with the server's own sentence so the honest state stays visible
+  // (D4) — the entry leaves only once the server says it fully landed.
+  const unreconciled = status >= 200 && status < 300 && !queued &&
+    (body.reconciled === false || body.repairRequired === true);
 
-  if (status >= 200 && status < 300 && !queued) {
+  if (status >= 200 && status < 300 && !queued && !unreconciled) {
     return await acknowledgeEntry(fresh, body);
+  }
+  if (unreconciled) {
+    return markRetryable(fresh, "projection_pending", message);
   }
   if (status >= 200 && status < 300 && queued) {
     // The server took the command into its PocketBase queue.
@@ -768,10 +820,26 @@ async function processEntry(entry: TaskOutboxEntry): Promise<FlushTaskOutboxResu
     return { acknowledged: 0, retryable: 1, permanent: 0 };
   }
   if (status === 401 || status === 403) {
-    // A wrong PIN or an expired session answers AT TAP TIME. The old outbox
-    // parked these forever under "waiting on a PIN"; the honest answer is a
-    // refusal the family can act on right now.
+    // A wrong PIN (or an expired session) answers AT TAP TIME — but only when
+    // there WAS a credential to present. A PIN-requiring command re-sent after
+    // a reload carries none: that is the "ask for the PIN again" case, not a
+    // refusal, and it must survive overnight (a network expiry would bury a
+    // tap the family can still complete).
+    if (!credential && taskOperationRequiresCredential(fresh.route, fresh.action)) {
+      return markAuthRequired(fresh, reason || "pin_required", message);
+    }
     return markFailed(fresh, "unauthorized", reason || "unauthorized", message);
+  }
+  if (
+    status === 400 &&
+    reason === "invalid_body" &&
+    !credential &&
+    taskOperationRequiresCredential(fresh.route, fresh.action)
+  ) {
+    // `parseApproveCommand`/`parseLedgerCommand` require memberName+pin, so a
+    // credential-less re-send is refused 400 invalid_body BEFORE auth ever
+    // runs. Same missing-PIN state as the 401 above, same honest re-prompt.
+    return markAuthRequired(fresh, "pin_required", message);
   }
   if (status === 404 && reason === "unknown_task") {
     // A stranded id, not a broken chore: the device kept an id the server
@@ -798,10 +866,17 @@ async function processEntry(entry: TaskOutboxEntry): Promise<FlushTaskOutboxResu
 function sweepLocalExpiry(): void {
   const now = Date.now();
   for (const entry of readRaw()) {
-    if (entry.status === "reconciling" || entry.status === "failed") continue;
+    if (entry.status === "auth-required" || entry.status === "reconciling" || entry.status === "failed") continue;
     if (entry.serverQueued) continue;
     if (entry.status === "queued" && inFlightOperationIds.has(entry.operationId)) continue;
     if (now - createdMs(entry) < TASK_STORE_LOCAL_EXPIRY_MS) continue;
+    // A PIN-requiring command with no credential in memory cannot be sent by
+    // anything on this device until the PIN is entered again — call it what it
+    // is (waiting on a PIN) instead of a network expiry that reads as "lost".
+    if (!resolveTaskOutboxCredential(entry) && taskOperationRequiresCredential(entry.route, entry.action)) {
+      markAuthRequired(entry, "pin_required", "Enter the PIN again to send this one.");
+      continue;
+    }
     markFailed(entry, "network", "queue_expired", "The family server could not be reached for over a day — try again.");
   }
 }
@@ -1097,6 +1172,55 @@ async function adoptConfigAcknowledgement(acknowledgement: TaskOutboxAcknowledge
   if (updatedAt) stores.writeWeeklyPrizesStamp(updatedAt);
 }
 
+/**
+ * The acknowledgement's own clear decision, mirroring the pull gate exactly:
+ * a paid earn for the row in the ack's week, or a send-back stamp that does
+ * not pre-date the local row's own completion stamp. Used as the fallback when
+ * either timestamp in `ackClearIsFreshEnough` is unreadable.
+ */
+function ackPullGateWouldClear(
+  local: Task,
+  acknowledgement: TaskOutboxAcknowledgement,
+  ackRow: Task | undefined,
+): boolean {
+  const history = Array.isArray(acknowledgement.weekData?.history)
+    ? acknowledgement.weekData!.history
+    : [];
+  const paidElsewhere = history.some(
+    (tx) => tx?.type === "earn" && Number(tx?.taskId) === Number(local.id),
+  );
+  const sentBackAt = (ackRow as any)?.sentBackAt;
+  const localDoneAt = Date.parse(String((local as any).pendingApproval?.at ?? local.completedAt ?? ""));
+  const sentBackElsewhere =
+    !!sentBackAt && (Number.isNaN(localDoneAt) || Date.parse(String(sentBackAt)) >= localDoneAt);
+  return paidElsewhere || sentBackElsewhere;
+}
+
+/** The ack's copy of a cleared row: the server's own post-command row where it
+ *  names one, else the local row with its pending record dropped. */
+function ackClearedRow(local: Task, ackRow: Task | undefined): Task {
+  if (!ackRow) return { ...local, pendingApproval: undefined };
+  const source = ackRow as unknown as Record<string, unknown>;
+  const next: Record<string, unknown> = { ...local };
+  for (const key of [
+    "completed",
+    "completedBy",
+    "completedAt",
+    "completedInWeek",
+    "pendingApproval",
+    "sentBackAt",
+    "awardedPoints",
+    "crewSize",
+    "crew",
+    "speedBonus",
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) next[key] = source[key] ?? undefined;
+  }
+  if (!Object.prototype.hasOwnProperty.call(source, "completed")) next.completed = local.completed;
+  if (!Object.prototype.hasOwnProperty.call(source, "pendingApproval")) next.pendingApproval = undefined;
+  return next as unknown as Task;
+}
+
 export async function adoptTaskOutboxAcknowledgement(
   acknowledgement: TaskOutboxAcknowledgement,
 ): Promise<void> {
@@ -1115,10 +1239,55 @@ export async function adoptTaskOutboxAcknowledgement(
     if (remaining.length !== rows.length) stores.saveTasks(remaining);
     return;
   }
-  if (!acknowledgement.task && !acknowledgement.weekData) return;
+
   const stores = await import("@/lib/task-utils");
+  // The ack-clear contract: a SNAPSHOT may be stale, so its clear needs proof
+  // (the pull gate above); an ACK is the server's own receipt for a command
+  // this device issued, so it needs only to be newer than the tap it claims to
+  // clear. An unreconciled ack never clears anything. `ACK_CLEAR_AUTHORITATIVE
+  // = false` restores the pre-B1a pull-gate-only path.
+  const ackClearsRows =
+    ACK_CLEAR_AUTHORITATIVE &&
+    acknowledgement.reconciled !== false &&
+    acknowledgement.repairRequired !== true;
+  const ackRowsById = new Map<number, Task>();
+  if (ackClearsRows) {
+    if (Array.isArray(acknowledgement.clearedTasks)) {
+      for (const row of acknowledgement.clearedTasks) {
+        const id = Number((row as any)?.id);
+        if (Number.isSafeInteger(id)) ackRowsById.set(id, row);
+      }
+    }
+    const single = acknowledgement.task;
+    const singleId = Number((single as any)?.id);
+    if (single && Number.isSafeInteger(singleId) && !ackRowsById.has(singleId)) {
+      ackRowsById.set(singleId, single);
+    }
+  }
+  let tasks = stores.loadTasks();
+  if (ackRowsById.size > 0) {
+    const weekData = stores.loadWeekData();
+    let changed = false;
+    const next = tasks.map((local) => {
+      const id = Number(local.id);
+      const ackRow = ackRowsById.get(id);
+      if (!ackRow) return local;
+      const hasSomethingToClear = local.completed === true || !!local.pendingApproval;
+      if (!hasSomethingToClear) return local;
+      const pullGateWouldClear = ackPullGateWouldClear(local, acknowledgement, ackRow);
+      if (!stores.ackClearIsFreshEnough(local, acknowledgement.commandCreatedAt, pullGateWouldClear)) {
+        return local;
+      }
+      changed = true;
+      return ackClearedRow(local, ackRow);
+    });
+    if (changed) {
+      tasks = next;
+      stores.saveTasks(tasks);
+    }
+  }
   if (acknowledgement.task) {
-    const merged = stores.mergeTasksSnapshot(stores.loadTasks(), stores.loadWeekData(), {
+    const merged = stores.mergeTasksSnapshot(tasks, stores.loadWeekData(), {
       tasks: [acknowledgement.task as Task],
     });
     if (merged.tasksChanged) stores.saveTasks(merged.tasks);

@@ -6,10 +6,12 @@
 //
 // The GET leg changed contract too, deliberately: it is now
 // `GET(request: NextRequest)` and authorizes itself with `requireLiveSession`
-// BEFORE its three write legs (rollover, day sweep, projection repair), and an
-// unreconciled read answers 503 with the full body retained instead of 200 with
-// `ok:false`. So every GET below passes a genuinely signed session request
-// (`getSync`) and asserts the honest status.
+// BEFORE its three write legs (rollover, day sweep, projection repair). Since
+// B1a (2026-10-09) a readable snapshot is handed over on a 200 even when the
+// projection repair is pending (`reconciled:false`, categories on `warnings`);
+// only a READ-BLOCKING leg (rollover, day sweep, snapshot read, reconciler
+// throw) answers 503. So every GET below passes a genuinely signed session
+// request (`getSync`) and asserts the honest status.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
@@ -341,14 +343,11 @@ describe("tasks/sync leg gating", () => {
     expect(mocks.reconcileTaskProjectionLocked).toHaveBeenCalledOnce();
   });
 
-  it("GET still returns the snapshot with a repair-level pending state — on a 503, never a 200", async () => {
-    // The guarantee this title claims is that the SNAPSHOT survives a
-    // repair-level pending state, and it is still true — the route retains the
-    // full body on the non-200 precisely so a caller that wants the partial
-    // truth can read it. What changed is that the STATUS no longer claims the
-    // read was good: `src/db/index.ts:220` and `src/app/tasks/page.tsx:558`
-    // both branch on the status alone, so a 200 here applied a snapshot the
-    // handler had just declared unreconciled.
+  it("GET hands over the snapshot with a repair-level pending state — on a 200", async () => {
+    // B1a (2026-10-09) retired the old "503 for ANY unreconciled read" rule:
+    // the snapshot was read successfully and IS the family's truth, so a
+    // projection repair still pending is a WARNING. Withholding the body threw
+    // away a readable row and stranded a kid's tap (symptom (c)).
     db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
     mocks.reconcileTaskProjectionLocked.mockResolvedValue({
       ok: false,
@@ -358,8 +357,7 @@ describe("tasks/sync leg gating", () => {
       weekData: null,
     });
     const res = await getSync();
-    expect(res.status).not.toBe(200);
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       ok: false,
       error: "projection_reconcile_pending",
@@ -367,7 +365,8 @@ describe("tasks/sync leg gating", () => {
       snapshot: { tasks: [{ id: "t1" }] },
       reconciled: false,
       repaired: ["task:1:completion"],
-      failed: ["approval:pending"],
+      failed: [],
+      warnings: ["projection_reconcile_pending", "approval:pending"],
     });
   });
 });
@@ -430,7 +429,10 @@ describe("tasks/sync repair status contract", () => {
     });
   });
 
-  it("repair-level: a task collection read failure still serves the snapshot — on a 503, never a 200", async () => {
+  it("repair-level: a task collection read failure still serves the snapshot — now on a 200 with a warning", async () => {
+    // B1a: the mirror read failing does not make the canonical snapshot wrong.
+    // The category moves to `warnings`; the read-blocking legs (rollover,
+    // day sweep, snapshot read, reconciler throw) are what still 503.
     db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
     mocks.reconcileTaskProjectionLocked.mockResolvedValue({
       ok: false,
@@ -440,11 +442,8 @@ describe("tasks/sync repair status contract", () => {
       weekData: null,
     });
     const res = await getSync();
-    expect(res.status).not.toBe(200);
-    expect(res.status).toBe(503);
-    // `toEqual`, not `toMatchObject`: the exact body IS the contract here — the
-    // full partial truth still ships on the non-200, and it carries no `error`
-    // beyond the pending reason plus the retry hint both consumers need.
+    expect(res.status).toBe(200);
+    // `toEqual`, not `toMatchObject`: the exact body IS the contract here.
     expect(await res.json()).toEqual({
       ok: false,
       error: "projection_reconcile_pending",
@@ -452,8 +451,8 @@ describe("tasks/sync repair status contract", () => {
       snapshot: { tasks: [{ id: "t1" }] },
       reconciled: false,
       repaired: [],
-      failed: ["tasks:read"],
-      warnings: [],
+      failed: [],
+      warnings: ["projection_reconcile_pending", "tasks:read"],
     });
   });
 
@@ -467,8 +466,7 @@ describe("tasks/sync repair status contract", () => {
       weekData: null,
     });
     const res = await getSync();
-    expect(res.status).not.toBe(200);
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       ok: false,
       error: "projection_reconcile_pending",
@@ -476,8 +474,8 @@ describe("tasks/sync repair status contract", () => {
       snapshot: { tasks: [{ id: "t1" }] },
       reconciled: false,
       repaired: ["approval:projection"],
-      failed: ["tasks:changed"],
-      warnings: [],
+      failed: [],
+      warnings: ["projection_reconcile_pending", "tasks:changed"],
     });
   });
 

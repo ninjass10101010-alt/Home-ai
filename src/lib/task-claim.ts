@@ -409,6 +409,9 @@ function completedFields(now: string, weekStart: string, actor: ClaimActor) {
     completedAt: now,
     completedInWeek: weekStart,
     sentBackAt: null,
+    // A fresh tap starts a new occurrence's award; a stale paid amount must
+    // never describe it.
+    awardedPoints: null,
   };
 }
 
@@ -561,6 +564,8 @@ function reopenTask(task: SnapshotTask, now: string): SnapshotTask {
     completedInWeek: null,
     pendingApproval: null,
     sentBackAt: now,
+    // The award described a completion that no longer stands.
+    awardedPoints: null,
     ...(crew !== undefined ? { crew } : {}),
   };
 }

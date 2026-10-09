@@ -278,6 +278,7 @@ function internalResultToOutcome(
         ...(result.revision !== undefined ? { revision: result.revision } : {}),
         ...(result.paid !== undefined ? { paid: result.paid } : {}),
         ...(result.cleared !== undefined ? { cleared: result.cleared } : {}),
+        ...(Array.isArray(result.clearedTasks) ? { clearedTasks: result.clearedTasks } : {}),
         ...(result.skipped !== undefined ? { skipped: result.skipped } : {}),
         ...(result.duplicate ? { duplicate: true } : {}),
         reconciled: result.reconciled,

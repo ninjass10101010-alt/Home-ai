@@ -191,6 +191,8 @@ const OPEN_ASSIGNEE = "All";
 // 403 is "an adult has to do this", a 404 is "that name or item isn't on the
 // roster any more", and a 503 is "Consuela is asleep — try again" (the outbox
 // retries it, so nothing is lost). No 4xx is ever dressed as a confirmation.
+// The approval route's own codes ride the same table (its 404 display slug is
+// hyphenated, so both spellings of `unknown_task` are listed).
 const LEDGER_REFUSAL_COPY: Record<string, string> = {
   adult_only: "Only a grown-up can move points.",
   unauthorized: "That PIN wasn't right.",
@@ -205,11 +207,30 @@ const LEDGER_REFUSAL_COPY: Record<string, string> = {
   ledger_unavailable: "Consuela is unreachable right now — it'll retry.",
   snapshot_write_failed: "Consuela couldn't save that yet — it'll retry.",
   outbox_evicted: "It was dropped from the pending list before it sent.",
+  unknown_task: "That chore isn't on the family's list any more.",
+  "unknown-task": "That chore isn't on the family's list any more.",
+  ambiguous_task: "That chore matched more than one row on the family's list.",
+  semantic_duplicate: "That tap was already approved once.",
+  repair_required: "That approval is still landing — try again in a moment.",
+  task_store_unavailable: "Consuela couldn't read the chores — it'll retry.",
+  forbidden_approval_payload: "That change wasn't in the shape the server expects.",
+  invalid_action: "That review action isn't one the server knows.",
+  invalid_task_id: "That chore's id wasn't accepted.",
 };
 
 function ledgerRefusalCopy(reason?: string): string {
   if (!reason) return "";
   return LEDGER_REFUSAL_COPY[reason] ?? "";
+}
+
+/**
+ * The card's amount contract: the persisted award (`awardedPoints`, survives
+ * approval) → the pending record's promised amount (`pendingApproval.points`)
+ * → the chore's own base. The base is the pre-B1a legacy read (a pending record
+ * with no recorded amount); the server pays the same via parsePending.
+ */
+function baseTaskPoints(task: Pick<Task, "points">): number {
+  return task.points;
 }
 
 const categories = ["Chores", "Errands", "Admin", "Health", "Pets", "School"];
@@ -551,6 +572,18 @@ export default function TasksPage() {
     | { kind: "pending"; taskId: number }
     | { kind: "cancelling"; taskId: number };
   const [optimisticRows, setOptimisticRows] = useState<Record<string, OptimisticRow>>({});
+  // The mark list is memoised so every memo that reads it has a STABLE input:
+  // deriving it inline would hand each a fresh array every render and make the
+  // memoisation decorative. Declared HERE, above every consumer — including
+  // submitApproval's approve-all id selection — so the React Compiler can
+  // preserve the manual memoization.
+  const optimisticRowsList = useMemo(() => Object.values(optimisticRows), [optimisticRows]);
+  const optimisticRemoved = useMemo(
+    () => optimisticRowsList
+      .filter((row): row is Extract<OptimisticRow, { kind: "remove" }> => row.kind === "remove")
+      .map((row) => row.taskId),
+    [optimisticRowsList],
+  );
   // Latest-state mirrors for the async snapshot restore: the fetch resolves long
   // after commit, and these effects re-sync before any merge runs, so
   // mergeTasksSnapshot always sees the CURRENT state (never a stale closure).
@@ -656,6 +689,11 @@ export default function TasksPage() {
     } else if (terminal) {
       showToast(`The family server refused that change. ${ledgerRefusalCopy(acknowledged.reason)}`.trim(), "error");
     }
+    // A non-terminal ack can still carry the server's own sentence (an
+    // approval that has not reached the kitchen display yet): say it, never
+    // bank it as a silent success.
+    const notice = typeof acknowledged.error === "string" ? acknowledged.error.trim() : "";
+    if (!terminal && notice) showToast(notice, "error");
     if (pinFreeInFlightRef.current.size > 0) {
       for (const taskId of [...pinFreeInFlightRef.current]) pinFreeInFlightRef.current.delete(taskId);
     }
@@ -1295,16 +1333,32 @@ export default function TasksPage() {
     }
   };
 
+  // ONE opener for all three review dialogs, funnelling through the same timer
+  // registry the PIN dialogs use: a stale 2500 ms error-clear from the previous
+  // attempt can never erase the next dialog's error.
+  const openApprovalDialog = useCallback(
+    (taskId: number | null, mode: "approve" | "sendback" | "approve-all") => {
+      clearDialogTimers();
+      setApprovalTaskId(taskId);
+      setApprovalMode(mode);
+      setApprovalPin("");
+      setApprovalError("");
+    },
+    [clearDialogTimers],
+  );
+
   const submitApproval = async () => {
     if ((approvalTaskId === null && approvalMode !== "approve-all") || !approvalPin || pinBusy) return;
     setPinBusy(true);
     try {
       let parent: any = null;
       let unreachable = false;
+      let sawWrongPin = false;
       for (const m of membersData.filter((m: any) => m.role === "parent")) {
         const result = await verifyPinRemote(m.fullName, approvalPin);
         if (result.status === "ok") { parent = m; break; }
         if (result.status === "unreachable") { unreachable = true; break; }
+        sawWrongPin = true;
       }
       if (unreachable) {
         setApprovalError(unreachableCopy());
@@ -1313,7 +1367,12 @@ export default function TasksPage() {
         return;
       }
       if (!parent) {
-        setApprovalError("Parent PIN required to review tapped tasks.");
+        // A typo is not a permission problem: say which one it was.
+        setApprovalError(
+          sawWrongPin
+            ? "That PIN wasn't right — try again."
+            : "Parent PIN required to review tapped tasks.",
+        );
         setApprovalPin("");
         armDialogTimer(() => setApprovalError(""), 2500);
         return;
@@ -1325,7 +1384,21 @@ export default function TasksPage() {
       // the outbox entry or to localStorage, and the outbox releases it only
       // after the acknowledgment (or the user's cancel).
       if (approvalMode === "approve-all") {
-        const taskIds = pendingApprovals.map((p) => p.id);
+        // a row with a queued delete is about to be gone server-side; sending
+        // it in the batch earns a 404 whose stranded-id self-heal would make
+        // the queued removal permanent (D8). F2 owns `pendingApprovals`' SOURCE
+        // (raw → substituted rows); B1a filters only the ids it selects here.
+        const taskIds = pendingApprovals
+          .filter((p) => !optimisticRemoved.includes(p.id))
+          .map((p) => p.id);
+        if (taskIds.length === 0) {
+          showToast("Those tapped chores are already on their way out.", "neutral");
+          setApprovalTaskId(null);
+          setApprovalMode("approve");
+          setApprovalPin("");
+          setApprovalError("");
+          return;
+        }
         queueCommand({
           route: "/api/tasks/approve",
           action: "approve-all",
@@ -1985,17 +2058,6 @@ export default function TasksPage() {
   // contributes a temporary row, a queued DELETE hides its row, a queued UPDATE
   // substitutes its row's copy, and a queued completion / reopen contributes an
   // honest note. None of this is written to the store.
-  //
-  // The mark list is memoised so the memos below have a STABLE input: deriving
-  // it inline would hand every one of them a fresh array each render and make
-  // the memoisation decorative.
-  const optimisticRowsList = useMemo(() => Object.values(optimisticRows), [optimisticRows]);
-  const optimisticRemoved = useMemo(
-    () => optimisticRowsList
-      .filter((row): row is Extract<OptimisticRow, { kind: "remove" }> => row.kind === "remove")
-      .map((row) => row.taskId),
-    [optimisticRowsList],
-  );
   const optimisticCancelling = useMemo(
     () => optimisticRowsList
       .filter((row): row is Extract<OptimisticRow, { kind: "cancelling" }> => row.kind === "cancelling")
@@ -2901,7 +2963,7 @@ export default function TasksPage() {
                 {/* One PIN pays the whole queue — the per-row grind was the
                     biggest parent complaint in the evaluation. */}
                 <div className="mb-3">
-                  <SoftButton onClick={() => { setApprovalTaskId(null); setApprovalMode("approve-all"); setApprovalPin(""); setApprovalError(""); }} className="w-full">
+                  <SoftButton onClick={() => openApprovalDialog(null, "approve-all")} className="w-full">
                     ✓ Approve all ({pendingApprovals.length})
                   </SoftButton>
                 </div>
@@ -2930,19 +2992,22 @@ export default function TasksPage() {
                         <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
                         <div className="line-clamp-2 text-xs leading-snug text-text-secondary">
                           {isCrew
-                            ? `🤝 Crew ${crew.length}/${task.crewSize ?? crew.length} · ${task.points}pts each · ${crew.map((n) => n.split(" ")[0]).join(", ")}`
+                            ? `🤝 Crew ${crew.length}/${task.crewSize ?? crew.length} · ${task.awardedPoints ?? task.pendingApproval!.points ?? baseTaskPoints(task)}pts each · ${crew.map((n) => n.split(" ")[0]).join(", ")}`
                             /* The raw `at` is an ISO instant; `split("T")[0]`
                                printed "2026-10-05" where every other date on this
-                               page reads "Oct 5". Same formatDueLabel contract. */
-                            : `${task.pendingApproval!.byName.split(" ")[0]} · tapped ${formatDueLabel(task.pendingApproval!.at.split("T")[0])} · ${task.points}pts`}
+                               page reads "Oct 5". Same formatDueLabel contract.
+                               The amount is the PAID one: the persisted award,
+                               else the pending record the approval will pay —
+                               never the pre-bonus base while a record exists. */
+                            : `${task.pendingApproval!.byName.split(" ")[0]} · tapped ${formatDueLabel(task.pendingApproval!.at.split("T")[0])} · ${task.awardedPoints ?? task.pendingApproval!.points ?? baseTaskPoints(task)}pts`}
                           {isCrew && crew.length !== joined && (
                             <span className="text-xs text-text-secondary"> · {crew.length} of {joined} checked in</span>
                           )}
                         </div>
                       </div>
                       <div className="flex w-full shrink-0 gap-2 sm:ml-auto sm:w-auto">
-                        <button type="button" aria-label={`Approve ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("approve"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle sm:flex-none">Approve</button>
-                        <button type="button" aria-label={`Send back ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("sendback"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-semibold text-text-secondary sm:flex-none">Send back</button>
+                        <button type="button" aria-label={`Approve ${task.title}`} onClick={() => openApprovalDialog(task.id, "approve")} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle sm:flex-none">Approve</button>
+                        <button type="button" aria-label={`Send back ${task.title}`} onClick={() => openApprovalDialog(task.id, "sendback")} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-semibold text-text-secondary sm:flex-none">Send back</button>
                       </div>
                     </div>
                     );
@@ -2989,7 +3054,7 @@ export default function TasksPage() {
                             <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                             <div className="min-w-0 flex-1">
                               <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
-                              <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{owner.byName.split(" ")[0]} · tapped {formatDueLabel(owner.at.split("T")[0])} · {task.points}pts on the way</div>
+                              <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{owner.byName.split(" ")[0]} · tapped {formatDueLabel(owner.at.split("T")[0])} · {task.awardedPoints ?? task.pendingApproval!.points ?? baseTaskPoints(task)}pts on the way</div>
                             </div>
                             <span
                               className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"

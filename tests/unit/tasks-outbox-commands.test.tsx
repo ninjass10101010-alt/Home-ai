@@ -414,15 +414,18 @@ describe("parent approval is a durable command, not a local pay", () => {
     expect(readTaskCommandCredential(listTaskOutbox()[0]?.operationId ?? "x")).toBeUndefined();
   });
 
-  it("adopts 202 authoritative data before clearing the outbox", async () => {
-    // A 202 WITHOUT `queued` is a 2xx acknowledgment: it is the route's
-    // partial-projection answer (reconciled:false) and its body already
-    // carries the authoritative week, which is adopted before the entry goes.
+  it("retries a 202 that did not reconcile — never banks it as an ack", async () => {
+    // B1a D4: the route's partial-projection answer (reconciled:false) is NOT
+    // a success the client may bank — the kitchen display never received it —
+    // so the entry stays durable and the week is not adopted until a
+    // reconciled answer lands.
     server.approveStatus = 202;
     server.approveBody = {
       success: true,
       reconciled: false,
       repairRequired: true,
+      retryable: true,
+      error: "1 approval did not reach the kitchen display yet. Consuela is still retrying.",
       weekData: weekWithEarn("Jasmine Rose", 8),
     };
     seed([PENDING_TASK]);
@@ -432,9 +435,12 @@ describe("parent approval is a durable command, not a local pay", () => {
     await settle(120);
 
     expect(requestsFor("/api/tasks/approve")).toHaveLength(1);
-    expect(listTaskOutbox()).toHaveLength(0);
-    expect(storedWeek().points["Jasmine Rose"]).toBe(8);
-    expect(storedWeek().history).toHaveLength(1);
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(listTaskOutbox()[0].status).toBe("retrying");
+    expect(listTaskOutbox()[0].lastErrorReason).toBe("projection_pending");
+    expect(listTaskOutbox()[0].lastErrorMessage).toContain("did not reach the kitchen display");
+    expect(storedWeek().points["Jasmine Rose"]).toBeUndefined();
+    expect(storedWeek().history).toHaveLength(0);
   });
 
   it("mirrors a 202 { queued: true } as a server-owned entry until the queue poll resolves it", async () => {

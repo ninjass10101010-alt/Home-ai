@@ -407,7 +407,7 @@ describe("needs approval queue", () => {
     expect(storedHistory()).toHaveLength(0);
   });
 
-  it("a refused parent PIN queues nothing and says Parent PIN required", async () => {
+  it("a refused parent PIN queues nothing and says the PIN was wrong", async () => {
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
     mockAuth.isLoggedIn = true;
     seed(pendingSeed());
@@ -429,7 +429,9 @@ describe("needs approval queue", () => {
     await act(async () => { dialogButton("Approve").click(); });
     await settle(120);
 
-    expect(document.body.textContent || "").toContain("Parent PIN required to review tapped tasks.");
+    // B1a D6: a typo is not a permission problem.
+    expect(document.body.textContent || "").toContain("That PIN wasn't right — try again.");
+    expect(document.body.textContent || "").not.toContain("Parent PIN required");
     expect(storedTasks()[0].pendingApproval).toBeDefined();
     expect(listTaskOutbox()).toHaveLength(0);
   });
