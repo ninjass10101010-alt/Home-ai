@@ -268,6 +268,16 @@ function redeemProjection(operationId: string, actorId: string): LedgerProjectio
 function internalResultToOutcome(
   result: InternalTaskCommandResult,
 ): ReplayOutcome {
+  // D4: an ok result that did NOT reconcile may have paid while the kitchen
+  // display never received it. Storing it `resolved` would let every device
+  // bank it as done; it stays RETRYABLE and repairable instead.
+  if (result.ok && result.reconciled === false) {
+    return {
+      kind: "retry",
+      reason: "projection_pending",
+      message: "The change has not reached every device yet. Consuela is still retrying.",
+    };
+  }
   if (result.ok) {
     return {
       kind: "resolved",
@@ -359,6 +369,13 @@ async function replayQueueRow(row: Record<string, any>): Promise<ReplayOutcome> 
         // actor identity. `executeLedgerCommand` never re-reads it.
         pin: "",
       });
+      if (result.ok && result.reconciled === false) {
+        return {
+          kind: "retry",
+          reason: "projection_pending",
+          message: "The change has not reached every device yet. Consuela is still retrying.",
+        };
+      }
       if (result.ok) {
         return {
           kind: "resolved",

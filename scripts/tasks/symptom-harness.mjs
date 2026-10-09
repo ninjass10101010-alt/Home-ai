@@ -969,6 +969,21 @@ try {
   });
   await forcePull(pages.P);
   await waitForCardRow(pages.P, "Unload the dishwasher");
+  // Read the card BEFORE approving: the ack clears the row, so a post-ack read
+  // would see nothing and prove nothing. This is the display-vs-pay evidence.
+  const b2CardText = await pages.P.evaluate(() => {
+    const h = [...document.querySelectorAll("h2")].find((x) => x.textContent.includes("Needs approval"));
+    if (!h) return "";
+    let el = h;
+    for (let i = 0; i < 5 && el; i++) {
+      el = el.parentElement;
+      if (el) {
+        const rows = [...el.querySelectorAll(".schedule-row")];
+        if (rows.length) return rows.map((r) => r.innerText).join("\n");
+      }
+    }
+    return "";
+  });
   let b2Status = null;
   let b2Body = null;
   const b2Listener = async (res) => {
@@ -986,19 +1001,6 @@ try {
   pages.P.off("response", b2Listener);
   const ledgerB2 = await ledgerHistory();
   const earnsFor103 = (ledgerB2.history || []).filter((tx) => tx.taskId === 103 && tx.type === "earn");
-  const b2CardText = await pages.P.evaluate(() => {
-    const h = [...document.querySelectorAll("h2")].find((x) => x.textContent.includes("Needs approval"));
-    if (!h) return "";
-    let el = h;
-    for (let i = 0; i < 5 && el; i++) {
-      el = el.parentElement;
-      if (el) {
-        const rows = [...el.querySelectorAll(".schedule-row")];
-        if (rows.length) return rows.map((r) => r.innerText).join("\n");
-      }
-    }
-    return "";
-  });
   hop("b2", {
     question: "the award the card shows vs the award approval pays",
     cardMetaLine: b2CardText.match(/(\d+)pts/)?.[0] || "not found",
@@ -1007,7 +1009,7 @@ try {
     earnAmounts: earnsFor103.map((tx) => tx.amount),
     approveStatus: b2Status,
     approveBody: { paid: b2Body?.paid, cleared: b2Body?.cleared },
-    defect: "card prints task.points (page.tsx:2937) while approval pays pendingApproval.points (task-approval.ts:403) — the card under-reports the award by the speed bonus",
+    expect: "the pre-approval card prints the PAID amount (9pts), never the base (6pts) — approval pays pendingApproval.points (task-approval.ts:403)",
   });
 
   // b3: crew-two — parent closes the crew (API, parent PIN), then approves.
@@ -1027,6 +1029,20 @@ try {
   });
   await forcePull(pages.P);
   await waitForCardRow(pages.P, "Clean the playroom");
+  // Pre-approval read (the ack clears the row).
+  const b3CardText = await pages.P.evaluate(() => {
+    const h = [...document.querySelectorAll("h2")].find((x) => x.textContent.includes("Needs approval"));
+    if (!h) return "";
+    let el = h;
+    for (let i = 0; i < 5 && el; i++) {
+      el = el.parentElement;
+      if (el) {
+        const rows = [...el.querySelectorAll(".schedule-row")];
+        if (rows.length) return rows.map((r) => r.innerText).join("\n");
+      }
+    }
+    return "";
+  });
   let b3Status = null;
   let b3Body = null;
   const b3Listener = async (res) => {
@@ -1044,27 +1060,14 @@ try {
   pages.P.off("response", b3Listener);
   const ledgerB3 = await ledgerHistory();
   const earnsFor104 = (ledgerB3.history || []).filter((tx) => tx.taskId === 104 && tx.type === "earn");
-  const b3CardText = await pages.P.evaluate(() => {
-    const h = [...document.querySelectorAll("h2")].find((x) => x.textContent.includes("Needs approval"));
-    if (!h) return "";
-    let el = h;
-    for (let i = 0; i < 5 && el; i++) {
-      el = el.parentElement;
-      if (el) {
-        const rows = [...el.querySelectorAll(".schedule-row")];
-        if (rows.length) return rows.map((r) => r.innerText).join("\n");
-      }
-    }
-    return "";
-  });
   hop("b3", {
-    question: "crew award list — the crew line prints task.points once for 2 payees",
+    question: "crew award list — the crew line prints the per-payee award",
     cardCrewLine: /(\d+)pts each/.test(b3CardText) ? b3CardText.match(/(\d+)pts each/)[0] : "not found",
     ledgerPaid: earnsFor104.map((tx) => ({ member: tx.member, amount: tx.amount })),
     totalPaid: earnsFor104.reduce((s, tx) => s + (tx.amount || 0), 0),
     approveStatus: b3Status,
     approveBody: { paid: b3Body?.paid, cleared: b3Body?.cleared, skipped: b3Body?.skipped },
-    defect: "the card prints task.points once (page.tsx:2933) for an award list of 2 payees (task-claim.ts:1686) — approval pays EACH member",
+    expect: "the crew line prints the recorded per-payee award (4pts each), not the base once — approval pays EACH member (task-claim.ts:1686)",
   });
 
   // --- Step 0B7: symptom (d) — PIN/permission errors -----------------------

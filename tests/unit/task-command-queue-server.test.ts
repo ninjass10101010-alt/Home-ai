@@ -365,4 +365,37 @@ describe("drainDueTaskCommandQueue", () => {
     expect(state.updated).toHaveLength(0);
     expect(state.deleted).toHaveLength(0);
   });
+
+  it("keeps an ok-but-unreconciled result RETRYABLE instead of storing it resolved", async () => {
+    // D4 on the queued path: the command may have paid while the kitchen
+    // display never received it — banking it `resolved` would let every device
+    // adopt a change the server itself declared incomplete. It stays pending
+    // with a backoff and the honest reason.
+    taskCommandMocks.executeInternalTaskCommand.mockResolvedValue({
+      ok: true,
+      operationId: "op-drain-1",
+      reconciled: false,
+      paid: 1,
+      cleared: 0,
+    });
+    const { state, pb } = makePb([dueRow()]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+
+    const summary = await drainDueTaskCommandQueue();
+
+    expect(summary).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(state.updated).toHaveLength(1);
+    expect(state.updated[0]).toMatchObject({
+      id: "row-drain",
+      data: {
+        attemptCount: 1,
+        lastErrorReason: "projection_pending",
+        lastErrorMessage:
+          "The change has not reached every device yet. Consuela is still retrying.",
+      },
+    });
+    expect(state.updated[0].data.status).not.toBe("resolved");
+    expect(state.updated[0].data.resolvedAt).toBeUndefined();
+    expect(typeof state.updated[0].data.nextAttemptAt).toBe("string");
+  });
 });

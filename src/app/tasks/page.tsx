@@ -207,6 +207,7 @@ const LEDGER_REFUSAL_COPY: Record<string, string> = {
   ledger_unavailable: "Consuela is unreachable right now — it'll retry.",
   snapshot_write_failed: "Consuela couldn't save that yet — it'll retry.",
   outbox_evicted: "It was dropped from the pending list before it sent.",
+  projection_pending: "Still landing — Consuela is retrying this change.",
   unknown_task: "That chore isn't on the family's list any more.",
   "unknown-task": "That chore isn't on the family's list any more.",
   ambiguous_task: "That chore matched more than one row on the family's list.",
@@ -2500,6 +2501,13 @@ export default function TasksPage() {
                         <span className="block text-[var(--color-accent-ink-rose)]">
                           {ledgerRefusalCopy(entry.lastErrorReason) || entry.lastErrorReason}
                         </span>
+                      )}
+                      {/* A still-sending (retrying) or PIN-parked entry carries
+                          the server's own sentence — an unreconciled approval
+                          said so and the family must be able to read it, not
+                          find it buried in a field no surface renders. */}
+                      {entry.status !== "failed" && entry.lastErrorMessage && (
+                        <span className="block">{entry.lastErrorMessage}</span>
                       )}
                     </span>
                     <button

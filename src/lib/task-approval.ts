@@ -46,10 +46,15 @@ export type ApproveAction = "approve" | "approve-all" | "send-back";
 
 const APPROVAL_REPAIR_ACTIONS = new Set<string>(["approve", "approve-all", "send-back"]);
 
-// The claim stamp and the approval proof are both server-authored, so the only
-// drift between them is a clock step (NTP). A pending stamped within this
-// window after the proof is the same tap this command paid — not a re-tap
-// (the re-tap hazard this guard exists for is minutes-to-hours later).
+// Replay-clear skew, kept deliberately and named: the claim stamp and the
+// approval proof are both server-authored, so the only drift between them is a
+// clock step (NTP). The strict `pendingAt <= proofAt` comparison cannot clear a
+// row whose tap stamped 1s after the proof — the named failure that greens
+// `tests/unit/task-approval-replay-clear-guard.test.ts` ("it worked but the row
+// never went away"), and the reason this window exists. Contract: a pending
+// stamped within the window after the proof is the same tap this command paid;
+// outside it, the row is a re-tap and the replay refuses to clear (leaving the
+// newer tap standing). Boundary-tested on both sides in that suite.
 const APPROVAL_PROOF_SKEW_MS = 5_000;
 
 export interface ApproveCommand {

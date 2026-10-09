@@ -1640,6 +1640,48 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(earned).toHaveLength(1);
     expect(earned[0].amount).toBe(7);
   });
+
+  it("a retried single approve after an approve-all paid the row is a no-op, never a second earn", async () => {
+    // The BLOCKER 1 safety half: the parked approve no longer holds the
+    // approve-all; when its PIN finally arrives and it is retried, the row it
+    // targets has already been paid and cleared, so the replay must not pay
+    // again.
+    const t1 = pendingTaskRow();
+    const t2 = pendingTaskRow({
+      id: 102,
+      assignee: "Aurora Garcia",
+      completedBy: "Aurora Garcia",
+      pendingApproval: { byName: "Aurora Garcia", at: "2026-09-19T18:30:00.000Z", points: 5 },
+    });
+    const { pb, history } = makePb({ snapshotTasks: [t1, t2], collectionTask: null });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+
+    const batch = await POST(jsonReq({
+      action: "approve-all",
+      operationId: "op-order-approve-all",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskIds: [101, 102],
+    }));
+    expect(batch.status).toBe(200);
+    expect((await batch.json()).paid).toBe(2);
+
+    const retried = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-order-parked-retry",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 102,
+    }));
+    const retriedBody = await retried.json();
+
+    expect(retried.status).toBe(200);
+    expect(retriedBody.paid).toBe(0);
+    expect(retriedBody.cleared).toBe(0);
+    const earns102 = history().filter((transaction: any) => transaction.type === "earn" && transaction.taskId === 102);
+    expect(earns102).toHaveLength(1);
+    expect(history().filter((transaction: any) => transaction.type === "earn")).toHaveLength(2);
+  });
 });
 
 describe("POST /api/tasks/approve — action:send-back", () => {

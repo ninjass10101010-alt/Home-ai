@@ -93,7 +93,7 @@ const OPERATION_ID = "op-replay-timestamp-skew";
 const PROOF_AT = new Date(Date.now() - 60_000).toISOString();
 const SKEWED_PENDING_AT = new Date(Date.parse(PROOF_AT) + 1000).toISOString();
 
-function makePb() {
+function makePb(pendingAt: string = SKEWED_PENDING_AT) {
   const weekStart = mondayISO();
   const fingerprint = approvalCommandFingerprint(
     { operationId: OPERATION_ID, action: "approve", taskId: 101 },
@@ -120,7 +120,7 @@ function makePb() {
       completedBy: "Caspian Garcia",
       completedInWeek: weekStart,
       // The tapping device's clock ran one second ahead of the server's proof.
-      pendingApproval: { byName: "Caspian Garcia", at: SKEWED_PENDING_AT, points: 5 },
+      pendingApproval: { byName: "Caspian Garcia", at: pendingAt, points: 5 },
     }],
     deletedTaskIds: [],
     weekData: { weekStart, points: {}, streak: {}, lastActive: {}, history: [] as any[] },
@@ -219,11 +219,9 @@ beforeEach(() => {
 });
 
 describe("an approval replay whose timestamp gate fails still clears the row", () => {
-  it("clears a still-pending row whose tap stamp is one second after the proof", async () => {
-    const harness = makePb();
+  async function approve(harness: ReturnType<typeof makePb>) {
     mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
-
-    const res = await POST(new NextRequest("http://localhost/api/tasks/approve", {
+    return POST(new NextRequest("http://localhost/api/tasks/approve", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -234,10 +232,38 @@ describe("an approval replay whose timestamp gate fails still clears the row", (
         taskId: 101,
       }),
     }));
+  }
+
+  it("clears a still-pending row whose tap stamp is one second after the proof", async () => {
+    const harness = makePb();
+    const res = await approve(harness);
     const body = await res.json();
 
     expect(body.cleared).toBe(1);
     expect(body.reconciled).toBe(true);
     expect(harness.snapshotTask(101)?.pendingApproval ?? null).toBeNull();
+  });
+
+  it("clears a tap at the exact edge of the skew window", async () => {
+    // APPROVAL_PROOF_SKEW_MS = 5000; the boundary is INCLUSIVE (a tie is the
+    // same tap, not a newer one).
+    const harness = makePb(new Date(Date.parse(PROOF_AT) + 5_000).toISOString());
+    const res = await approve(harness);
+    const body = await res.json();
+
+    expect(body.cleared).toBe(1);
+    expect(body.reconciled).toBe(true);
+    expect(harness.snapshotTask(101)?.pendingApproval ?? null).toBeNull();
+  });
+
+  it("refuses to clear a re-tap one millisecond outside the window and leaves it standing", async () => {
+    const reTapAt = new Date(Date.parse(PROOF_AT) + 5_001).toISOString();
+    const harness = makePb(reTapAt);
+    const res = await approve(harness);
+    const body = await res.json();
+
+    expect(body.cleared).toBe(0);
+    expect(body.reconciled).toBe(false);
+    expect(harness.snapshotTask(101)?.pendingApproval?.at ?? null).toBe(reTapAt);
   });
 });

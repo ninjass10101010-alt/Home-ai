@@ -131,6 +131,9 @@ function makePb() {
         tasks: snapData.tasks.map((task: any) => (Number(task.id) === id ? { ...task, ...patch } : task)),
       };
     },
+    tombstoneTask: (id: number) => {
+      snapData = { ...snapData, deletedTaskIds: [...(snapData.deletedTaskIds ?? []), id] };
+    },
     preparedRowCount: () => 2,
     pb: {
       collection: (name: string) => {
@@ -194,7 +197,7 @@ function makePb() {
 }
 
 /**
- * Wire the fake PB, and clear task 102 out-of-band right after the FIRST
+ * Wire the fake PB and clear task 102 out-of-band right after the FIRST
  * withAdmin call — i.e. after `resolveTasks` prepared both rows but before
  * `writeApprovalSnapshot` re-reads the snapshot. That is the exact shape
  * task-approval.ts:1139 hits when another writer cleared the row mid-command.
@@ -205,6 +208,22 @@ function wirePbWithMidCommandClear(harness: ReturnType<typeof makePb>) {
     adminCalls += 1;
     const value = await fn(harness.pb);
     if (adminCalls === 1) harness.updateSnapshotTask(102, { pendingApproval: null, sentBackAt: null });
+    return value;
+  });
+}
+
+/**
+ * Wire the fake PB and TOMBSTONE task 102 right after the first withAdmin call.
+ * A tombstoned patch makes the snapshot write conflict (`cleared: 0`), while the
+ * ledger leg still pays both rows — the genuine partial-clear shape: `cleared`
+ * must come back below the prepared count, `reconciled` false, non-200.
+ */
+function wirePbWithMidCommandTombstone(harness: ReturnType<typeof makePb>) {
+  let adminCalls = 0;
+  mocks.withAdmin.mockImplementation(async (fn: any) => {
+    adminCalls += 1;
+    const value = await fn(harness.pb);
+    if (adminCalls === 1) harness.tombstoneTask(102);
     return value;
   });
 }
@@ -255,25 +274,23 @@ describe("approve reports every row it cleared, or admits it did not", () => {
   });
 
   it("admits a partial clear instead of reconciling silently", async () => {
+    // A genuine partial: another writer TOMBSTONES row 102 between prepare and
+    // the snapshot write, so its patch conflicts and cannot be applied — while
+    // the ledger leg still pays both rows. The response must admit it:
+    // cleared < paid, reconciled:false, non-200, and no fabricated row legs.
     const harness = makePb();
-    wirePbWithMidCommandClear(harness);
+    wirePbWithMidCommandTombstone(harness);
 
     const res = await POST(approveAllRequest());
     const body = await res.json();
 
-    // The plain-reading fix (test 1) counts a row a writer cleared between
-    // prepare and write as cleared, so `cleared === paid` and this fixture is
-    // fully reconciled. The honesty contract this test protects — now phrased
-    // exactly as the plan's suite-1 spec — is the conditional: a response may
-    // only claim `reconciled:true` when it cleared every prepared row.
-    expect(body.cleared).toBeLessThanOrEqual(harness.preparedRowCount());
-    if (body.cleared < harness.preparedRowCount()) {
-      expect(body.reconciled).toBe(false);
-      expect(res.status).not.toBe(200);
-    } else {
-      expect(body.reconciled).toBe(true);
-      expect(res.status).toBe(200);
-    }
+    expect(body.paid).toBe(2);
+    expect(body.cleared).toBeLessThan(harness.preparedRowCount());
+    expect(body.cleared).toBe(0);
+    expect(body.reconciled).toBe(false);
+    expect(res.status).toBe(202);
+    expect(body.projectionFailures).toEqual([101, 102]);
+    expect(body.clearedTasks).toEqual([]);
   });
 
   it("carries a task leg for every requested id on approve-all", async () => {

@@ -36,7 +36,12 @@ vi.mock("@/db", () => ({
 import TasksPage from "@/app/tasks/page";
 import { localWeekStartISO } from "@/lib/local-date";
 import { todayISO } from "@/lib/task-utils";
-import { __resetTaskOutboxForTests } from "@/lib/task-command-store";
+import {
+  __resetTaskOutboxForTests,
+  enqueueTaskOperation,
+  flushTaskOutbox,
+  listTaskOutbox,
+} from "@/lib/task-command-store";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 
 const MONDAY = localWeekStartISO();
@@ -219,5 +224,67 @@ describe("the review dialog says what actually happened", () => {
 
     const text = document.body.textContent || "";
     expect(text).toContain("That chore isn't on the family's list any more.");
+  });
+
+  it("surfaces an unreconciled retry's sentence in the queue banner, never as a refusal", async () => {
+    const SENTENCE = "1 approval did not reach the kitchen display yet. Consuela is still retrying.";
+    enqueueTaskOperation({
+      operationId: "op-banner-truth",
+      route: "/api/tasks/approve",
+      action: "approve",
+      payload: { taskId: 101, memberName: "Rebecca (Mom)" },
+      displayTarget: { kind: "approval", taskId: 101, title: "Quest A" },
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/tasks/approve")) {
+        return {
+          ok: true,
+          status: 202,
+          json: async () => ({ success: true, reconciled: false, repairRequired: true, retryable: true, error: SENTENCE }),
+        } as any;
+      }
+      return { ok: false, status: 401, json: async () => ({}) } as any;
+    }));
+    await flushTaskOutbox();
+    expect(listTaskOutbox()[0]?.status).toBe("retrying");
+
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+
+    const text = document.body.textContent || "";
+    // The family sees the server's own sentence; it is never dressed as a refusal.
+    expect(text).toContain(SENTENCE);
+    expect(text).not.toContain("refused that change");
+    void el;
+  });
+
+  it("a fully reconciled approval is never described as refused", async () => {
+    enqueueTaskOperation({
+      operationId: "op-banner-paid",
+      route: "/api/tasks/approve",
+      action: "approve",
+      payload: { taskId: 101, memberName: "Rebecca (Mom)" },
+      displayTarget: { kind: "approval", taskId: 101, title: "Quest A" },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        reconciled: true,
+        repairRequired: false,
+        weekData: { weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] },
+      }),
+    } as any)));
+    await flushTaskOutbox();
+    expect(listTaskOutbox()).toHaveLength(0);
+
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+
+    const text = document.body.textContent || "";
+    expect(text).not.toContain("refused that change");
+    expect(text).not.toContain("Still landing");
+    void el;
   });
 });

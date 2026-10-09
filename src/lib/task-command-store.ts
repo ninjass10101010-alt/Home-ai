@@ -71,9 +71,15 @@ export const TASK_QUEUE_POLL_INTERVAL_MS = 30_000;
  * Containment for the wave's riskiest change. `false` restores the pre-B1a
  * pull-gate clear path exactly: an acknowledgement merges through
  * `mergeTasksSnapshot` and its clear is refused unless it carries ledger proof
- * (a paid earn for the row, or a send-back stamp newer than the tap). One edit.
+ * (a paid earn for the row, or a send-back stamp newer than the tap). One edit
+ * in source flips it; the test-only setter exists so both branches are
+ * exercised, and no production caller touches it.
  */
-export const ACK_CLEAR_AUTHORITATIVE = true;
+export let ACK_CLEAR_AUTHORITATIVE = true;
+
+export function __setAckClearAuthoritativeForTests(value: boolean): void {
+  ACK_CLEAR_AUTHORITATIVE = value;
+}
 
 export type {
   FlushTaskOutboxResult,
@@ -917,7 +923,12 @@ function isDueEntry(entry: TaskOutboxEntry): boolean {
  * earlier non-terminal command on the same row, or the server could apply the
  * OLD value after the new one while the app's own ledger showed the new one.
  * Creation order is the store's array order (evictions keep it sorted by
- * createdAt); a `failed` entry is terminal and no longer holds.
+ * createdAt). Two statuses no longer hold ordering: a `failed` entry is
+ * terminal, and an `auth-required` entry is PARKED awaiting a user credential —
+ * it is not in flight, never due, so holding later commands behind it would
+ * strand them forever without ever sending anything. The parked command's own
+ * replay protection (operationId receipts + semantic-duplicate suppression)
+ * keeps a later retry from double-paying after the newer command lands.
  */
 function heldByEarlierTaskCommand(entry: TaskOutboxEntry, all: TaskOutboxEntry[]): boolean {
   const ids = taskIdsOf(entry);
@@ -925,7 +936,7 @@ function heldByEarlierTaskCommand(entry: TaskOutboxEntry, all: TaskOutboxEntry[]
   const index = all.indexOf(entry);
   for (let position = 0; position < index; position += 1) {
     const earlier = all[position];
-    if (earlier.status === "failed") continue;
+    if (earlier.status === "failed" || earlier.status === "auth-required") continue;
     if (taskIdsOf(earlier).some((id) => ids.includes(id))) return true;
   }
   return false;
@@ -1287,8 +1298,13 @@ export async function adoptTaskOutboxAcknowledgement(
     }
   }
   if (acknowledgement.task) {
+    // The pull-gate path (also what `ACK_CLEAR_AUTHORITATIVE === false`
+    // restores): the ack's own weekData rides along so the gate can SEE the
+    // ledger proof it requires — a fix over the pre-B1a merge, which passed no
+    // weekData and so could never clear an approval.
     const merged = stores.mergeTasksSnapshot(tasks, stores.loadWeekData(), {
       tasks: [acknowledgement.task as Task],
+      ...(acknowledgement.weekData ? { weekData: acknowledgement.weekData } : {}),
     });
     if (merged.tasksChanged) stores.saveTasks(merged.tasks);
     if (merged.weekChanged) stores.saveWeekData(merged.weekData);

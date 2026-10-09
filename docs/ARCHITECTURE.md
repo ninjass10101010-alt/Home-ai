@@ -253,15 +253,20 @@ directly with the credential in the body from the ephemeral in-memory registry.
 Outcomes: a FULLY RECONCILED 2xx ack → adopt + release; a 2xx whose body says
 `reconciled:false`/`repairRequired:true` is retryable `projection_pending` (the
 change may have paid while the kitchen display never received it), never a
-banked success; `202 { queued: true }` → the server wrote a `task_command_queue`
-row and the local entry mirrors it until `/api/tasks/queue` reports resolution;
-4xx → immediate terminal refusal, EXCEPT a credential-requiring operation
-(`/api/tasks/approve`, `/api/tasks/ledger`) re-sent with no credential in
-memory (the reload case) — both the 401/403 answer and the parser's `400
-invalid_body` refusal park it `auth-required` (`pin_required`) for a re-prompt
-instead of killing it, and a past-expiry sweep parks it the same way rather than
-reporting a network/`queue_expired` loss; network/5xx → local backoff
-(2s→5min, 8 attempts, 24h expiry) replaying on online/visibility/mount.
+banked success — the same rule on the QUEUED path, where the drain stores an
+ok-but-unreconciled result as a retry with the honest sentence instead of a
+`resolved` marker; the tasks page's queue banner renders a non-failed entry's
+`lastErrorMessage` (the server's own words) and `LEDGER_REFUSAL_COPY` maps
+`projection_pending`; `202 { queued: true }` → the server wrote a
+`task_command_queue` row and the local entry mirrors it until
+`/api/tasks/queue` reports resolution; 4xx → immediate terminal refusal, EXCEPT
+a credential-requiring operation (`/api/tasks/approve`, `/api/tasks/ledger`)
+re-sent with no credential in memory (the reload case) — both the 401/403 answer
+and the parser's `400 invalid_body` refusal park it `auth-required`
+(`pin_required`) for a re-prompt instead of killing it, and a past-expiry sweep
+parks it the same way rather than reporting a network/`queue_expired` loss;
+network/5xx → local backoff (2s→5min, 8 attempts, 24h expiry) replaying on
+online/visibility/mount.
 `GET /api/tasks/queue` lists pending/recent rows for banners; `DELETE` cancels
 one (the original actor or any parent). The queue carries `/api/tasks/claim`,
 `/api/tasks/approve`, `/api/tasks/manage`, `/api/tasks/config`,
@@ -281,9 +286,22 @@ to be newer than the tap it claims to clear: `ackClearIsFreshEnough` refuses a
 local tap stamped after the command's creation instant (the entry's `createdAt`,
 or the queue row's `created` for a cross-device poll) and falls back to the
 pull-gate decision when either instant is unreadable. The path is contained by
-`ACK_CLEAR_AUTHORITATIVE` (default `true`) in `src/lib/task-command-store.ts`;
-`false` restores the pre-B1a pull-gate-only clear. An unreconciled ack
+`ACK_CLEAR_AUTHORITATIVE` (default `true`, an `export let` in
+`src/lib/task-command-store.ts`) restores the pull-gate-only clear when set to
+`false`; its test-only setter exercises both branches, no production caller
+touches it, and the false branch feeds the ack's own `weekData` into the merge
+so the pull gate can SEE the ledger proof it requires. An unreconciled ack
 (`reconciled:false`/`repairRequired:true`) never clears anything.
+
+**An `auth-required` entry never holds ordering.** It is parked awaiting a user
+credential — not in flight, never due — so `heldByEarlierTaskCommand` exempts
+it exactly like a terminal `failed` entry; otherwise an approve parked on task
+102 held an approve-all `[102,105]` forever and the batch never POSTed. The
+parked command's own replay protection (`operationId` receipts +
+semantic-duplicate suppression) keeps a later retry from double-paying after
+the newer command landed. Lifetime is bounded and visible: it rides the queue
+banner's `auth-required` count and its Cancel affordance, and the store's
+7-day/cap eviction drops it at the next write.
 
 **The approve route names every row it cleared and persists the paid award.**
 `POST /api/tasks/approve` success bodies carry `clearedTasks` (one row per
@@ -295,7 +313,13 @@ is cleared. `awardedPoints` is cleared by every meaning-reset (`completedFields`
 `reopenTask`, `recurringClone`, the send-back arm) and is tolerated in BOTH PB
 projection matchers (`taskProjectionMatches` and the reconciler's
 `projectionMatches`), so a missing/0 mirror value never triggers a perpetual
-projection repair. Schema: `tasks.awardedPoints` (number) — the NAS needs
+projection repair. `approvalPatch`'s replay gate keeps the strict
+`pendingAt <= proofAt` comparison except for a named 5 s skew window
+(`APPROVAL_PROOF_SKEW_MS`): both instants are server-authored, and the strict
+comparison could not clear a row whose tap stamped 1 s after the proof — the
+named failure `tests/unit/task-approval-replay-clear-guard.test.ts` exists for.
+The window is boundary-tested both inside (clears) and outside (refuses, leaving
+the newer tap standing). Schema: `tasks.awardedPoints` (number) — the NAS needs
 `npm run pb:seed` BEFORE the image that expects it.
 
 **`GET /api/tasks/sync` hands over a readable snapshot even when the projection
