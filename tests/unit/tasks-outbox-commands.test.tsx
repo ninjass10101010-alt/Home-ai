@@ -10,6 +10,7 @@ import { localWeekStartISO } from "@/lib/local-date";
 
 import {
   __resetTaskOutboxForTests,
+  flushTaskOutbox,
   listTaskOutbox,
   pollQueue,
   readTaskCommandCredential,
@@ -1066,6 +1067,42 @@ describe("reward redemption, penalty and manual adjust are server commands", () 
     // and the family can see (and cancel) the command that is still pending.
     expect(storedWeek().points["Caspian Garcia"]).toBe(5);
     expect(el.querySelector('[aria-label="Cancel queued Caspian Garcia"]')).not.toBeNull();
+  });
+
+  it("a manual adjust that exhausts retries is never described as refused", async () => {
+    // The tracked sibling of the approval exhaustion case: an adjust that paid
+    // server-side while nothing confirmed it must not be announced as "didn't
+    // go through" / "refused".
+    server.ledgerStatus = 202;
+    server.ledgerBody = {
+      ok: true,
+      reconciled: false,
+      repairRequired: true,
+      retryable: true,
+      error: "The change has not reached every device yet. Consuela is still retrying.",
+    };
+    seed([], { points: { "Caspian Garcia": 25 }, streak: {}, lastActive: {}, history: [] });
+    await applyAdjustTo("Caspian Garcia");
+    expect(listTaskOutbox()[0]?.lastErrorReason).toBe("projection_pending");
+
+    const nowSpy = vi.spyOn(Date, "now");
+    let fakeNow = Date.now();
+    nowSpy.mockImplementation(() => fakeNow);
+    try {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        fakeNow += 10 * 60_000;
+        await act(async () => { await flushTaskOutbox(); });
+      }
+    } finally {
+      nowSpy.mockRestore();
+    }
+    await settle(80);
+
+    const text = document.body.textContent || "";
+    expect(listTaskOutbox()[0]?.status).toBe("failed");
+    expect(text).toContain("Consuela couldn't confirm that change");
+    expect(text).not.toContain("refused that change");
+    expect(text).not.toContain("didn't go through");
   });
 });
 

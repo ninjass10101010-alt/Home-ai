@@ -890,7 +890,9 @@ try {
     clearedAfterPullLatencyMs: a8ClearedLatencyMs,
     lastPullStatus: a8PullStatus,
     rowsNow: pRowsAfterA8,
-    guard: "the ack merge carries no weekData (task-command-store.ts:1120-1126), so paidElsewhere is false and the clear gate (task-utils.ts:719-738) refuses the clear; the row clears only when a pull carries the earn in weekData.history",
+    guard: a8SurvivedAck
+      ? "the ack merge carries no weekData, so paidElsewhere is false and the clear gate (task-utils.ts:719-738) refuses the clear; the row clears only when a pull carries the earn in weekData.history"
+      : "the ack cleared the row by id on its own receipt (freshness-guarded); no pull carrying the earn was needed",
   });
 
   // a9: points landed? Compare the ledger earn count for task 101.
@@ -1154,7 +1156,9 @@ try {
     terminalCategory: d4Entry?.lastErrorCategory ?? null,
     terminalReason: d4Entry?.lastErrorReason ?? null,
     expectPerSuite6: "status 'auth-required' with lastErrorCategory NOT a refusal — the entry should ask for the PIN again, not refuse it",
-    defect: "processEntry maps the refusal straight to markFailed (task-command-store.ts:770-775); the PIN lived only in an in-memory map (task-command-store.ts:86-107)",
+    defect: d4Entry?.status === "failed" && d4Entry?.lastErrorCategory !== "auth-required"
+      ? "processEntry maps the refusal straight to markFailed (task-command-store.ts:770-775); the PIN lived only in an in-memory map (task-command-store.ts:86-107)"
+      : `FIXED — terminal status ${d4Entry?.status ?? "?"}, reason ${d4Entry?.lastErrorReason ?? "?"}; the parked entry asks for the PIN again`,
   });
 
   // b4 (moved after d4 so approve-all has TWO ids): Jasmine (9, the fixture's
@@ -1225,7 +1229,9 @@ try {
     question: "the affordance that should have said 'waiting on a PIN'",
     bannerVisible: /waiting on a PIN/.test(d5Banner),
     authRequiredEntries: d5AuthRequired.length,
-    defect: "task-operation-payload.ts:509 rewrites every persisted 'auth-required' to 'failed' on read, so useTaskOperationOutbox.ts:109's count is structurally 0 and the banner is dead code",
+    defect: /waiting on a PIN/.test(d5Banner) && d5AuthRequired.length > 0
+      ? `FIXED — bannerVisible true, authRequiredEntries ${d5AuthRequired.length}; the parked entry is surfaced`
+      : "task-operation-payload.ts:509 rewrites every persisted 'auth-required' to 'failed' on read, so useTaskOperationOutbox.ts:109's count is structurally 0 and the banner is dead code",
   });
 
   // --- Step 0B3 Probe 2 / c8: the drain must not require a reader -----------
@@ -1285,7 +1291,9 @@ try {
     drainedWithoutReader: c8DrainedAlone,
     rowAfter70s: c8Row ? { status: c8Row.status, attemptCount: c8Row.attemptCount } : "gone",
     elapsedMs: Date.now() - c8Start,
-    defect: "the drain's only trigger is GET /api/tasks/sync (sync/route.ts:67-71) — with no device reading, the row never leaves pending",
+    defect: c8DrainedAlone
+      ? "INFO — the row drained with no reader"
+      : "the drain's only trigger is GET /api/tasks/sync (sync/route.ts:67-71) — with no device reading, the row never leaves pending",
   });
 
   // Now open /tasks on one device: the next sync should drain it.
@@ -1305,6 +1313,8 @@ try {
   // exhibited the defect"; on a CLASS it means "the symptom reproduced in this
   // run". No cell may be blank; a hop that did not trigger says so explicitly.
   const a6PreparedHonest = (approveBody?.cleared ?? preparedCount) < preparedCount;
+  const d4Reproduced = d4Entry?.status === "failed" && d4Entry?.lastErrorCategory !== "auth-required";
+  const d5Reproduced = !/waiting on a PIN/.test(d5Banner) && d5AuthRequired.length === 0;
   const matrix = [
     {
       symptom: "a-rows-stuck",
@@ -1314,7 +1324,7 @@ try {
       latencyMs: a8ClearedLatencyMs,
       latencyVerdict: a8SurvivedAck
         ? `ack left the row; the next pull cleared it in ${a8ClearedLatencyMs ?? ">80000"}ms`
-        : "not triggered — the row was already gone when the ack was checked",
+        : "FIXED — the ack cleared the row with no pull",
       disposition: a8SurvivedAck ? "REPRODUCED (tree-native)" : "NOT-TRIGGERED",
       cells: [
         {
@@ -1347,13 +1357,15 @@ try {
         {
           hop: "a8", name: "approve ack vs the next pull",
           reproduced: a8SurvivedAck === true,
-          failingHop: "a8",
+          failingHop: a8SurvivedAck === true ? "a8" : null,
           fileLine: "src/lib/task-utils.ts:719-738",
           latencyMs: a8ClearedLatencyMs,
           latencyVerdict: a8SurvivedAck
             ? `DEFECT — the ack did not clear; the pull did, in ${a8ClearedLatencyMs ?? ">80000"}ms`
-            : "INFO — ack or pull cleared the row",
-          detail: "the ack merge carries no weekData (task-command-store.ts:1120-1126), so paidElsewhere is false and the clear gate refuses the clear",
+            : "INFO — the ack cleared the row itself",
+          detail: a8SurvivedAck
+            ? "the ack did not clear; the row needed a pull carrying the earn in weekData.history"
+            : "the ack cleared the row by id on its own receipt; no pull carrying the earn was needed",
         },
       ],
     },
@@ -1363,7 +1375,9 @@ try {
       failingHop: "b2",
       fileLine: "src/app/tasks/page.tsx:2937",
       latencyMs: null,
-      latencyVerdict: "INFO — display-vs-pay mismatch, no timing dimension",
+      latencyVerdict: (findings.hops.b2?.cardShowsTaskPoints ?? false)
+        ? "DEFECT — the card prints the base while approval pays the recorded award"
+        : `INFO — the card printed ${findings.hops.b2?.cardMetaLine ?? "?"} and approval paid ${findings.hops.b2?.serverPaid ?? "?"}`,
       disposition: ((findings.hops.b2?.serverPaid ?? 0) === 9 && (findings.hops.b2?.cardShowsTaskPoints ?? false)) ? "REPRODUCED (tree-native)" : "NOT-TRIGGERED",
       cells: [
         {
@@ -1378,11 +1392,15 @@ try {
         {
           hop: "b2", name: "speed-bonus award — card vs paid",
           reproduced: (findings.hops.b2?.serverPaid ?? 0) === 9 && (findings.hops.b2?.cardShowsTaskPoints ?? false),
-          failingHop: "b2",
+          failingHop: (findings.hops.b2?.cardShowsTaskPoints ?? false) ? "b2" : null,
           fileLine: "src/app/tasks/page.tsx:2937",
           latencyMs: null,
-          latencyVerdict: "DEFECT — the card prints task.points while approval pays pendingApproval.points",
-          detail: `card shows 6pts (task.points) while approval pays ${findings.hops.b2?.serverPaid ?? "?"} (pendingApproval.points)`,
+          latencyVerdict: (findings.hops.b2?.cardShowsTaskPoints ?? false)
+            ? "DEFECT — the card prints task.points while approval pays pendingApproval.points"
+            : "INFO — the pre-approval card printed the paid amount",
+          detail: (findings.hops.b2?.cardShowsTaskPoints ?? false)
+            ? `card shows 6pts (task.points) while approval pays ${findings.hops.b2?.serverPaid ?? "?"} (pendingApproval.points)`
+            : `pre-approval card printed ${findings.hops.b2?.cardMetaLine ?? "?"}; approval paid ${findings.hops.b2?.serverPaid ?? "?"}`,
         },
         {
           hop: "b3", name: "crew award — card vs ledger",
@@ -1399,7 +1417,11 @@ try {
           failingHop: b4Status === null ? "b4" : null,
           fileLine: "src/app/tasks/page.tsx:1327-1333",
           latencyMs: null,
-          latencyVerdict: b4Status !== null && (b4Body?.paid ?? 0) > 0 ? "INFO — paid" : "FAIL — approve-all paid nothing",
+          latencyVerdict: b4Status === null
+            ? "FAIL — the approve-all never POSTed"
+            : (b4Body?.paid ?? 0) > 0
+              ? "INFO — paid"
+              : "FAIL — approve-all paid nothing",
           detail: `approve-all ${b4Status}: paid=${b4Body?.paid ?? "?"} cleared=${b4Body?.cleared ?? "?"} skipped=${b4Body?.skipped ?? "?"} over ids ${JSON.stringify(findings.hops.b4?.pendingIdsOnCard ?? [])}`,
         },
       ],
@@ -1453,12 +1475,14 @@ try {
     },
     {
       symptom: "d-pin",
-      reproduced: (d4Entry?.status === "failed" && d4Entry?.lastErrorCategory !== "auth-required") || (!/waiting on a PIN/.test(d5Banner) && d5AuthRequired.length === 0),
-      failingHop: (d4Entry?.status === "failed" && d4Entry?.lastErrorCategory !== "auth-required") ? "d4" : "d5",
-      fileLine: (d4Entry?.status === "failed" && d4Entry?.lastErrorCategory !== "auth-required") ? "src/lib/task-command-store.ts:770-775" : "src/lib/task-operation-payload.ts:509",
+      reproduced: d4Reproduced || d5Reproduced,
+      failingHop: d4Reproduced ? "d4" : d5Reproduced ? "d5" : null,
+      fileLine: d4Reproduced ? "src/lib/task-command-store.ts:770-775" : "src/lib/task-operation-payload.ts:509",
       latencyMs: null,
-      latencyVerdict: "INFO — the failure is terminal-by-refusal, not a timing defect",
-      disposition: ((d4Entry?.status === "failed" && d4Entry?.lastErrorCategory !== "auth-required") || (!/waiting on a PIN/.test(d5Banner) && d5AuthRequired.length === 0)) ? "REPRODUCED (tree-native)" : "NOT-TRIGGERED",
+      latencyVerdict: d4Reproduced || d5Reproduced
+        ? "INFO — the failure is terminal-by-refusal, not a timing defect"
+        : "FIXED — the parked entry asks for the PIN again and the banner surfaces it",
+      disposition: (d4Reproduced || d5Reproduced) ? "REPRODUCED (tree-native)" : "NOT-TRIGGERED",
       cells: [
         {
           hop: "d1", name: "wrong PIN → 401, entry terminal",
@@ -1480,21 +1504,25 @@ try {
         },
         {
           hop: "d4", name: "PIN-gated approval re-sent after a reload",
-          reproduced: d4Entry?.status === "failed" && d4Entry?.lastErrorCategory !== "auth-required",
-          failingHop: "d4",
+          reproduced: d4Reproduced,
+          failingHop: d4Reproduced ? "d4" : null,
           fileLine: "src/lib/task-command-store.ts:770-775",
           latencyMs: null,
-          latencyVerdict: d4Entry?.status === "failed" ? "DEFECT — the reloaded entry is refused instead of asking for the PIN again" : `INFO — terminal status ${d4Entry?.status ?? "?"}`,
-          detail: `terminal status ${d4Entry?.status ?? "?"}, category ${d4Entry?.lastErrorCategory ?? "?"}, reason ${d4Entry?.lastErrorReason ?? "?"} — expected 'auth-required' (ask for the PIN again)`,
+          latencyVerdict: d4Reproduced
+            ? "DEFECT — the reloaded entry is refused instead of asking for the PIN again"
+            : `INFO — terminal status ${d4Entry?.status ?? "?"} (the parked entry asks for the PIN again)`,
+          detail: `terminal status ${d4Entry?.status ?? "?"}, category ${d4Entry?.lastErrorCategory ?? "?"}, reason ${d4Entry?.lastErrorReason ?? "?"}${d4Reproduced ? " — expected 'auth-required' (ask for the PIN again)" : ""}`,
         },
         {
-          hop: "d5", name: "the 'waiting on a PIN' affordance is dead code",
-          reproduced: !/waiting on a PIN/.test(d5Banner) && d5AuthRequired.length === 0,
-          failingHop: "d5",
+          hop: "d5", name: "the 'waiting on a PIN' affordance is surfaced",
+          reproduced: d5Reproduced,
+          failingHop: d5Reproduced ? "d5" : null,
           fileLine: "src/lib/task-operation-payload.ts:509",
           latencyMs: null,
-          latencyVerdict: "DEFECT — the banner is unreachable and no entry can hold 'auth-required'",
-          detail: "the banner never appears and no entry can hold status 'auth-required' — the storage boundary rewrites it to 'failed' on read",
+          latencyVerdict: d5Reproduced
+            ? "DEFECT — the banner is unreachable and no entry can hold 'auth-required'"
+            : "INFO — the banner is visible and an entry holds 'auth-required'",
+          detail: `bannerVisible=${/waiting on a PIN/.test(d5Banner)}, authRequiredEntries=${d5AuthRequired.length}`,
         },
       ],
     },

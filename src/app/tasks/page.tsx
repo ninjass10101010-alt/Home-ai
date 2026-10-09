@@ -186,6 +186,12 @@ const initialTasks: Task[] = [];
 // the archived defs already carry.
 const OPEN_ASSIGNEE = "All";
 
+// An exhausted retry is NOT a server refusal: the command may have applied
+// while nothing confirmed it (a lost response, an unreconciled projection).
+// This is the ONLY honest sentence for that terminal state — a paid approval
+// must never be described as refused.
+const UNCONFIRMED_CHANGE_COPY = "Consuela couldn't confirm that change — it may still land.";
+
 // The ledger route's refusal codes, said the way the family reads them. The
 // honest distinction the route itself draws: a 401 is "that PIN was wrong", a
 // 403 is "an adult has to do this", a 404 is "that name or item isn't on the
@@ -207,7 +213,7 @@ const LEDGER_REFUSAL_COPY: Record<string, string> = {
   ledger_unavailable: "Consuela is unreachable right now — it'll retry.",
   snapshot_write_failed: "Consuela couldn't save that yet — it'll retry.",
   outbox_evicted: "It was dropped from the pending list before it sent.",
-  projection_pending: "Still landing — Consuela is retrying this change.",
+  projection_pending: UNCONFIRMED_CHANGE_COPY,
   unknown_task: "That chore isn't on the family's list any more.",
   "unknown-task": "That chore isn't on the family's list any more.",
   ambiguous_task: "That chore matched more than one row on the family's list.",
@@ -679,16 +685,34 @@ export default function TasksPage() {
     // so the mark comes off exactly as it does on a success — and a family that
     // was told "sending" is told why it stopped. A 4xx is never a confirmation.
     const terminal = acknowledged.failed === true || acknowledged.evicted === true;
+    // A `network`-category terminal is retry EXHAUSTION (or a lost response):
+    // the server never refused it — the command may even have applied. That
+    // state gets the unconfirmed sentence, never "refused".
+    const unconfirmed = terminal && acknowledged.category === "network";
     const tracked = ledgerOpsRef.current.get(operationId);
     if (tracked) {
       ledgerOpsRef.current.delete(operationId);
       if (terminal) {
-        showToast(`${tracked.refused} ${ledgerRefusalCopy(acknowledged.reason)}`.trim(), "error");
+        showToast(
+          unconfirmed
+            ? UNCONFIRMED_CHANGE_COPY
+            : `${tracked.refused} ${ledgerRefusalCopy(acknowledged.reason)}`.trim(),
+          "error",
+        );
       } else {
         showToast(tracked.done, "success");
       }
     } else if (terminal) {
-      showToast(`The family server refused that change. ${ledgerRefusalCopy(acknowledged.reason)}`.trim(), "error");
+      showToast(
+        unconfirmed
+          ? UNCONFIRMED_CHANGE_COPY
+          : acknowledged.evicted === true
+            // A local drop never reached the server, so the server cannot have
+            // refused it — name the drop alone.
+            ? ledgerRefusalCopy("outbox_evicted")
+            : `The family server refused that change. ${ledgerRefusalCopy(acknowledged.reason)}`.trim(),
+        "error",
+      );
     }
     // A non-terminal ack can still carry the server's own sentence (an
     // approval that has not reached the kitchen display yet): say it, never

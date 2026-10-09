@@ -287,4 +287,48 @@ describe("the review dialog says what actually happened", () => {
     expect(text).not.toContain("Still landing");
     void el;
   });
+
+  it("a command that exhausts retries while unresolved never reads as a refusal", async () => {
+    const SENTENCE = "1 approval did not reach the kitchen display yet. Consuela is still retrying.";
+    enqueueTaskOperation({
+      operationId: "op-exhaust",
+      route: "/api/tasks/approve",
+      action: "approve",
+      payload: { taskId: 101, memberName: "Rebecca (Mom)" },
+      displayTarget: { kind: "approval", taskId: 101, title: "Quest A" },
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/tasks/approve")) {
+        return {
+          ok: true,
+          status: 202,
+          json: async () => ({ success: true, reconciled: false, repairRequired: true, retryable: true, error: SENTENCE }),
+        } as any;
+      }
+      return { ok: false, status: 401, json: async () => ({}) } as any;
+    }));
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+
+    // Exhaust the 8-attempt ladder: each unreconciled answer may have PAID, so
+    // the terminal copy must say "couldn't confirm", never "refused".
+    const nowSpy = vi.spyOn(Date, "now");
+    let fakeNow = Date.now();
+    nowSpy.mockImplementation(() => fakeNow);
+    try {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        fakeNow += 10 * 60_000;
+        await act(async () => { await flushTaskOutbox(); });
+      }
+    } finally {
+      nowSpy.mockRestore();
+    }
+    await settle(80);
+
+    const text = document.body.textContent || "";
+    expect(listTaskOutbox()[0]?.status).toBe("failed");
+    expect(text).toContain("Consuela couldn't confirm that change");
+    expect(text).not.toContain("refused that change");
+    void el;
+  });
 });
