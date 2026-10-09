@@ -308,7 +308,12 @@ function internalResultToOutcome(
 }
 
 /**
- * The drain-time supersede guard for queued `claim` / `complete` intents.
+ * The drain's CHEAP pre-check for queued `claim` / `complete` intents — a
+ * fast refusal that never enters the service. It is defense-in-depth only:
+ * the authoritative check runs inside `executeClaimCommand`, on the fresh
+ * read and under the task-command lock, against the `supersedeIfSentBackAfter`
+ * instant this drain passes into the command (the two reads can disagree —
+ * an undo can commit in between — and only the locked check is atomic).
  *
  * A queued command is a deferred intent, not a promise; it may only apply
  * while the row still carries the state it was written against. `sentBackAt`
@@ -359,11 +364,14 @@ async function replayQueueRow(row: Record<string, any>, pb: AdminPB): Promise<Re
   try {
     if (route === "/api/tasks/claim") {
       ensureTaskClaimHandlersRegistered();
+      const guardedPayload = { ...payload };
       // Only the two actions that re-apply a completion carry the hazard; the
       // retraction itself (`undo`) and the crew/config legs must replay.
       if (action === "claim" || action === "complete") {
         const taskId = Number(payload.taskId);
         if (Number.isSafeInteger(taskId) && taskId > 0) {
+          // Cheap pre-check (defense-in-depth): refuse before entering the
+          // service when the CURRENT read already shows the retraction.
           let superseded: ReplayOutcome | null = null;
           try {
             const lookup = await findCanonicalTask(pb, taskId);
@@ -374,11 +382,19 @@ async function replayQueueRow(row: Record<string, any>, pb: AdminPB): Promise<Re
             superseded = null;
           }
           if (superseded) return superseded;
+          // The ATOMIC re-check rides the command itself: the service compares
+          // `sentBackAt` against this capture instant on its FRESH read, under
+          // the task-command lock — so an undo that commits after the read
+          // above can no longer be paid by this replay.
+          const queueCreatedMs = rowCreatedAtMs(row);
+          if (queueCreatedMs > 0) {
+            guardedPayload.supersedeIfSentBackAfter = new Date(queueCreatedMs).toISOString();
+          }
         }
       }
       return internalResultToOutcome(
         await executeInternalTaskCommand(
-          { operationId, kind: action as never, actor, payload },
+          { operationId, kind: action as never, actor, payload: guardedPayload },
           { source: "server" },
         ),
       );

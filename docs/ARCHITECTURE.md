@@ -268,10 +268,11 @@ parks it the same way rather than reporting a network/`queue_expired` loss;
 network/5xx → local backoff (2s→5min, 8 attempts, 24h expiry) replaying on
 online/visibility/mount.
 `GET /api/tasks/queue` **drains due rows first, then lists** pending/recent
-rows for banners — the client's 30 s queue poll is a drain trigger, so a queued
-command moves with any open device and no longer waits for someone to GET
-`/api/tasks/sync` (the heartbeat is gate-free: once a device polls, it keeps
-polling); `DELETE` cancels one (the original actor or any parent). The queue
+rows for banners — a second drain trigger that runs whenever a device's 30 s
+queue heartbeat polls this route (the heartbeat is gate-free once started; its
+first beat still comes from an existing trigger, and the 60 s `/sync` drain
+remains the universal one every signed-in page hits); `DELETE` cancels one (the
+original actor or any parent). The queue
 carries `/api/tasks/claim`, `/api/tasks/approve`, `/api/tasks/manage`,
 `/api/tasks/config`, `/api/tasks/ledger`, `/api/rewards/redeem`;
 `/api/tasks/quarantine` is not carried. A PIN never enters a queue row — intake

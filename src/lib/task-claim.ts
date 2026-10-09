@@ -59,6 +59,14 @@ export interface ClaimCommand {
   memberName?: string;
   pin?: string;
   targetName?: string;
+  /**
+   * SERVER-QUEUE ONLY — the instant a deferred `claim`/`complete` was captured
+   * (the queue row's `created`). The service re-checks `sentBackAt` against it
+   * on its FRESH read, under the task-command lock, so an undo that commits
+   * after the drain's cheap pre-check cannot be paid by the replay. The wire
+   * parser never admits this key; only `decodeInternalCommand` attaches it.
+   */
+  supersedeIfSentBackAfter?: string;
 }
 
 export type ClaimAuthentication = "pin" | "session" | "internal";
@@ -1326,6 +1334,22 @@ async function executeClaimCommandUnlocked(
   if (lookup.ambiguous) return failure(command.operationId, "ambiguous_task", action);
   if (!lookup.task || lookup.tombstoned) return failure(command.operationId, "unknown_task", action);
   const task = lookup.task;
+  // The queued replay's supersede guard, re-checked on the FRESH read and
+  // INSIDE the task-command lock (this whole function runs under
+  // withWeekLedgerLock -> withTaskCommandLock, the same lock the undo's
+  // reopenTask write takes). The drain's cheap pre-check can go stale between
+  // its read and this one; this check-then-act cannot race a concurrent undo,
+  // so a retracted completion is refused before ANY ledger write.
+  if (
+    command.supersedeIfSentBackAfter &&
+    (action === "claim" || action === "complete")
+  ) {
+    const retractedMs = Date.parse(String((task as Record<string, any>).sentBackAt ?? ""));
+    const capturedMs = Date.parse(command.supersedeIfSentBackAfter);
+    if (Number.isFinite(retractedMs) && Number.isFinite(capturedMs) && retractedMs >= capturedMs) {
+      return failure(command.operationId, "already_undone", action);
+    }
+  }
   const baseActor: ClaimActor = { ...actor, authentication: rawActor.authentication ?? "internal" };
   const actorRole = actor.role.trim().toLowerCase();
   if (!sessionPolicyAllows(baseActor, task, action)) {
@@ -1767,16 +1791,29 @@ export function taskClaimInternalPayload(command: ClaimCommand): Record<string, 
 
 function decodeInternalCommand(command: InternalTaskCommand): ClaimCommand | null {
   if (!isRecord(command.payload)) return null;
+  // `supersedeIfSentBackAfter` is SERVER-QUEUE ONLY: the wire parser
+  // (`parseClaimCommand`) never admits it, and only the two actions that
+  // re-apply a completion may carry it. Everything else keeps the old keys.
+  const guarded = command.kind === "claim" || command.kind === "complete";
   const allowed = command.kind === "crew-remove"
     ? new Set(["taskId", "targetName"])
-    : new Set(["taskId"]);
+    : guarded
+      ? new Set(["taskId", "supersedeIfSentBackAfter"])
+      : new Set(["taskId"]);
   if (Object.keys(command.payload).some((key) => !allowed.has(key))) return null;
+  const { supersedeIfSentBackAfter, ...wirePayload } = command.payload;
   const parsed = parseClaimCommand({
     action: command.kind,
     operationId: command.operationId,
-    ...command.payload,
+    ...wirePayload,
   });
-  return "error" in parsed ? null : parsed;
+  if ("error" in parsed) return null;
+  const capturedAt =
+    typeof supersedeIfSentBackAfter === "string" &&
+    Number.isFinite(Date.parse(supersedeIfSentBackAfter))
+      ? supersedeIfSentBackAfter
+      : undefined;
+  return capturedAt ? { ...parsed, supersedeIfSentBackAfter: capturedAt } : parsed;
 }
 
 async function handleCommand(

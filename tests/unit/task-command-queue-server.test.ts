@@ -286,7 +286,8 @@ describe("drainDueTaskCommandQueue", () => {
   });
 
   it("replays a due pending row through the service seam and records the resolved marker", async () => {
-    const { state, pb } = makePb([dueRow()]);
+    const row = dueRow();
+    const { state, pb } = makePb([row]);
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
 
     const summary = await drainDueTaskCommandQueue();
@@ -303,7 +304,9 @@ describe("drainDueTaskCommandQueue", () => {
           role: "child",
           authentication: "pin",
         },
-        payload: { taskId: 42 },
+        // The claim/complete replay carries the queue row's capture instant so
+        // the service can re-check `sentBackAt` atomically under its lock.
+        payload: { taskId: 42, supersedeIfSentBackAfter: row.created },
       },
       { source: "server" },
     );

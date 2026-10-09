@@ -649,11 +649,12 @@ export async function pollQueue(): Promise<void> {
 }
 
 function scheduleFollowUpPoll(): void {
-  // The heartbeat must not depend on THIS device owning rows it is watching on
-  // someone else's behalf. A device that never held a `serverQueued` row (the
-  // parent's card, watching a kid's command) still polls, so a queued command
-  // drains and resolves within one interval — and every open device keeps the
-  // server queue moving, not just the one that queued the command.
+  // Once a device's heartbeat has started it keeps beating: the old gate
+  // stopped the poll as soon as THIS device lost its own server rows, so a
+  // command queued on another device stopped being watched from here. The
+  // first beat still comes from an existing trigger (a server row, a 202, a
+  // resolution), and `/sync` remains the universal drain every signed-in page
+  // hits through its 60 s CacheRefresher.
   scheduleQueuePoll(TASK_QUEUE_POLL_INTERVAL_MS);
 }
 

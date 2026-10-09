@@ -25,7 +25,7 @@ vi.mock("@/lib/live-member", () => ({
   getLiveMembers: mocks.getLiveMembers,
 }));
 
-import { ensureTaskClaimHandlersRegistered } from "@/lib/task-claim";
+import { ensureTaskClaimHandlersRegistered, parseClaimCommand } from "@/lib/task-claim";
 import { drainDueTaskCommandQueue } from "@/lib/task-command-queue-server";
 
 const WEEK = "week_data";
@@ -53,6 +53,10 @@ function makePb(options: {
   completedTask?: boolean;
   pendingApproval?: boolean;
   sentBackAt?: string;
+  /** The critic's TOCTOU shape, deterministic: the drain's pre-check reads a
+   *  row with NO retraction, and every read the service makes afterwards sees
+   *  one (the undo "commits" between the two reads). */
+  retractAfterFirstSnapshotRead?: boolean;
 }) {
   const weekStart = mondayISO();
   const task: Record<string, any> = {
@@ -80,6 +84,9 @@ function makePb(options: {
   let weekRow: Record<string, any> | null = null;
   const weekWrites: unknown[] = [];
   const taskRows: Record<string, any>[] = [{ ...task, id: "task-row-1" }];
+  // Shared across every `collection(SNAP)` handle — the flip must depend on
+  // the TOTAL read count, not one factory call's local count.
+  let snapshotReads = 0;
 
   const queueRow: Record<string, any> = {
     id: "queue-1",
@@ -110,7 +117,19 @@ function makePb(options: {
     }
     if (name === SNAP) {
       return {
-        getFullList: async () => [structuredClone(snapshotRow)],
+        getFullList: async () => {
+          snapshotReads += 1;
+          if (options.retractAfterFirstSnapshotRead && snapshotReads > 1) {
+            const data = typeof snapshotRow.data === "string" ? JSON.parse(snapshotRow.data) : snapshotRow.data;
+            data.tasks = (data.tasks ?? []).map((row: any) =>
+              Number(row.id) === 101
+                ? { ...row, sentBackAt: options.sentBackAt ?? T_RETRACT }
+                : row,
+            );
+            snapshotRow = { ...snapshotRow, data: JSON.stringify(data) };
+          }
+          return [structuredClone(snapshotRow)];
+        },
         update: async (_id: string, payload: any) => {
           snapshotRow = { ...snapshotRow, ...payload };
           return snapshotRow;
@@ -182,7 +201,7 @@ beforeEach(() => {
 });
 
 describe("the claim replay refuses an intent the row has already retracted", () => {
-  it("refuses when sentBackAt is AT the queue row's creation: terminal already_undone, no earn", async () => {
+  it("refuses when sentBackAt is AFTER the queue row's creation: terminal already_undone, no earn", async () => {
     const fixture = makePb({ sentBackAt: T_RETRACT });
 
     await drain(fixture);
@@ -194,14 +213,33 @@ describe("the claim replay refuses an intent the row has already retracted", () 
     expect(fixture.earned()).toBe(false);
   });
 
-  it("refuses when sentBackAt is AFTER the queue row's creation: the retraction supersedes", async () => {
-    const fixture = makePb({ sentBackAt: T_AFTER_RETRACT });
+  it("refuses on an EXACT timestamp tie (sentBackAt === the queue row's created)", async () => {
+    // Pins `>=`, not `>`: a retraction at the capture instant supersedes too.
+    const fixture = makePb({ sentBackAt: T_RETRACT });
+    fixture.queueRow.created = T_RETRACT;
 
     await drain(fixture);
 
     expect(fixture.queueRow.status).toBe("resolved");
     expect(fixture.queueRow.result).toMatchObject({ duplicate: true, reason: "already_undone" });
     expect(fixture.earned()).toBe(false);
+  });
+
+  it("re-checks on the service's FRESH read: a retraction landing after the drain's pre-check still refuses", async () => {
+    // The critic's TOCTOU interleaving, made deterministic: the drain's
+    // pre-check reads a row with NO retraction; every read the service makes
+    // afterwards sees one (the undo "commits" in between). Without the locked
+    // re-check inside executeClaimCommand the replay would pay.
+    const fixture = makePb({ retractAfterFirstSnapshotRead: true });
+
+    const summary = await drain(fixture);
+
+    expect(summary.acknowledged).toBe(1);
+    expect(fixture.queueRow.status).toBe("resolved");
+    expect(fixture.queueRow.result).toMatchObject({ duplicate: true, reason: "already_undone" });
+    expect(fixture.weekWrites).toHaveLength(0);
+    expect(fixture.earned()).toBe(false);
+    expect(fixture.snapshotTask()?.completed).toBe(false);
   });
 
   it("replays and pays when sentBackAt is OLDER than the queue row's creation", async () => {
@@ -225,6 +263,18 @@ describe("the claim replay refuses an intent the row has already retracted", () 
 
     expect(fixture.queueRow.status).toBe("resolved");
     expect(fixture.earned()).toBe(true);
+  });
+
+  it("never admits the guard instant from the wire parser", () => {
+    // Only the server queue may attach `supersedeIfSentBackAfter`; a client
+    // body carrying it is refused outright, so the guard cannot be bypassed.
+    const parsed = parseClaimCommand({
+      action: "complete",
+      operationId: "op-wire-guard",
+      taskId: 101,
+      supersedeIfSentBackAfter: T_RETRACT,
+    });
+    expect(parsed).toEqual({ error: "forbidden_claim_payload" });
   });
 
   it("does NOT guard the undo action: a queued retraction still replays", async () => {
