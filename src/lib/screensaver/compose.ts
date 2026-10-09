@@ -5,6 +5,8 @@
  */
 import { parseMinutes } from "@/lib/consuela/chat-context";
 import { googleEventCoversDay } from "@/lib/calendar/google-mapping";
+import { localTodayISO } from "@/lib/local-date";
+import { isCompletedInWeek } from "@/lib/task-utils";
 
 export interface ScreensaverEvent {
   title: string;
@@ -75,19 +77,29 @@ export function selectTodayEvents(
 }
 
 /**
- * Family-wide week scoreboard. done = completed THIS week (completedInWeek is
- * the Monday-ISO week key written by task-utils). open = not done, not
- * completed this week, and due by week end (or no due date at all).
+ * Family-wide week scoreboard. done = completed THIS week (the shared
+ * `isCompletedInWeek` predicate — a legacy row with no `completedInWeek` stamp
+ * but a `completedAt` inside the week is done, where the old strict stamp
+ * compare dropped it from BOTH buckets). open = not completed at all and due
+ * by week end (or no due date at all). A completed row is never open, and a
+ * completion from another week is neither — the same honest-null shape as
+ * before.
  */
 export function choreProgress(
-  tasks: Array<{ status?: string; completedInWeek?: string; due?: string }>,
+  tasks: Array<{ status?: string; completed?: boolean; completedInWeek?: string; completedAt?: string; due?: string }>,
   weekKey: string,
-  weekEndISO: string
+  weekEndISO: string,
+  today: string = localTodayISO()
 ): { done: number; total: number } {
-  const done = tasks.filter((t) => t.completedInWeek === weekKey).length;
-  const open = tasks.filter(
-    (t) => t.status !== "done" && t.completedInWeek !== weekKey && (!t.due || t.due <= weekEndISO)
+  const isCompleted = (t: { status?: string; completed?: boolean }) => t.completed ?? t.status === "done";
+  const done = tasks.filter((t) =>
+    isCompletedInWeek(
+      { completed: isCompleted(t), completedInWeek: t.completedInWeek, completedAt: t.completedAt },
+      weekKey,
+      today
+    )
   ).length;
+  const open = tasks.filter((t) => !isCompleted(t) && (!t.due || t.due <= weekEndISO)).length;
   return { done, total: done + open };
 }
 

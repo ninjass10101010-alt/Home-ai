@@ -1686,20 +1686,34 @@ describe("POST /api/tasks/approve — action:approve", () => {
 
 describe("POST /api/tasks/approve — action:send-back", () => {
   it("reopens a solo pending row with sentBackAt and no ledger write", async () => {
-    const { pb, history, points, collectionUpdated, snapshotUpdates } = makePb();
+    // Seed all three completion stamps so the test proves send-back CLEARS
+    // them (B2 D4), not merely that they were absent.
+    const { pb, history, points, collectionUpdated, snapshotUpdates } = makePb({
+      snapshotTasks: [pendingTaskRow({ completedAt: "2026-09-19T17:45:00.000Z" })],
+    });
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
     const res = await POST(jsonReq({ action: "send-back", memberName: "Rebecca (Mom)", pin: "0202", taskId: 101 }));
     expect(res.status).toBe(200);
     expect(collectionUpdated()?.completed).toBe(false);
     expect(collectionUpdated()?.pendingApproval).toBeNull();
     expect(typeof collectionUpdated()?.sentBackAt).toBe("string");
+    // D4 (B2): the whole completion set is cleared on the PB projection too —
+    // a re-completion re-enters through the stamping primitive and can inherit
+    // nothing stale.
+    expect(collectionUpdated()?.completedBy).toBeNull();
+    expect(collectionUpdated()?.completedAt).toBeNull();
+    expect(collectionUpdated()?.completedInWeek).toBeNull();
     expect(history()).toHaveLength(0);
     expect(points()["Caspian Garcia"]).toBeUndefined();
     const data = typeof snapshotUpdates()?.data === "string"
       ? JSON.parse(snapshotUpdates().data)
       : snapshotUpdates()?.data;
-    expect(data.tasks.find((t: any) => t.id === 101)?.completed).toBe(false);
-    expect(data.tasks.find((t: any) => t.id === 101)?.sentBackAt).toBeTruthy();
+    const snapRow = data.tasks.find((t: any) => t.id === 101);
+    expect(snapRow?.completed).toBe(false);
+    expect(snapRow?.sentBackAt).toBeTruthy();
+    expect(snapRow?.completedBy).toBeNull();
+    expect(snapRow?.completedAt).toBeNull();
+    expect(snapRow?.completedInWeek).toBeNull();
   });
 
   it("crew send-back strips checkedInAt from every member (B4)", async () => {

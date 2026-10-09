@@ -15,6 +15,7 @@ import {
   loadHallOfFame,
   loadHallOfFameMerged,
   loadPreviousWeekRanksMerged,
+  isCompletedInWeek,
 } from "@/lib/task-utils";
 import { useAllTimeTotals, type AllTimeReadState } from "@/hooks/useAllTimeTotals";
 import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard/level";
@@ -132,7 +133,9 @@ export function useLeaderboardData() {
   const entries = useMemo<LeaderboardEntry[]>(() => {
     if (!mounted || !weekData) return [];
     const members = db.selectMembers();
-    const currentMonday = localWeekStartISO();
+    // The SAME week the points beside it describe: `weekData.weekStart` is the
+    // server's week (localWeekStartISO stays imported for the :110 fallback).
+    const currentMonday = weekData.weekStart;
     const roster = members
       .filter((m: any) => m.role !== "pet")
       .map((m: any) => {
@@ -167,10 +170,7 @@ export function useLeaderboardData() {
           allTimePoints,
           allTimeCompletions: allTimeComps,
           completedInWeek: tasks.filter(
-            t => t.completed && t.completedBy === name && (
-              t.completedInWeek === currentMonday ||
-              (!t.completedInWeek && t.completedAt && t.completedAt >= currentMonday)
-            )
+            t => t.completed && t.completedBy === name && isCompletedInWeek(t, currentMonday)
           ).length,
         };
       });

@@ -71,9 +71,11 @@ async function fetchWeather(now: Date): Promise<ScreensaverPayload["weather"]> {
   return wx;
 }
 
-function choreRowsFor(read: CanonicalTaskRead): Array<{ status: string; completedInWeek?: string; due?: string }> {
+function choreRowsFor(read: CanonicalTaskRead): Array<{ status: string; completed?: boolean; completedAt?: string; completedInWeek?: string; due?: string }> {
   return read.tasks.map((task: any) => ({
     status: task.completed === true ? "done" : "pending",
+    completed: task.completed === true,
+    completedAt: task.completedAt,
     completedInWeek: task.completedInWeek,
     due: task.due,
   }));
@@ -130,7 +132,7 @@ export async function composeScreensaverPayload(now: Date = new Date()): Promise
       weekStart,
       localWeekdayShort(now)
     ),
-    tasks: choreProgress(choreRowsFor(taskRead), wk, weekEnd),
+    tasks: choreProgress(choreRowsFor(taskRead), wk, weekEnd, today),
     briefing: briefingDigest(summary),
     weather,
   };

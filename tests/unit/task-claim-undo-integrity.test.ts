@@ -928,3 +928,65 @@ describe("task-page wave B3 — a pre-contract week is evidence for nobody, in E
     expect(fixture.weekWrites).toHaveLength(0);
   });
 });
+
+// Named "task-page wave B2", NOT "B6": this suite's own B1–B5 describes (:298,
+// :366, :463, :514, :713) are a FINISHED historical series, and a wave-prefixed
+// name is what keeps the two apart.
+describe("task-page wave B2 — claim owns the current-week row without the rollover (the D3 contract)", () => {
+  it("creates the current week_data row when none exists, and does not call the rollover", async () => {
+    const fixture = makePb({
+      tasks: [soloTask({ completed: false, status: "pending", completedBy: null, completedAt: null, completedInWeek: null })],
+      weekRows: [],
+      archiveRows: [],
+    });
+    const result = await run(command("complete", 42, "op-d3-create"), actor("parent-alex"), fixture);
+    expect(result.ok).toBe(true);
+    // The stamp and the ledger week are the SAME key, always.
+    expect(fixture.weekWrites.map((w) => w.weekStart)).toEqual([AUTHORITY_WEEK]);
+  });
+
+  it("serialises against the rollover on the SAME week-ledger lock (no duplicate row)", async () => {
+    // Hold AUTHORITY_WEEK's ledger lock (as the rollover does), start a claim,
+    // and assert the claim does not reach PocketBase until the lock is
+    // released — the property that makes "claim creates the row, rollover
+    // reconciles it" safe instead of a duplicate-row race.
+    const fixture = makePb({
+      tasks: [soloTask({ completed: false, status: "pending", completedBy: null, completedAt: null, completedInWeek: null })],
+      weekRows: [],
+      archiveRows: [],
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const rollover = withWeekLedgerLock(AUTHORITY_WEEK, async () => {
+      await held;
+    });
+
+    const claim = run(command("complete", 42, "op-d3-lock"), actor("parent-alex"), fixture);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fixture.weekWrites).toHaveLength(0);
+
+    release();
+    const result = await claim;
+    await rollover;
+
+    expect(result.ok).toBe(true);
+    expect(fixture.weekWrites.map((w) => w.weekStart)).toEqual([AUTHORITY_WEEK]);
+  });
+
+  it("refuses a second command on an unstamped done row with already_completed (A5)", async () => {
+    // The client double-tap guard is stamp-only (`completedInWeek ===
+    // localWeekStartISO()`), so on an unstamped done row it queues a second
+    // command; the server refuses honestly via `doneThisWeek`
+    // (task-claim.ts:377-385) — no double-pay, no second write.
+    const fixture = makePb({
+      tasks: [soloTask({ completed: false, status: "done", completedBy: "Alex", completedAt: null, completedInWeek: null })],
+      weekRows: [weekRow(AUTHORITY_WEEK, [])],
+    });
+    const result = await run(command("complete", 42, "op-a5-refuse"), actor("parent-alex"), fixture);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("already_completed");
+    expect(fixture.weekWrites).toHaveLength(0);
+  });
+});

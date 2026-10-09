@@ -39,4 +39,23 @@ describe("meals-week-utils timezone safety", () => {
     process.env.TZ = "Australia/Sydney";
     expect(localPreviousDayISO("2026-09-01")).toBe("2026-08-31");
   });
+
+  it("weekStartForDate is zone-invariant — the family zone and the process zone cannot disagree (B2 D5)", () => {
+    // localWeekStartISO couples an Intl-zone date (localTodayISO) with
+    // process-local Date parsing (weekStartForDate). The answer must not move
+    // when the PROCESS zone moves, or the seam is a latent wrong week.
+    const expected = new Map<string, string>();
+    for (const zone of ["America/Detroit", "UTC", "Asia/Tokyo", "Australia/Sydney", "America/Havana", "Pacific/Chatham"]) {
+      process.env.TZ = zone;
+      expected.set(zone, weekStartForDate("2026-09-28"));
+    }
+    expect(new Set(expected.values()), "zone-invariant Monday").toEqual(new Set(["2026-09-28"]));
+
+    // And the seam itself, in the family's zone, under a Sunday-evening instant.
+    // 2026-10-05T02:00:00.000Z is Sun 2026-10-04 22:00 EDT (NOT Mon 22:00), so the
+    // local day is 2026-10-04 and the Monday that contains it is 2026-09-28 —
+    // the week that ENDED.
+    process.env.TZ = "America/Detroit";
+    expect(localWeekStartISO(new Date("2026-10-05T02:00:00.000Z"))).toBe("2026-09-28");
+  });
 });

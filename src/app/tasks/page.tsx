@@ -40,7 +40,7 @@ import {
   emptyWeekData,
   loadWeekData, saveWeekData,
   calculateRealStreak,
-  getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
+  getThisWeeksCompletedDates, getThisWeeksCompletedTasks, isCompletedInWeek,
   loadTasks, saveTasks,
   saveRewards, savePenalties,
   getPreviousWeekRanks, loadHallOfFame, loadHallOfFameMerged,
@@ -57,6 +57,7 @@ import {
   crewMemberCheckedIn, crewCheckinProgress,
   crewCloseModeOf,
   normalizeSpeedBonus,
+  needsStreakSave,
 } from "@/lib/task-utils";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import type { TaskOutboxAcknowledgedEvent } from "@/lib/task-command-store";
@@ -2228,10 +2229,7 @@ export default function TasksPage() {
         }
         const currentMonday = weekData.weekStart;
         const completedInWeek = visibleTasks.filter(
-          t => t.completed && t.completedBy === name && (
-            t.completedInWeek === currentMonday ||
-            (!t.completedInWeek && t.completedAt && t.completedAt >= currentMonday)
-          )
+          t => t.completed && t.completedBy === name && isCompletedInWeek(t, currentMonday)
         ).length;
         return {
           name,
@@ -2345,13 +2343,12 @@ export default function TasksPage() {
       .slice(0, 3);
   }, [visibleTasks, isLoggedIn, currentUser, myIdentity]);
 
-  const needsStreakSave = useMemo(() => {
+  const streakSaveNeeded = useMemo(() => {
     if (!isLoggedIn || !currentUser) return false;
-    const entry = dynamicLeaderboard.find(e => e.name === myIdentity.name);
-    if (!entry || entry.streak < 2) return false;
-    const today = localTodayISO();
-    return !visibleTasks.some(t => t.completed && myIdentity.isMe(t.completedBy) && t.completedAt && t.completedAt.split("T")[0] === today);
-  }, [dynamicLeaderboard, visibleTasks, isLoggedIn, currentUser, myIdentity]);
+    // Delegates to the exported helper (one Local-day rule for the nag, shared
+    // with the wall and any future surface) — the page no longer re-derives it.
+    return needsStreakSave(myIdentity.name ?? "", weekData, visibleTasks);
+  }, [weekData, visibleTasks, isLoggedIn, currentUser, myIdentity]);
 
   // The neighbour is a POSITION in the sorted board, never `rank ± 1`. Under
   // competition ranking `rank` skips: 100/100/60/60/10 makes the fourth row
@@ -3308,7 +3305,7 @@ export default function TasksPage() {
               return myEntry ? <YourCard entry={myEntry} aheadEntry={aheadEntry} getMemberColor={(n: string) => memberColors[n] || "green"} allTimeRead={allTimeRead} /> : null;
             })()}
 
-            {needsStreakSave && (
+            {streakSaveNeeded && (
               <StreakSaverBanner
                 streak={myEntry?.streak ?? 0}
                 quickTask={myPendingQuests[0] || null}

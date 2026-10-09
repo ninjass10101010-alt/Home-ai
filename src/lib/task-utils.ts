@@ -391,20 +391,42 @@ export function getThisWeeksCompletedDates(tasks: Task[], memberName?: string, t
     });
 }
 
+/**
+ * B2 — the ONE predicate for "this task was completed inside the week that
+ * starts on `weekStart`".
+ *
+ * `weekStart` is a LOCAL Monday date string; `completedAt` is a UTC instant.
+ * Comparing the two as strings is the trap `localDateOf` exists to kill:
+ * lexically `"2026-10-05T02:00:00.000Z" >= "2026-10-05"` is TRUE, and that
+ * instant is Sunday 22:00 in Detroit — the week that ENDED — so a
+ * Sunday-evening Detroit completion is pulled INTO the new week, and the
+ * rollover has already flipped `weekData.weekStart` by then because it runs on
+ * every sync. Convert the instant to the family zone first, then compare local
+ * day to local day.
+ *
+ * A `completedInWeek` stamp that names ANOTHER week is authoritative and is
+ * never overridden: a completion approved in a later week keeps the week it
+ * was completed in (the approval pays the AUTHORITY week — see
+ * `entryDescription` in task-approval.ts), so no surface may "helpfully"
+ * rewrite it to match the points week.
+ */
+export function isCompletedInWeek(
+  task: Pick<Task, "completed" | "completedInWeek" | "completedAt">,
+  weekStart: string,
+  today: string = localTodayISO()
+): boolean {
+  if (!task.completed) return false;
+  if (task.completedInWeek === weekStart) return true;
+  if (task.completedInWeek) return false; // stamped into another week — that week owns it
+  if (!task.completedAt) return false;
+  const day = localDateOf(task.completedAt);
+  return day >= weekStart && day <= today;
+}
+
 export function getThisWeeksCompletedTasks(tasks: Task[]): Task[] {
   const monday = localWeekStartISO();
   const now = localTodayISO();
-  return tasks.filter(
-    (t) => t.completed && (
-      t.completedInWeek === monday ||
-      // Unstamped rows: compare LOCAL days. `completedAt` is a UTC instant, and
-      // lexically "2026-09-28T14:00:00.000Z" > "2026-09-28", so the old
-      // `completedAt <= now` was false for EVERY completion made on the current
-      // day — an unstamped task never counted as this week's, on either feed
-      // (the Tasks board filter and the kid's "Done today" card).
-      (!t.completedInWeek && t.completedAt && localDateOf(t.completedAt) >= monday && localDateOf(t.completedAt) <= now)
-    )
-  );
+  return tasks.filter((t) => isCompletedInWeek(t, monday, now));
 }
 
 export function loadTasks(): Task[] {
@@ -1162,10 +1184,7 @@ export function getMemberAllTimeCompletions(
 ): number {
   const archive = getArchivedWeeks();
   const thisWeekCount = tasks.filter(
-    (t) => t.completed && t.completedBy === memberName && (
-      t.completedInWeek === currentWeek.weekStart ||
-      (!t.completedInWeek && t.completedAt && t.completedAt >= currentWeek.weekStart)
-    )
+    (t) => t.completed && t.completedBy === memberName && isCompletedInWeek(t, currentWeek.weekStart)
   ).length;
 
   let pastCompletions = 0;
@@ -1271,11 +1290,13 @@ export function getDailyQuests(memberName: string, tasks: Task[]): Task[] {
 export function needsStreakSave(memberName: string, week: WeekData, tasks: Task[]): boolean {
   const streak = week.streak[memberName] || 0;
   if (streak < 2) return false;
-  // Local calendar day — with the UTC date this nag fired every evening
-  // ("no completion tomorrow" → banner begging a save the kid already earned).
+  // Local calendar day, like the streak itself: `localDateOf` converts the UTC
+  // instant to the family zone. Slicing the ISO string (`.split("T")[0]`)
+  // yields its UTC date, so in America/Detroit a chore finished at 20:30 read
+  // as tomorrow and the nag fired every evening for a save already earned.
   const today = localTodayISO();
   const completedToday = tasks.some(
-    t => t.completed && t.completedBy === memberName && t.completedAt && t.completedAt.split("T")[0] === today
+    t => t.completed && t.completedBy === memberName && t.completedAt && localDateOf(t.completedAt) === today
   );
   return !completedToday;
 }

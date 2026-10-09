@@ -16,7 +16,7 @@
 // this-week filter) and `KidHome.tsx:391` (the kid's "Done today" card).
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { getThisWeeksCompletedTasks } from "@/lib/task-utils";
+import { getThisWeeksCompletedTasks, isCompletedInWeek } from "@/lib/task-utils";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import type { Task } from "@/types/tasks";
 
@@ -104,5 +104,28 @@ describe("getThisWeeksCompletedTasks — an unstamped completion is still this w
     // previous one) — even at 21:00 local, when the UTC date has rolled over.
     expect(localTodayISO()).toBe("2026-09-28");
     expect(localWeekStartISO()).toBe("2026-09-28");
+  });
+
+  it("agrees with the shared isCompletedInWeek predicate on every fixture shape (B2)", () => {
+    atLocal("2026-10-07T21:00:00-04:00"); // Wed 21:00 EDT — today 2026-10-07, monday 2026-10-05
+    const fixtures = [
+      // Stamped this week (the fast path).
+      { id: 1, completed: true, completedBy: "Caspian", completedAt: "2026-10-07T14:00:00.000Z", completedInWeek: "2026-10-05" },
+      // Unstamped, completed today (the local-day fallback).
+      { id: 2, completed: true, completedBy: "Caspian", completedAt: "2026-10-07T14:00:00.000Z", completedInWeek: undefined },
+      // Stamped into the previous week — the stamp wins.
+      { id: 3, completed: true, completedBy: "Caspian", completedAt: "2026-09-28T14:00:00.000Z", completedInWeek: "2026-09-28" },
+      // Unstamped, completed last Saturday — outside the week.
+      { id: 4, completed: true, completedBy: "Caspian", completedAt: "2026-10-03T14:00:00.000Z", completedInWeek: undefined },
+    ];
+    const expected = getThisWeeksCompletedTasks(fixtures as never)
+      .map((t) => t.id)
+      .sort();
+    expect(
+      fixtures
+        .filter((t) => isCompletedInWeek(t as never, "2026-10-05"))
+        .map((t) => t.id)
+        .sort()
+    ).toEqual(expected);
   });
 });

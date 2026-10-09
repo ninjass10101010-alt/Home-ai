@@ -74,6 +74,17 @@ describe("choreProgress", () => {
     ];
     expect(choreProgress(tasks, "2026-09-07", "2026-09-13")).toEqual({ done: 1, total: 3 });
   });
+
+  it("counts an unstamped completion as done, and never also as open (B2 A2)", () => {
+    // The row carries NO `completed` field — exactly what exercises the
+    // `t.completed ?? t.status === "done"` fallback. Its instant is Wed
+    // 2026-10-07 10:00 EDT (plan §0.5); the week key is Mon 2026-10-05.
+    const tasks = [
+      { status: "done", completedInWeek: undefined, completedAt: "2026-10-07T14:00:00.000Z", due: "2026-10-07" },
+      { status: "pending", due: "2026-10-11" }, // open: due ON the week end
+    ];
+    expect(choreProgress(tasks, "2026-10-05", "2026-10-11", "2026-10-07")).toEqual({ done: 1, total: 2 });
+  });
 });
 
 describe("briefingDigest", () => {
