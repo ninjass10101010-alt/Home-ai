@@ -43,10 +43,10 @@ vi.mock("@/lib/server-auth", async (importOriginal) => {
   return { ...actual, verifyPinFromPB: mocks.verifyPinFromPB };
 });
 
-vi.mock("@/lib/live-member", () => ({
-  getLiveMemberById: mocks.getLiveMemberById,
-  getLiveMembers: mocks.getLiveMembers,
-}));
+vi.mock("@/lib/live-member", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, getLiveMemberById: mocks.getLiveMemberById, getLiveMembers: mocks.getLiveMembers };
+});
 
 vi.mock("@/lib/task-week-rollover", () => ({
   ensureCurrentTaskWeek: mocks.ensureCurrentTaskWeek,

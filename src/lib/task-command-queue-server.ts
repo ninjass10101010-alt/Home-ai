@@ -7,6 +7,7 @@ import { ensureTaskApprovalHandlersRegistered } from "@/lib/task-approval";
 import { executeLedgerCommand } from "@/lib/task-ledger-command";
 import { applyWeekLedgerOperation, type LedgerProjection } from "@/lib/ledger-operations";
 import {
+  findCanonicalTask,
   mutateSnapshotWithMeta,
   persistSnapshotWeek,
   type SnapshotData,
@@ -307,11 +308,41 @@ function internalResultToOutcome(
 }
 
 /**
+ * The drain-time supersede guard for queued `claim` / `complete` intents.
+ *
+ * A queued command is a deferred intent, not a promise; it may only apply
+ * while the row still carries the state it was written against. `sentBackAt`
+ * is the durable retraction stamp, and the queue row's `created` is when the
+ * intent was captured — a retraction at or after that instant means the
+ * intent is gone. Refusing with `already_undone` (an existing duplicate
+ * reason) is a terminal ack: the family sees the tap was taken back, and
+ * nothing is paid.
+ *
+ * `snapshot_write_failed` needs no supersede guard of its own: the canonical
+ * write records its operation receipt BEFORE it verifies, so a re-run with the
+ * same operationId is a duplicate read, not a re-apply.
+ */
+function claimSupersededBySendBack(
+  task: Record<string, any> | null,
+  queueRow: Record<string, any>,
+  operationId: string,
+): ReplayOutcome | null {
+  const sentBackAtMs = Date.parse(String(task?.sentBackAt ?? ""));
+  if (!Number.isFinite(sentBackAtMs)) return null;
+  const queueCreatedMs = rowCreatedAtMs(queueRow);
+  if (sentBackAtMs < queueCreatedMs) return null;
+  return {
+    kind: "duplicate",
+    ack: { operationId, duplicate: true, reason: "already_undone" },
+  };
+}
+
+/**
  * Replay ONE stored row through the same service seam its intake route used.
  * The stored actor identity is the authorization the route verified at intake
  * — no raw PIN exists anywhere in the row.
  */
-async function replayQueueRow(row: Record<string, any>): Promise<ReplayOutcome> {
+async function replayQueueRow(row: Record<string, any>, pb: AdminPB): Promise<ReplayOutcome> {
   const route = String(row.route ?? "");
   const action = String(row.action ?? "");
   const payload = isRecord(row.payload) ? (row.payload as Record<string, unknown>) : {};
@@ -328,6 +359,23 @@ async function replayQueueRow(row: Record<string, any>): Promise<ReplayOutcome> 
   try {
     if (route === "/api/tasks/claim") {
       ensureTaskClaimHandlersRegistered();
+      // Only the two actions that re-apply a completion carry the hazard; the
+      // retraction itself (`undo`) and the crew/config legs must replay.
+      if (action === "claim" || action === "complete") {
+        const taskId = Number(payload.taskId);
+        if (Number.isSafeInteger(taskId) && taskId > 0) {
+          let superseded: ReplayOutcome | null = null;
+          try {
+            const lookup = await findCanonicalTask(pb, taskId);
+            superseded = claimSupersededBySendBack(lookup.task, row, operationId);
+          } catch {
+            // An unreadable store is not a retraction: let the service answer
+            // with its own retryable failure instead of refusing the claim.
+            superseded = null;
+          }
+          if (superseded) return superseded;
+        }
+      }
       return internalResultToOutcome(
         await executeInternalTaskCommand(
           { operationId, kind: action as never, actor, payload },
@@ -493,7 +541,7 @@ export async function drainDueTaskCommandQueue(): Promise<DrainTaskCommandQueueS
     let retryable = 0;
     let permanent = 0;
     for (const row of batch) {
-      const outcome = await replayQueueRow(row);
+      const outcome = await replayQueueRow(row, pb);
       const collection = pb.collection(TASK_COMMAND_QUEUE_COLLECTION);
       if (outcome.kind === "resolved" || outcome.kind === "duplicate") {
         try {

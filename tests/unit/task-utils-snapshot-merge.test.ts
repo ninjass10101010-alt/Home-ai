@@ -14,6 +14,7 @@ vi.mock("@/db", () => ({
 
 import { localWeekStartISO } from "@/lib/local-date";
 import {
+  __resetAdoptedSnapshotRevisionForTests,
   applyTasksSnapshotToStores,
   emptyWeekData,
   mergeTasksSnapshot,
@@ -211,6 +212,7 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
 describe("applyTasksSnapshotToStores (the 60s refresh seam into localStorage)", () => {
   beforeEach(() => {
     localStorage.clear();
+    __resetAdoptedSnapshotRevisionForTests();
   });
 
   it("merges another device's task into the store loadTasks() reads", () => {
@@ -291,5 +293,34 @@ describe("applyTasksSnapshotToStores (the 60s refresh seam into localStorage)", 
     const week = JSON.parse(localStorage.getItem(WEEK_DATA_KEY)!);
     expect(week.history).toHaveLength(1);
     expect(week.points.Alex).toBe(5);
+  });
+
+  it("ignores a snapshot at or below the adopted revision", () => {
+    saveTasks([]);
+    saveWeekData(emptyWeekData());
+    // Production writes `revision` as a decimal string (snapshot-tasks.ts).
+    expect(applyTasksSnapshotToStores({ revision: "9", tasks: [{ id: 8, title: "Fresh" }] })).toBe(true);
+
+    expect(applyTasksSnapshotToStores({ revision: "8", tasks: [{ id: 9, title: "Stale" }] })).toBe(false);
+    expect(applyTasksSnapshotToStores({ revision: "9", tasks: [{ id: 10, title: "Same revision" }] })).toBe(false);
+
+    const stored = JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY)!);
+    const titles = stored.map((t: any) => t.title);
+    expect(titles).toContain("Fresh");
+    expect(titles).not.toContain("Stale");
+    expect(titles).not.toContain("Same revision");
+  });
+
+  it("still adopts a strictly newer snapshot, including the length-change case", () => {
+    saveTasks([]);
+    saveWeekData(emptyWeekData());
+    expect(applyTasksSnapshotToStores({ revision: "9", tasks: [{ id: 1, title: "Older" }] })).toBe(true);
+
+    // "9" -> "10": a string compare gets this wrong, a numeric one does not.
+    const changed = applyTasksSnapshotToStores({ revision: "10", tasks: [{ id: 2, title: "Newer" }] });
+
+    expect(changed).toBe(true);
+    const stored = JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY)!);
+    expect(stored.map((t: any) => t.title)).toContain("Newer");
   });
 });

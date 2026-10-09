@@ -62,7 +62,7 @@ import {
 } from "@/lib/task-utils";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import type { TaskOutboxAcknowledgedEvent } from "@/lib/task-command-store";
-import { onTaskOutboxAdopted } from "@/lib/task-command-store";
+import { listTaskOutbox, onTaskOutboxAdopted } from "@/lib/task-command-store";
 import { writeTaskConfig } from "@/lib/task-config-client";
 import type { TaskConfigCommand, TaskTemplateConfigItem } from "@/lib/task-config";
 import {
@@ -632,6 +632,39 @@ export default function TasksPage() {
   const addOptimisticRow = useCallback((operationId: string, row: OptimisticRow) => {
     setOptimisticRows((prev) => ({ ...prev, [operationId]: row }));
   }, []);
+  // D9: the marks are display state, but the commands are durable. A reload
+  // between the tap and the ack used to drop the affordance and render the
+  // chore as untouched — exactly what "the tap never reached the card" looks
+  // like. One mount pass re-seeds a mark per persisted non-terminal command,
+  // keyed by its own operationId (the same key the ack releases), so every
+  // surface still shows the command waiting.
+  useEffect(() => {
+    const entries = listTaskOutbox();
+    if (!entries.length) return;
+    setOptimisticRows((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const entry of entries) {
+        if (entry.status !== "queued" && entry.status !== "retrying") continue;
+        const taskId = Number(entry.displayTarget?.taskId ?? entry.payload?.taskId);
+        if (!Number.isSafeInteger(taskId) || taskId <= 0) continue;
+        const row: OptimisticRow | null =
+          entry.action === "delete"
+            ? { kind: "remove", taskId }
+            : entry.action === "undo" || entry.action === "send-back"
+              ? { kind: "cancelling", taskId }
+              : entry.route === "/api/tasks/claim"
+                ? { kind: "pending", taskId }
+                : null;
+        if (!row) continue;
+        if (!(entry.operationId in next)) {
+          next[entry.operationId] = row;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
   // Dialog auto-dismiss timers, in ONE registry. Every PIN dialog used to clear
   // ITSELF from an uncancelled `setTimeout`, so a success that showed for 1500ms
   // and was then dismissed with Escape would null the id of the chore the user
@@ -721,8 +754,17 @@ export default function TasksPage() {
     // bank it as a silent success.
     const notice = typeof acknowledged.error === "string" ? acknowledged.error.trim() : "";
     if (!terminal && notice) showToast(notice, "error");
+    // The double-tap guard releases per task: an unrelated command's ack must
+    // not free a task whose own tap is still in flight. Only an ack that names
+    // no task at all (a config or redeem leg legitimately has none) falls back
+    // to clearing the set.
+    const ackedTaskId = Number(acknowledged.taskId);
     if (pinFreeInFlightRef.current.size > 0) {
-      for (const taskId of [...pinFreeInFlightRef.current]) pinFreeInFlightRef.current.delete(taskId);
+      if (Number.isSafeInteger(ackedTaskId) && ackedTaskId > 0) {
+        pinFreeInFlightRef.current.delete(ackedTaskId);
+      } else {
+        for (const taskId of [...pinFreeInFlightRef.current]) pinFreeInFlightRef.current.delete(taskId);
+      }
     }
     setOptimisticRows((prev) => {
       if (!(operationId in prev)) return prev;
@@ -2880,7 +2922,19 @@ export default function TasksPage() {
                 <div className="mb-2 space-y-2">
                   {[...optimisticPendingSet].map((taskId) => {
                     const row = optimisticVisible.find((t) => t.id === taskId);
-                    if (!row) return null;
+                    // D9: the strip is the TOTAL fallback. A queued delete (or a
+                    // mark seeded before the first snapshot lands) can hide the
+                    // row from every board, so an unresolvable id still renders
+                    // the command's own displayTarget title instead of a blank —
+                    // never a second copy, the Set dedupes by task.
+                    const fallback = row
+                      ? null
+                      : outboxEntries.find((entry) => {
+                          const id = Number(entry.displayTarget?.taskId ?? entry.payload?.taskId);
+                          return Number.isSafeInteger(id) && id === taskId;
+                        });
+                    const title = row?.title ?? fallback?.displayTarget?.title ?? "";
+                    if (!title) return null;
                     const cancelling = optimisticCancelling.includes(taskId);
                     return (
                       <div
@@ -2894,9 +2948,13 @@ export default function TasksPage() {
                       >
                         <span className="text-sm">⏳</span>
                         <div className="min-w-0 flex-1">
-                          <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={row.title}>{row.title}</div>
+                          <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={title}>{title}</div>
                           <div className="truncate text-xs text-text-secondary">
-                            {cancelling ? "asking the family server to reopen it" : `${row.points}pts on the way`}
+                            {cancelling
+                              ? "asking the family server to reopen it"
+                              : typeof row?.points === "number"
+                                ? `${row.points}pts on the way`
+                                : "on the way"}
                           </div>
                         </div>
                         <span className="shrink-0 text-xs font-semibold text-[var(--color-accent-ink-amber)]">

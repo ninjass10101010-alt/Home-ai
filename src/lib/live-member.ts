@@ -14,6 +14,16 @@ export type LiveParentAuth =
   | { ok: true; member: LiveMember }
   | { ok: false; status: 401 | 403 | 503; reason: string };
 
+/**
+ * The ONE parent-role predicate. The roster writer pins the exact lowercase
+ * vocabulary (`ALLOWED_MEMBER_ROLES` in members/admin), but the readers must
+ * not assume it: a case-folded or padded value is still the same role. Fold +
+ * trim here, never at a call site, so the four gates can never drift.
+ */
+export function isParentRole(role: unknown): boolean {
+  return typeof role === "string" && role.trim().toLowerCase() === "parent";
+}
+
 function sanitizeLiveMember(value: unknown): LiveMember | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
@@ -66,7 +76,7 @@ export async function verifyLiveParentSession(request: NextRequest): Promise<Liv
   try {
     const member = await getLiveMemberById(session.memberId);
     if (!member) return { ok: false, status: 401, reason: "member_missing" };
-    if (member.role !== "parent") return { ok: false, status: 403, reason: "adult_only" };
+    if (!isParentRole(member.role)) return { ok: false, status: 403, reason: "adult_only" };
     return { ok: true, member };
   } catch {
     return { ok: false, status: 503, reason: "member_lookup_failed" };

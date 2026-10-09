@@ -5,12 +5,14 @@ const mocks = vi.hoisted(() => ({
   requireLiveSession: vi.fn(),
   listTaskCommandQueueState: vi.fn(),
   cancelTaskCommandQueueRow: vi.fn(),
+  drainDueTaskCommandQueue: vi.fn(),
 }));
 
 vi.mock("@/lib/server-auth", () => ({ requireLiveSession: mocks.requireLiveSession }));
 vi.mock("@/lib/task-command-queue-server", () => ({
   listTaskCommandQueueState: mocks.listTaskCommandQueueState,
   cancelTaskCommandQueueRow: mocks.cancelTaskCommandQueueRow,
+  drainDueTaskCommandQueue: mocks.drainDueTaskCommandQueue,
 }));
 
 import { DELETE, GET } from "@/app/api/tasks/queue/route";
@@ -32,6 +34,7 @@ beforeEach(() => {
   mocks.requireLiveSession.mockReset();
   mocks.listTaskCommandQueueState.mockReset();
   mocks.cancelTaskCommandQueueRow.mockReset();
+  mocks.drainDueTaskCommandQueue.mockReset().mockResolvedValue({ acknowledged: 0, retryable: 0, permanent: 0 });
 });
 
 describe("GET /api/tasks/queue", () => {
@@ -40,6 +43,26 @@ describe("GET /api/tasks/queue", () => {
     const res = await get();
     expect(res.status).toBe(401);
     expect(await res.json()).toMatchObject({ ok: false, rows: [] });
+    expect(mocks.drainDueTaskCommandQueue).not.toHaveBeenCalled();
+  });
+
+  it("drains due rows BEFORE listing them — the status read is a drain trigger", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: true, identity: { memberId: "m1", role: "parent" } });
+    mocks.listTaskCommandQueueState.mockResolvedValue([]);
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(mocks.drainDueTaskCommandQueue).toHaveBeenCalledTimes(1);
+    expect(mocks.drainDueTaskCommandQueue.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.listTaskCommandQueueState.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("a failing drain never breaks the status read", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: true, identity: { memberId: "m1", role: "parent" } });
+    mocks.drainDueTaskCommandQueue.mockRejectedValue(new Error("pb_down"));
+    mocks.listTaskCommandQueueState.mockResolvedValue([]);
+    const res = await get();
+    expect(res.status).toBe(200);
   });
 
   it("returns the queue rows for a live session", async () => {

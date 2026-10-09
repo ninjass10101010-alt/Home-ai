@@ -158,6 +158,13 @@ export interface FlushTaskOutboxResult {
 export interface TaskOutboxAcknowledgedEvent {
   operationId?: string;
   action?: string;
+  /**
+   * The task row this acknowledgement belongs to, when the command names one
+   * (`payload.taskId`, else the first of `payload.taskIds`, else the display
+   * target). Consumers use it to release per-task guards for THIS task only;
+   * an ack with no task id (config/redeem) legitimately names none.
+   */
+  taskId?: number;
   paid?: number;
   cleared?: number;
   skipped?: number;

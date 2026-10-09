@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireLiveSession } from "@/lib/server-auth";
 import {
   cancelTaskCommandQueueRow,
+  drainDueTaskCommandQueue,
   listTaskCommandQueueState,
 } from "@/lib/task-command-queue-server";
 import { isRecord } from "@/lib/task-operation-contract";
@@ -14,9 +15,12 @@ export const dynamic = "force-dynamic";
  * cancel) a command that is waiting for the family server — across devices,
  * reloads and reboots.
  *
- * GET  — pending rows, recent failures, and terminal markers still inside
- *        their retention window. PB failures answer 503 so the client keeps
- *        its local view instead of mistaking an outage for an empty queue.
+ * GET  — drains due rows FIRST (the client's 30s heartbeat polls this route,
+ *        so a queued command no longer waits for some device to GET
+ *        /api/tasks/sync), then answers with pending rows, recent failures,
+ *        and terminal markers still inside their retention window. PB
+ *        failures answer 503 so the client keeps its local view instead of
+ *        mistaking an outage for an empty queue.
  * DELETE — cancel one pending row by operation id. Only the member who
  *        queued it or a parent may cancel; cancelling an already-terminal row
  *        is a no-op success (the family's intent was already served).
@@ -25,6 +29,13 @@ export async function GET(request: NextRequest) {
   const live = await requireLiveSession(request);
   if (!live.ok) {
     return NextResponse.json({ ok: false, error: live.error, rows: [] }, { status: live.status });
+  }
+  // The drain owns its own error handling and must never make the status read
+  // fail: a PB outage still answers 503 below through the list leg.
+  try {
+    await drainDueTaskCommandQueue();
+  } catch {
+    /* the list leg reports the outage */
   }
   let rows;
   try {

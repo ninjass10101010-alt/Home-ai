@@ -21,9 +21,10 @@ vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
-vi.mock("@/lib/live-member", () => ({
-  getLiveMembers: mocks.getLiveMembers,
-}));
+vi.mock("@/lib/live-member", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, getLiveMembers: mocks.getLiveMembers };
+});
 
 // Importing the seam registers its command handlers, so
 // executeInternalTaskCommand can dispatch to `complete` / `undo`.

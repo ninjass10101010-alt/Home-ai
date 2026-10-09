@@ -370,7 +370,13 @@ async function loadLiveParent(actor: ApprovalActor): Promise<{ roster: LiveMembe
   if (!roster) return "member_roster_unavailable";
   const parent = roster.find((member) => member.id === actor.memberId);
   if (!parent) return "unauthorized";
-  if (parent.role.toLowerCase() !== "parent") return "adult_only";
+  // The SAME predicate every route gate uses. Read defensively (like the
+  // getLiveMembers read above): suites mock this module partially, and the
+  // fold is identical either way.
+  const roleIsParent = typeof liveMember.isParentRole === "function"
+    ? liveMember.isParentRole(parent.role)
+    : parent.role.trim().toLowerCase() === "parent";
+  if (!roleIsParent) return "adult_only";
   return { roster, parent };
 }
 

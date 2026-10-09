@@ -1034,6 +1034,21 @@ export function applyTaskConfigSnapshotToStores(snapshot: any): boolean {
 }
 
 /**
+ * The highest snapshot revision this shared writer has adopted. The page keeps
+ * its own ref for its pull seam; this module-level twin is what the 60s
+ * refresher (db/index.ts) and the outbox's snapshot proof
+ * (adoptTaskOutboxSnapshot) share, so neither can overwrite a fresher store
+ * with a staler snapshot. Not persisted: after a reload the stores already
+ * hold the newest adopted data, and a response at or below it is a deep-equal
+ * no-op through mergeTasksSnapshot anyway.
+ */
+let adoptedSnapshotRevision: string | null = null;
+
+export function __resetAdoptedSnapshotRevisionForTests(): void {
+  adoptedSnapshotRevision = null;
+}
+
+/**
  * Store-level seam for the 60s refresh loop (db.refreshCaches): the caller
  * reads /api/tasks/sync and hands the snapshot here, which merges it into the
  * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
@@ -1044,6 +1059,22 @@ export function applyTaskConfigSnapshotToStores(snapshot: any): boolean {
  */
 export function applyTasksSnapshotToStores(snapshot: any): boolean {
   if (!snapshot) return false;
+  // Monotonic guard: the mount fetch and the 60s refresher race, and the
+  // server leg is authoritative within one `weekStart` — so a response that is
+  // not STRICTLY newer than the highest revision already adopted must not
+  // overwrite a fresher store. `revision` is a decimal string, which compares
+  // correctly as a string only when the length is equal, so compare as numbers.
+  const revision = typeof snapshot.revision === "string" && /^\d+$/.test(snapshot.revision)
+    ? snapshot.revision
+    : null;
+  if (
+    revision !== null &&
+    adoptedSnapshotRevision !== null &&
+    Number(revision) <= Number(adoptedSnapshotRevision)
+  ) {
+    return false;
+  }
+  if (revision !== null) adoptedSnapshotRevision = revision;
   const { tasks, weekData, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
     loadTasks(),
     loadWeekData(),

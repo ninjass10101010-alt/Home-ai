@@ -314,7 +314,7 @@ describe("POST /api/tasks/claim", () => {
     expect(res.status).toBe(404);
   });
 
-  it("detects a lost concurrent write and reports 409 instead of silent point loss", async () => {
+  it("keeps a lost concurrent write durable: 202 queued with the retryable ledger_unavailable reason", async () => {
     const siblingHistory = JSON.stringify([
       { id: 111, timestamp: "2026-08-24T10:00:00Z", member: "Sam", type: "earn", amount: 5, description: "Completed: Dishes (+5pts)", taskId: 42 },
     ]);
@@ -325,10 +325,15 @@ describe("POST /api/tasks/claim", () => {
       jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" })
     );
 
-    expect(res.status).toBe(503);
+    // B1b: `ledger_unavailable` is post-authentication and replayable through
+    // the internal claim seam, so the tap is held in the server queue instead
+    // of falling back to the browser-only retry ladder.
+    expect(res.status).toBe(202);
     const body = await res.json();
     expect(body.success).toBe(false);
+    expect(body.queued).toBe(true);
     expect(body.reason).toBe("ledger_unavailable");
+    expect(body.retryable).toBe(true);
   });
 
   it("keeps the happy path: valid pin, unclaimed task, existing week row", async () => {

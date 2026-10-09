@@ -186,7 +186,18 @@ function liveActor(
 // verified and the command is replayable through the internal claim seam.
 // Pre-auth failures (roster/PB unreachable while verifying) are NOT queueable
 // — there is no verified identity to authorize a replay.
-const QUEUEABLE_REASONS = new Set(["task_store_unavailable", "member_roster_unavailable"]);
+//
+// `ledger_unavailable` / `snapshot_write_failed` are post-auth too, and a
+// queued claim that replays later is guarded at drain time by the row's
+// `sentBackAt` versus the queue row's `created` (a retraction at or after the
+// intent's capture refuses with `already_undone`), so a tap that survived an
+// outage can never pay for a completion the child has since taken back.
+const QUEUEABLE_REASONS = new Set([
+  "task_store_unavailable",
+  "member_roster_unavailable",
+  "ledger_unavailable",
+  "snapshot_write_failed",
+]);
 
 function queuedResponse(operationId: string, reason: string, action?: string) {
   // 202 + `queued: true` is the server-queue contract: the command is durable

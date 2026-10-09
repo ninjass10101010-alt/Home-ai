@@ -33,10 +33,10 @@ vi.mock("@/lib/server-auth", () => ({
   verifyPinFromPB: mocks.verifyPinFromPB,
 }));
 
-vi.mock("@/lib/live-member", () => ({
-  getLiveMemberById: mocks.getLiveMemberById,
-  getLiveMembers: mocks.getLiveMembers,
-}));
+vi.mock("@/lib/live-member", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, getLiveMemberById: mocks.getLiveMemberById, getLiveMembers: mocks.getLiveMembers };
+});
 
 vi.mock("@/lib/local-date", () => ({
   localWeekStartISO: mocks.localWeekStartISO,

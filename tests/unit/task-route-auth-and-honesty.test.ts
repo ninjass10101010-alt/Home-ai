@@ -49,10 +49,14 @@ vi.mock("@/lib/server-auth", () => ({
   requireLiveSession: (request: Request) => mocks.requireLiveSession(request),
   verifyPinFromPB: mocks.verifyPinFromPB,
 }));
-vi.mock("@/lib/live-member", () => ({
-  verifyLiveParentSession: mocks.verifyLiveParentSession,
-  getLiveMemberById: mocks.getLiveMemberById,
-}));
+vi.mock("@/lib/live-member", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    verifyLiveParentSession: mocks.verifyLiveParentSession,
+    getLiveMemberById: mocks.getLiveMemberById,
+  };
+});
 vi.mock("@/lib/session", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, verifySession: mocks.verifySession };

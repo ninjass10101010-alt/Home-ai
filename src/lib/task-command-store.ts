@@ -220,6 +220,29 @@ function createdMs(entry: TaskOutboxEntry): number {
   return Number.isFinite(epoch) ? epoch : 0;
 }
 
+/**
+ * The task id a command names, so a terminal event can release only that
+ * row's per-task guard. `payload.taskId` first, then the first batched
+ * `taskIds` entry, then the display target (a cross-device mirrored entry
+ * carries an empty payload but a sanitized displayTarget).
+ */
+function entryTaskId(entry: TaskOutboxEntry): number | undefined {
+  const single = Number(entry.payload?.taskId);
+  if (Number.isSafeInteger(single) && single > 0) return single;
+  const many = entry.payload?.taskIds;
+  if (Array.isArray(many)) {
+    const first = Number(many[0]);
+    if (Number.isSafeInteger(first) && first > 0) return first;
+  }
+  const target = Number(entry.displayTarget?.taskId);
+  return Number.isSafeInteger(target) && target > 0 ? target : undefined;
+}
+
+function ackTaskScope(entry: TaskOutboxEntry): { taskId?: number } {
+  const taskId = entryTaskId(entry);
+  return taskId === undefined ? {} : { taskId };
+}
+
 function readLegacyIndexIds(): string[] {
   if (!isBrowser()) return [];
   let raw: string | null = null;
@@ -426,6 +449,7 @@ function scheduleEvictionNotify(evicted: TaskOutboxEntry[]): void {
       notifyAcknowledged({
         operationId: entry.operationId,
         action: entry.action,
+        ...ackTaskScope(entry),
         failed: true,
         evicted: true,
         reason: "outbox_evicted",
@@ -534,10 +558,10 @@ export async function pollQueue(): Promise<void> {
           ...(row.createdAt ? { commandCreatedAt: row.createdAt } : {}),
         };
         await adoptTaskOutboxAcknowledgement(ack);
-        const known = current.some((entry) => entry.operationId === row.operationId);
-        if (known) {
+        const knownEntry = current.find((entry) => entry.operationId === row.operationId);
+        if (knownEntry) {
           forgetTaskCommandCredential(row.operationId);
-          notifyAcknowledged({ ...ack, operationId: row.operationId });
+          notifyAcknowledged({ ...ack, operationId: row.operationId, ...ackTaskScope(knownEntry) });
           notifyAdopted();
           changed = true;
         }
@@ -547,10 +571,10 @@ export async function pollQueue(): Promise<void> {
     if (row.status === "cancelled") {
       if (!seenResolvedOperationIds.has(row.operationId)) {
         seenResolvedOperationIds.add(row.operationId);
-        const known = current.some((entry) => entry.operationId === row.operationId);
-        if (known) {
+        const knownEntry = current.find((entry) => entry.operationId === row.operationId);
+        if (knownEntry) {
           forgetTaskCommandCredential(row.operationId);
-          notifyAcknowledged({ operationId: row.operationId });
+          notifyAcknowledged({ operationId: row.operationId, ...ackTaskScope(knownEntry) });
           changed = true;
         }
       }
@@ -569,6 +593,7 @@ export async function pollQueue(): Promise<void> {
         notifyAcknowledged({
           operationId: row.operationId,
           action: merged.action,
+          ...ackTaskScope(merged),
           failed: true,
           reason: merged.lastErrorReason,
           category: "server",
@@ -609,7 +634,7 @@ export async function pollQueue(): Promise<void> {
     if (entry.serverQueued && !seenResolvedOperationIds.has(entry.operationId)) {
       seenResolvedOperationIds.add(entry.operationId);
       forgetTaskCommandCredential(entry.operationId);
-      notifyAcknowledged({ operationId: entry.operationId });
+      notifyAcknowledged({ operationId: entry.operationId, ...ackTaskScope(entry) });
       changed = true;
       continue;
     }
@@ -624,10 +649,12 @@ export async function pollQueue(): Promise<void> {
 }
 
 function scheduleFollowUpPoll(): void {
-  const hasServerRows = readRaw().some((entry) => entry.serverQueued);
-  if (hasServerRows || seenResolvedOperationIds.size > 0) {
-    scheduleQueuePoll(TASK_QUEUE_POLL_INTERVAL_MS);
-  }
+  // The heartbeat must not depend on THIS device owning rows it is watching on
+  // someone else's behalf. A device that never held a `serverQueued` row (the
+  // parent's card, watching a kid's command) still polls, so a queued command
+  // drains and resolves within one interval — and every open device keeps the
+  // server queue moving, not just the one that queued the command.
+  scheduleQueuePoll(TASK_QUEUE_POLL_INTERVAL_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -708,6 +735,7 @@ function markFailed(
   notifyAcknowledged({
     operationId: entry.operationId,
     action: entry.action,
+    ...ackTaskScope(entry),
     failed: true,
     reason,
     category,
@@ -754,7 +782,7 @@ async function acknowledgeEntry(
 ): Promise<FlushTaskOutboxResult> {
   removeEntry(entry.operationId);
   forgetTaskCommandCredential(entry.operationId);
-  notifyAcknowledged({ action: entry.action, ...body, operationId: entry.operationId });
+  notifyAcknowledged({ action: entry.action, ...body, operationId: entry.operationId, ...ackTaskScope(entry) });
   try {
     // The ack answers the command this entry represents, so the entry's own
     // `createdAt` is the freshness proof the by-id clear compares a local tap
@@ -976,6 +1004,9 @@ export async function flushTaskOutbox(): Promise<FlushTaskOutboxResult> {
     });
     await Promise.allSettled(sends);
   }
+  // Poll the server queue once while this device holds server rows (or has
+  // seen one resolve). The heartbeat itself is gate-free (scheduleFollowUpPoll
+  // always re-arms); this is only its first beat.
   const hasServerRows = readRaw().some((entry) => entry.serverQueued);
   if (hasServerRows) {
     try {
@@ -1087,7 +1118,7 @@ export function cancelTaskOutboxEntry(operationId: string): boolean {
     }).catch(() => {});
     seenResolvedOperationIds.add(operationId);
   }
-  notifyAcknowledged({ operationId, action: removed.action });
+  notifyAcknowledged({ operationId, action: removed.action, ...ackTaskScope(removed) });
   return true;
 }
 

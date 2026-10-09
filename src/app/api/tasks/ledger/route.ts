@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLiveMemberById } from "@/lib/live-member";
+import { getLiveMemberById, isParentRole } from "@/lib/live-member";
 import { verifyPinFromPB } from "@/lib/server-auth";
 import { enqueueTaskCommandRow } from "@/lib/task-command-queue-server";
 import {
@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
   if (!live) {
     return errorResponse(parsed.command.operationId, parsed.command.action, "unauthorized");
   }
-  if (live.role !== "parent") {
+  if (!isParentRole(live.role)) {
     return errorResponse(parsed.command.operationId, parsed.command.action, "adult_only");
   }
 

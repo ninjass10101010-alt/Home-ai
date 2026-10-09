@@ -267,15 +267,25 @@ and the parser's `400 invalid_body` refusal park it `auth-required`
 parks it the same way rather than reporting a network/`queue_expired` loss;
 network/5xx → local backoff (2s→5min, 8 attempts, 24h expiry) replaying on
 online/visibility/mount.
-`GET /api/tasks/queue` lists pending/recent rows for banners; `DELETE` cancels
-one (the original actor or any parent). The queue carries `/api/tasks/claim`,
-`/api/tasks/approve`, `/api/tasks/manage`, `/api/tasks/config`,
-`/api/tasks/ledger`, `/api/rewards/redeem`; `/api/tasks/quarantine` is not
-carried. A PIN never enters a queue row — intake verifies it and stores the
-verified actor identity (`actorMemberId`/`actorName`/`actorRole`,
-`actorAuthentication`). **Do not fork the key or the entry shape** — import
-`TASK_OUTBOX_STORAGE_KEY` and the store/server-queue helpers, never
-re-implement a command buffer.
+`GET /api/tasks/queue` **drains due rows first, then lists** pending/recent
+rows for banners — the client's 30 s queue poll is a drain trigger, so a queued
+command moves with any open device and no longer waits for someone to GET
+`/api/tasks/sync` (the heartbeat is gate-free: once a device polls, it keeps
+polling); `DELETE` cancels one (the original actor or any parent). The queue
+carries `/api/tasks/claim`, `/api/tasks/approve`, `/api/tasks/manage`,
+`/api/tasks/config`, `/api/tasks/ledger`, `/api/rewards/redeem`;
+`/api/tasks/quarantine` is not carried. A PIN never enters a queue row — intake
+verifies it and stores the verified actor identity
+(`actorMemberId`/`actorName`/`actorRole`, `actorAuthentication`). **Do not fork
+the key or the entry shape** — import `TASK_OUTBOX_STORAGE_KEY` and the
+store/server-queue helpers, never re-implement a command buffer.
+**The claim route queues `ledger_unavailable`/`snapshot_write_failed` too**, and
+the drain guards those replays: for `claim`/`complete` only, a row whose
+`sentBackAt` is not older than the queue row's `created` refuses with the
+duplicate reason `already_undone` (a deferred intent may only apply while the
+row still carries the state it was written against); `snapshot_write_failed`
+needs no guard because the canonical write records its receipt before it
+verifies, making a re-run a duplicate read.
 
 **The approve acknowledgement clears its rows by id, gated by freshness.** A
 snapshot may be stale, so a snapshot's clear needs proof (an earn for the row in
