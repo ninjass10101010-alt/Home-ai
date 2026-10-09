@@ -577,6 +577,32 @@ describe("B1: renaming a member migrates their ledger keys", () => {
     expect(harness.member(MEMBER_ID)?.name).toBe(OLD_NAME);
     expect(lockedWeeks).toEqual([]);
   });
+
+  it("migrates the LEDGER keys only — a renamed member's ASSIGNED TASK is still keyed on the old name", async () => {
+    // KNOWN GAP (open-findings §0 "Newly surfaced and STILL OPEN", 2026-10-05):
+    // the ledger half migrates; task identity (`assignee`/`assigned`/`completedBy`/
+    // `crew[].name`) does not, because `renameMemberLedgerKeys`
+    // (members/admin/route.ts:192-261) only walks `week_data`, `week_archive` and
+    // the snapshot's mirrored weekData (`LEDGER_WEEK_COLLECTIONS` :17).
+    // `resolveHumanMember` (task-claim.ts:302-305) falls back to a FIRST-NAME
+    // match, so "Alex" → "Alexander" still completes and this test is a
+    // characterisation, not a failure claim. A rename that changes the FIRST name
+    // orphans the task outright — `unknown_task_owner`.
+    // **INVERT this assertion when the task-identity migration lands.**
+    const harness = createHarness({
+      ...seedLedger(),
+      tasks: [chore(42, { taskId: 42, assignee: OLD_NAME, assigned: OLD_NAME, completedBy: OLD_NAME })],
+    });
+    mocks.findLiveMemberById.mockResolvedValue({ id: MEMBER_ID, name: OLD_NAME, role: "child" });
+
+    const res = await PATCH(renameRequest());
+
+    expect(res.status).toBe(200);
+    const ledgerTaskRow = harness.taskRow(42);
+    expect(ledgerTaskRow).toBeDefined();
+    // **INVERT this assertion when the task-identity migration lands.**
+    expect(ledgerTaskRow?.assignee).toBe(OLD_NAME);
+  });
 });
 
 describe("B1: migrateWeekDataMemberName (pure ledger-key migration)", () => {

@@ -2090,4 +2090,38 @@ describe("POST /api/tasks/approve — action:approve-all", () => {
     const res2 = await POST(jsonReq({ action: "approve-all", memberName: "Rebecca (Mom)", pin: "0202", taskIds: [] }));
     expect(res2.status).toBe(400);
   });
+
+  it("is idempotent when the QUEUE replays the batch under the SAME operationId with the taskIds reversed", async () => {
+    const t1 = pendingTaskRow();
+    const t2 = pendingTaskRow({
+      id: 102, assignee: "Aurora Garcia", completedBy: "Aurora Garcia",
+      pendingApproval: { byName: "Aurora Garcia", at: "2026-09-19T18:30:00.000Z", points: 5 },
+    });
+    const { pb, points, history } = makePb({ snapshotTasks: [t1, t2], collectionTask: null });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const batch = (taskIds: number[]) => jsonReq({
+      action: "approve-all",
+      operationId: "op-approve-all-replay",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskIds,
+    });
+
+    const first = await POST(batch([101, 102]));
+    expect(first.status).toBe(200);
+    expect((await first.json()).paid).toBe(2);
+
+    // A drained `task_command_queue` row replays the command verbatim
+    // (task-command-queue-server.ts:303); the browser may have built the list in
+    // the other order, which the fingerprint sorts (task-approval.ts:244-250).
+    const second = await POST(batch([102, 101]));
+    expect(second.status).toBe(200);
+    const body = await second.json();
+    expect(body.paid).toBe(0);
+    expect(body.duplicate).toBe(true);
+    expect(points()).toEqual({ "Caspian Garcia": 8, "Aurora Garcia": 5 });
+    expect(history().filter((t: any) => t.type === "earn")).toHaveLength(2);
+    expect(history().filter((t: any) => t.taskId === 101)).toHaveLength(1);
+    expect(history().filter((t: any) => t.taskId === 102)).toHaveLength(1);
+  });
 });

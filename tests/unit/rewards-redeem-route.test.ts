@@ -129,9 +129,11 @@ function makePb(opts?: {
   rewards?: any[];
   members?: any[];
   snapshotFails?: boolean;
+  queuedRows?: any[];
 }) {
   const rewardRows = opts?.rewards ?? REWARDS;
   const memberRows = opts?.members ?? ROSTER;
+  const queuedRows = opts?.queuedRows ?? [];
   const access: string[] = [];
   const snapshotWrites: any[] = [];
   let snapshotRow: any = {
@@ -184,10 +186,20 @@ function makePb(opts?: {
         };
       }
       access.push(`${name}.getFullList`);
-      return { getFullList: async () => [] };
+      return {
+        getFullList: async () => [],
+        // The route's server-queue leg (`route.ts:314-338`, body at :75-80)
+        // reaches this on a persistent ledger failure. Without a real `create`
+        // it threw a TypeError the route swallowed at :329-331, and two 503
+        // tests passed for the wrong reason.
+        create: async (data: any) => {
+          queuedRows.push(data);
+          return data;
+        },
+      };
     },
   };
-  return { pb, access, snapshotWrites };
+  return { pb, access, snapshotWrites, queuedRows };
 }
 
 function fixturePin(name: string): string | null {
@@ -756,7 +768,7 @@ describe("POST /api/rewards/redeem — ledger result mapping", () => {
     expect(body.weekData).toBeUndefined();
   });
 
-  it("maps a ledger write conflict to 503 after one same-operation retry", async () => {
+  it("queues after one same-operation retry, and never reports the redemption as done", async () => {
     ledger.queue = [
       failureFixture("ledger_write_conflict"),
       failureFixture("ledger_write_conflict"),
@@ -769,8 +781,13 @@ describe("POST /api/rewards/redeem — ledger result mapping", () => {
       pin: memberPin,
     }));
 
-    expect(res.status).toBe(503);
-    expect((await res.json()).reason).toBe("ledger_unavailable");
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      queued: true,
+      retryable: true,
+      reason: "ledger_unavailable",
+    });
     expect(ledger.calls).toHaveLength(2);
     expect(ledger.calls.map((call) => call.operation.operationId)).toEqual([
       "op-write-conflict",
@@ -793,7 +810,7 @@ describe("POST /api/rewards/redeem — ledger result mapping", () => {
     expect(ledger.calls).toHaveLength(2);
   });
 
-  it("maps an invalid ledger operation to 503 ledger_unavailable", async () => {
+  it("queues an invalid ledger operation for retry rather than reporting a deduction", async () => {
     ledger.result = failureFixture("invalid_ledger_operation");
 
     const res = await POST(jsonReq({
@@ -803,8 +820,41 @@ describe("POST /api/rewards/redeem — ledger result mapping", () => {
       pin: memberPin,
     }));
 
-    expect(res.status).toBe(503);
-    expect((await res.json()).reason).toBe("ledger_unavailable");
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      queued: true,
+      reason: "ledger_unavailable",
+    });
+  });
+
+  it("queues a redemption the retry does not fix, under the SAME operationId, and never reports it done", async () => {
+    const queuedRows: any[] = [];
+    mocks.withAdmin.mockImplementation((fn: any) => fn(makePb({ queuedRows }).pb));
+    ledger.queue = [
+      failureFixture("ledger_write_conflict"),
+      failureFixture("ledger_write_conflict"),
+    ];
+
+    const res = await POST(jsonReq({
+      operationId: "op-queue-me",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: false, queued: true, retryable: true, operationId: "op-queue-me" });
+    // The retry reused the id, so a partial apply can never apply twice (route.ts:291-295).
+    expect(ledger.calls.map((call) => call.operation.operationId)).toEqual(["op-queue-me", "op-queue-me"]);
+    // The durable leg exists, and it is a DEDUCTION with no PIN in the row.
+    expect(queuedRows).toHaveLength(1);
+    expect(queuedRows[0]).toMatchObject({
+      operationId: "op-queue-me", route: "/api/rewards/redeem", action: "redeem",
+      actorAuthentication: "pin", status: "pending",
+    });
+    expect(JSON.stringify(queuedRows[0])).not.toMatch(new RegExp(memberPin));
   });
 
   it("answers 503 when the ledger seam itself is unreachable", async () => {

@@ -36,6 +36,10 @@ function transaction(
 function makePb(options: {
   history?: Transaction[];
   points?: Record<string, number>;
+  /** Older `week_data` rows — the weeks cross-week replay must search. */
+  otherWeeks?: Record<string, unknown>[];
+  /** `week_archive` rows (the rollover upserts rather than moves). */
+  archiveRows?: Record<string, unknown>[];
   dropWrite?: boolean;
   writeError?: Error;
 } = {}) {
@@ -48,8 +52,15 @@ function makePb(options: {
     history: JSON.stringify(options.history ?? []),
   };
   let writeCount = 0;
+  let archiveReads = 0;
+  const archiveCollection = {
+    getFullList: vi.fn(async () => {
+      archiveReads += 1;
+      return structuredClone(options.archiveRows ?? []);
+    }),
+  };
   const collection = {
-    getFullList: vi.fn(async () => [structuredClone(row)]),
+    getFullList: vi.fn(async () => [structuredClone(row), ...(options.otherWeeks ?? [])]),
     getOne: vi.fn(async (id: string) => (id === row.id ? structuredClone(row) : null)),
     update: vi.fn(async (_id: string, payload: Record<string, unknown>) => {
       writeCount += 1;
@@ -66,6 +77,13 @@ function makePb(options: {
   };
   const pb = {
     collection: vi.fn((name: string) => {
+      // Only hand back an archive collection when the test asked for one; every
+      // other existing test keeps throwing, which is the single-collection
+      // client path `archiveCollection` documents (ledger-operations.ts:502-511).
+      if (name === "week_archive") {
+        if (options.archiveRows) return archiveCollection;
+        throw new Error(`unexpected collection ${name}`);
+      }
       if (name !== "week_data") throw new Error(`unexpected collection ${name}`);
       return collection;
     }),
@@ -81,6 +99,9 @@ function makePb(options: {
     },
     get writeCount() {
       return writeCount;
+    },
+    get archiveReads() {
+      return archiveReads;
     },
   };
 }
@@ -1140,5 +1161,153 @@ describe("second review regressions", () => {
       code: "invalid_ledger_operation",
       operationId: "",
     });
+  });
+});
+
+describe("task-page wave B3 — the RUNNING negative-balance gate is scoped to the members an operation TOUCHES", () => {
+  it("does NOT refuse a NEW earn because a DIFFERENT member's stored balance is already negative", async () => {
+    // Bailey sits at -3 in this week's stored history. Under the old week-scoped
+    // `hasNegativeOutcome(current.history)` pre-check this returned
+    // `insufficient_balance` and froze every member for the week. The gate that
+    // RUNS is member-scoped (ledger-operations.ts:322-333, called at :823), so
+    // Alex's untouched earn lands.
+    const harness = makePb({
+      history: [transaction(1, { member: "Bailey", type: "adjust", amount: -3, description: "Penalty" })],
+      points: { Bailey: 0 },
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-not-frozen-by-a-sibling",
+        source: "task-approval",
+        entries: [{ type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 }],
+      },
+    }));
+
+    expect(result.applied).toBe(true);
+    expect(result.weekData.points).toEqual({ Bailey: 0, Alex: 8 });
+    expect(harness.writeCount).toBe(1);
+  });
+
+  it("applies the very operation that REPAIRS a member's deficit", async () => {
+    // `anyAffectedMemberGoNegative` is evaluated on the MERGED history
+    // (ledger-operations.ts:823), so +5 over a stored -3 is allowed. A pre-check
+    // on the CURRENT history would refuse it — the defect the comment at
+    // ledger-operations.ts:790-792 names.
+    const harness = makePb({
+      history: [transaction(1, { member: "Bailey", type: "adjust", amount: -3, description: "Penalty" })],
+      points: { Bailey: 0 },
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-repairs-the-deficit",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Bailey", amount: 5, description: "Bonus" }],
+      },
+    }));
+
+    expect(result.applied).toBe(true);
+    expect(result.weekData.history).toHaveLength(2);
+    // The STORED map is the kids-facing floored view (task-ledger.ts:371-383): -3
+    // floors to 0, then +5 lands on 0 → 5. The gate decided on the SUM (5 - 3 = 2).
+    expect(result.weekData.points["Bailey"]).toBe(5);
+  });
+});
+
+describe("task-page wave B3 — cross-week replay and pre-contract weeks, at the seam", () => {
+  const PREVIOUS = "2026-09-14";
+
+  it("reports an operationId already applied in ANOTHER week_data row as a duplicate and writes nothing", async () => {
+    const harness = makePb({
+      otherWeeks: [{
+        id: "w-previous",
+        weekStart: PREVIOUS,
+        points: JSON.stringify({ Alex: 8 }),
+        streak: "{}", lastActive: "{}",
+        history: JSON.stringify([{
+          id: 5, timestamp: `${PREVIOUS}T18:00:00.000Z`, member: "Alex", type: "earn",
+          amount: 8, description: "Approved", taskId: 101,
+          meta: { operationId: "op-cross-week", source: "task-approval" },
+        }]),
+      }],
+      archiveRows: [],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-cross-week",
+        source: "task-approval",
+        entries: [{ type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 }],
+      },
+    }));
+
+    expect(result.applied).toBe(false);
+    expect(result.duplicate).toBe(true);
+    expect(harness.writeCount).toBe(0);
+  });
+
+  it("refuses a write targeting a pre-contract week and NEVER rewrites or truncates the row", async () => {
+    // The live shape of 2026-09-14 / 2026-06-15: `canonicalLedgerMeta`
+    // (task-ledger.ts:50-78) rejects a meta with no operationId / an unknown
+    // source, so the WHOLE week stops parsing.
+    const legacy = {
+      id: 1, timestamp: `${PREVIOUS}T12:00:00.000Z`, member: "Caspian Garcia",
+      type: "earn", amount: 5, description: "Approved: Dishes (+5pts)", taskId: 42,
+      meta: { source: "task-complete" },
+    } as unknown as Transaction;
+    const harness = makePb({ history: [legacy] });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-into-a-legacy-week",
+        source: "task-approval",
+        entries: [{ type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "invalid_ledger_operation" });
+    expect(harness.writeCount).toBe(0);
+    // The stored row still holds the legacy transaction — the refusal is a
+    // refusal, not a silent repair.
+    expect(String(harness.history)).toContain("task-complete");
+  });
+
+  it("still writes the CURRENT week when an OLDER week's history is pre-contract", async () => {
+    // `collect` skips an unparseable other week (ledger-operations.ts:541-549,
+    // the `if (!week) return;` at :547). Without that skip the null escapes to
+    // the outer catch (:879) and EVERY family's write fails with
+    // `ledger_write_conflict`.
+    const harness = makePb({
+      otherWeeks: [{
+        id: "w-legacy", weekStart: PREVIOUS, points: "{}", streak: "{}", lastActive: "{}",
+        history: JSON.stringify([{ id: 3, timestamp: `${PREVIOUS}T12:00:00.000Z`, member: "Bailey",
+          type: "earn", amount: 5, description: "Approved", taskId: 42, meta: { source: "task-complete" } }]),
+      }],
+      archiveRows: [],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-current-week-unaffected",
+        source: "task-approval",
+        entries: [{ type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 }],
+      },
+    }));
+
+    expect(result.applied).toBe(true);
+    expect(harness.writeCount).toBe(1);
+    // Another week exists, so the archive WAS read — the skip is not "never look".
+    expect(harness.archiveReads).toBeGreaterThan(0);
   });
 });

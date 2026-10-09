@@ -876,3 +876,55 @@ describe("regression — the refusals and the queue rule the fixes must not weak
     expect(result.task?.pendingApproval).toBeNull();
   });
 });
+
+// Named "task-page wave B3", NOT "B6": this suite's own B1–B5 describes
+// (:298, :366, :463, :514, :713, documented at :4-21) are a FINISHED historical
+// series, and a wave-prefixed name is what keeps the two apart.
+describe("task-page wave B3 — a pre-contract week is evidence for nobody, in EITHER direction", () => {
+  const legacyRow = (weekStart: string) => weekRow(weekStart, [], {
+    history: JSON.stringify([{
+      id: 3, timestamp: `${weekStart}T12:00:00.000Z`, member: "Bailey Garcia",
+      type: "earn", amount: 5, description: "Approved: Dishes (+5pts)", taskId: 42,
+      meta: { source: "task-complete" },
+    }]),
+  });
+  const unpaid = (name: string) => soloTask({
+    assignee: name, completed: false, status: "pending", completedBy: null,
+    completedAt: null, completedInWeek: null,
+  });
+
+  it("still pays into the authority week when an OLDER week's history will not parse", async () => {
+    const fixture = makePb({
+      tasks: [unpaid("Rebecca Garcia")],
+      weekRows: [legacyRow(PREVIOUS_WEEK), weekRow(AUTHORITY_WEEK, [])],
+      archiveRows: [],
+    });
+
+    const result = await run(command("complete", 42), actor("parent-rebecca"), fixture);
+
+    expect(result.ok).toBe(true);
+    expect(fixture.weekWrites).toHaveLength(1);
+    expect(fixture.weekWrites[0].weekStart).toBe(AUTHORITY_WEEK);
+    expect(fixture.weekWrites[0].payload.history).toContainEqual(
+      expect.objectContaining({ type: "earn", member: "Rebecca Garcia", amount: 7, taskId: 42 }),
+    );
+    expect(fixture.archiveReads()).toBeGreaterThan(0);
+  });
+
+  it("answers invalid_task_state — never a duplicate — when the AUTHORITY week itself will not parse", async () => {
+    const fixture = makePb({
+      tasks: [unpaid("Rebecca Garcia")],
+      weekRows: [legacyRow(AUTHORITY_WEEK), weekRow(PREVIOUS_WEEK, [])],
+      archiveRows: [],
+    });
+
+    const result = await run(command("complete", 42), actor("parent-rebecca"), fixture);
+
+    // `invalid_ledger_operation` → `invalid_task_state` (task-claim.ts:1249-1251).
+    // Anything the outbox classifies as a DUPLICATE deletes the entry and leaves
+    // the points wrong (task-claim.ts:1020-1031), so the reason is the contract.
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("invalid_task_state");
+    expect(fixture.weekWrites).toHaveLength(0);
+  });
+});
