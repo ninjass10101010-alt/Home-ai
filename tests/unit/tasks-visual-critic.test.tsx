@@ -286,6 +286,7 @@ describe("the visual gate's JSON contract (U3-0)", () => {
       "overflow320",
       "clipped",
       "clsTwoWay",
+      "skeletonParity",
       "focusRing",
       "baselineDrift",
       "keyboard",
@@ -298,6 +299,34 @@ describe("the visual gate's JSON contract (U3-0)", () => {
     expect(skeleton.cls).toEqual({});
     expect(skeleton.fixture).toEqual({});
     expect(skeleton.motion).toEqual({});
+    expect(skeleton.screenshotCard).toBe(null);
+    expect(skeleton.skeletonParity).toEqual([]);
+  });
+
+  it("pins §H-5's 1px skeleton-parity rule", async () => {
+    const gate: any = await loadGate();
+    const parity = gate.buildSkeletonParity(
+      [
+        { card: "approval", selector: "div.schedule-row", skeletonPx: 62 },
+        { card: "completed", selector: "div.schedule-row", skeletonPx: 102 },
+      ],
+      [
+        { card: "approval", selector: "div.schedule-row", settledMinPx: 62.5 },
+      ],
+    );
+    expect(parity[0].deltaPx).toBe(0.5);
+    expect(parity[0].pass).toBe(true);
+    // 102 vs a missing settled row fails, never passes vacuously.
+    expect(parity[1].settledMinPx).toBe(null);
+    expect(parity[1].deltaPx).toBe(null);
+    expect(parity[1].pass).toBe(false);
+    // 102 vs 104 fails the 1px rule.
+    const failing = gate.buildSkeletonParity(
+      [{ card: "completed", selector: "div.schedule-row", skeletonPx: 102 }],
+      [{ card: "completed", selector: "div.schedule-row", settledMinPx: 104 }],
+    );
+    expect(failing[0].deltaPx).toBe(2);
+    expect(failing[0].pass).toBe(false);
   });
 
   it("pins the run key surface", async () => {
@@ -387,6 +416,13 @@ describe("the visual gate's JSON contract (U3-0)", () => {
       "createImageBitmap",
       "motion-baseline.json",
       "keyboard.json",
+      "skeletonParity",
+      "screenshotCard",
+      "settledMinPx",
+      "measureSkeletonRows",
+      "measureSettledRows",
+      "enterActivatesDisclosure",
+      "cardClipFor",
     ]) {
       expect(src, token).toContain(token);
     }

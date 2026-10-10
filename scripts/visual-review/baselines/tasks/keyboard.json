@@ -3,7 +3,7 @@
   "role": "parent",
   "viewport": "390x844",
   "theme": "dark",
-  "recordedAt": "2026-10-10T02:49:01.682Z",
+  "recordedAt": "2026-10-10T04:42:20.250Z",
   "steps": [
     {
       "i": 1,
@@ -1417,9 +1417,19 @@
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
+    },
+    {
+      "i": 158,
+      "key": "Enter",
+      "activeElement": "button",
+      "accessibleName": "completed disclosure",
+      "ringPx": null,
+      "inViewport": true,
+      "ariaExpanded": "false"
     }
   ],
   "escapeReturnsFocus": true,
+  "enterActivatesDisclosure": true,
   "orderViolations": [],
   "unreachable": [],
   "unlabelled": []

@@ -1,6 +1,6 @@
 {
   "route": "/tasks",
-  "recordedAt": "2026-10-10T02:49:03.657Z",
+  "recordedAt": "2026-10-10T04:42:22.928Z",
   "rings": {
     "parent|320x568|dark": {
       "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
@@ -32,6 +32,16 @@
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 20.48,
         "deltaLuminanceBorderOut": 20.77
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.79,
+        "deltaLuminanceBorderOut": 18.01
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.61,
+        "deltaLuminanceBorderOut": 20.62
       }
     },
     "parent|320x568|light": {
@@ -64,6 +74,16 @@
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 77.64,
         "deltaLuminanceBorderOut": 71.57
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 81.19,
+        "deltaLuminanceBorderOut": 63.64
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 74.57,
+        "deltaLuminanceBorderOut": 74.5
       }
     },
     "parent|390x844|dark": {
@@ -96,6 +116,16 @@
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 20.57,
         "deltaLuminanceBorderOut": 20.63
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.92,
+        "deltaLuminanceBorderOut": 18.06
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.25,
+        "deltaLuminanceBorderOut": 92.31
       }
     },
     "parent|390x844|light": {
@@ -128,6 +158,16 @@
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 77.83,
         "deltaLuminanceBorderOut": 74.85
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.33,
+        "deltaLuminanceBorderOut": 62.87
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 16.18,
+        "deltaLuminanceBorderOut": 19.23
       }
     },
     "parent|768x1024|dark": {
@@ -160,6 +200,16 @@
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 20.63,
         "deltaLuminanceBorderOut": 20.89
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.93,
+        "deltaLuminanceBorderOut": 18.09
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.75,
+        "deltaLuminanceBorderOut": 20.83
       }
     },
     "parent|768x1024|light": {
@@ -192,6 +242,16 @@
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 81.12,
         "deltaLuminanceBorderOut": 76.51
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 81.19,
+        "deltaLuminanceBorderOut": 64.34
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.57,
+        "deltaLuminanceBorderOut": 61.3
       }
     },
     "parent|1280x900|dark": {
@@ -224,6 +284,16 @@
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 20.66,
         "deltaLuminanceBorderOut": 21
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.94,
+        "deltaLuminanceBorderOut": 18.11
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.84,
+        "deltaLuminanceBorderOut": 20.83
       }
     },
     "parent|1280x900|light": {
@@ -256,6 +326,16 @@
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 81.12,
         "deltaLuminanceBorderOut": 77.41
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.33,
+        "deltaLuminanceBorderOut": 64.88
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.19,
+        "deltaLuminanceBorderOut": 61.3
       }
     },
     "parent|1536x900|dark": {
@@ -288,6 +368,16 @@
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.27,
         "deltaLuminanceBorderOut": 98.54
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 19.05,
+        "deltaLuminanceBorderOut": 18.09
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.96,
+        "deltaLuminanceBorderOut": 92.96
       }
     },
     "parent|1536x900|light": {
@@ -320,6 +410,16 @@
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.39,
         "deltaLuminanceBorderOut": 9.22
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.33,
+        "deltaLuminanceBorderOut": 64.95
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 76.34,
+        "deltaLuminanceBorderOut": 74.74
       }
     },
     "parent|1920x1080|dark": {
@@ -352,6 +452,16 @@
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.27,
         "deltaLuminanceBorderOut": 98.58
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.93,
+        "deltaLuminanceBorderOut": 18.11
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.82,
+        "deltaLuminanceBorderOut": 20.89
       }
     },
     "parent|1920x1080|light": {
@@ -384,6 +494,16 @@
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.39,
         "deltaLuminanceBorderOut": 8.38
+      },
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 81.13,
+        "deltaLuminanceBorderOut": 64.88
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.09,
+        "deltaLuminanceBorderOut": 61.2
       }
     },
     "guest|320x568|dark": {

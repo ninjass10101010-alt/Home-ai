@@ -52,6 +52,13 @@ export const DEFAULT_OUT_DIR = "/tmp/warmglass/tasks-review";
 export const FIXED_NOW_MS = Date.parse("2026-10-08T17:00:00.000Z");
 export const FIXED_TIMEZONE = "America/Detroit";
 
+// The matrix entry stretches the skeleton fixture's delayed `/api/tasks/sync`
+// read to 20s: the entry's composited-contrast pass takes two full-page
+// captures, and at 1920 the fixture's real 4s window closed between them — the
+// pair then mixed loading and settled pixels and reported false ~1.0:1 nodes.
+// The state probe keeps the fixture's real 4s timing (it measures immediately).
+export const SKELETON_WINDOW_MS = 20_000;
+
 // The harness's six viewports plus wide1536 (register, not patch — reviewRoute
 // already accepts raw {width,height}). `laptop` (1024) stays addressable by
 // name; `all` follows the plan's matrix table (320/390/768/1280/1536/1920).
@@ -93,6 +100,7 @@ export const GATE_KEYS = Object.freeze([
   "overflow320",
   "clipped",
   "clsTwoWay",
+  "skeletonParity",
   "focusRing",
   "baselineDrift",
   "keyboard",
@@ -112,11 +120,13 @@ export const ENTRY_KEYS = Object.freeze([
   "state",
   "redirected",
   "screenshot",
+  "screenshotCard",
   "baseline",
   "baselineDiffPx",
   "fixture",
   "overflow",
   "cls",
+  "skeletonParity",
   "geometry",
   "tapTargets",
   "focusRing",
@@ -262,11 +272,13 @@ export function buildEntrySkeleton(meta = {}) {
     state: meta.state ?? "populated",
     redirected: meta.redirected ?? false,
     screenshot: null,
+    screenshotCard: null,
     baseline: null,
     baselineDiffPx: null,
     fixture: {},
     overflow: {},
     cls: {},
+    skeletonParity: [],
     geometry: [],
     tapTargets: [],
     focusRing: [],
@@ -299,6 +311,34 @@ export function buildStateExpectations(name) {
     inFlightRows: 0,
     queueBannerVisible: false,
   };
+}
+
+/** §H-5, enforceable form: the skeleton row must reserve the settled row's
+ *  space, within 1px, for the same card at the same viewport.
+ *
+ *  `skeletonPx` is the skeleton row's rendered height in the loading window.
+ *  `settledMinPx` is the settled row's floor — its computed `min-height` when a
+ *  fix pins one, never below the height the content actually occupies (a pinned
+ *  min-height cannot shrink the row below its content). `pass` is
+ *  `deltaPx <= 1`; a card that renders no settled counterpart fails rather than
+ *  passing vacuously. */
+export function buildSkeletonParity(skeletonRows = [], settledRows = []) {
+  const settled = new Map(settledRows.map((row) => [row.card, row]));
+  return skeletonRows.map((skeleton) => {
+    const target = settled.get(skeleton.card);
+    const settledMinPx = target ? target.settledMinPx : null;
+    const deltaPx = settledMinPx === null
+      ? null
+      : Math.round(Math.abs(skeleton.skeletonPx - settledMinPx) * 10) / 10;
+    return {
+      card: skeleton.card,
+      selector: skeleton.selector,
+      skeletonPx: skeleton.skeletonPx,
+      settledMinPx,
+      deltaPx,
+      pass: deltaPx !== null && deltaPx <= 1,
+    };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -741,6 +781,76 @@ function measureDom() {
   };
 }
 
+/** §H-5: the loading window's skeleton row heights, one per rendered card.
+ *  Scope by the card's own heading (the Approve buttons do not exist yet while
+ *  the read is outstanding, so `cardScopes()` cannot find the approval card). */
+function measureSkeletonRows() {
+  const g = window.__vrGate;
+  const heading = Array.from(document.querySelectorAll("h2"))
+    .find((el) => /needs approval/i.test(el.textContent || ""));
+  let approval = null;
+  if (heading) {
+    let node = heading;
+    while (node && node !== document.body && !node.querySelector(".schedule-row")) {
+      node = node.parentElement;
+    }
+    if (node && node !== document.body) approval = node;
+  }
+  const completed = document.querySelector("[data-completed-card]");
+  const out = [];
+  for (const [card, scope] of [["approval", approval], ["completed", completed]]) {
+    if (!scope) continue;
+    const row = scope.querySelector(".schedule-row");
+    if (!row) continue;
+    const r = row.getBoundingClientRect();
+    out.push({ card, selector: g.describe(row), skeletonPx: Math.round(r.height * 10) / 10 });
+  }
+  return out;
+}
+
+/** §H-5: the settled row's floor for the same cards, measured after the
+ *  fixture's sync delay resolves. `max(computed min-height, rendered height)` —
+ *  a pinned min-height cannot shrink a row below its content. */
+function measureSettledRows() {
+  const g = window.__vrGate;
+  const { approval, completed } = g.cardScopes();
+  const out = [];
+  for (const [card, scope] of [["approval", approval], ["completed", completed]]) {
+    if (!scope) continue;
+    const row = scope.querySelector(".schedule-row");
+    if (!row) continue;
+    const r = row.getBoundingClientRect();
+    const minH = parseFloat(getComputedStyle(row).minHeight) || 0;
+    out.push({
+      card,
+      selector: g.describe(row),
+      settledMinPx: Math.round(Math.max(minH, r.height) * 10) / 10,
+    });
+  }
+  return out;
+}
+
+/** The card-anchored shot's clip: the target card scrolled into view and
+ *  clipped to the viewport (the page-top is not what a critic needs to see). */
+function cardClipFor(target) {
+  const g = window.__vrGate;
+  const scope = target === "approval"
+    ? g.cardScopes().approval
+    : document.querySelector("[data-completed-card]");
+  if (!scope) return null;
+  scope.scrollIntoView({ block: "start", inline: "center" });
+  const r = scope.getBoundingClientRect();
+  const pad = 6;
+  const x = Math.max(0, r.left - pad);
+  const y = Math.max(0, r.top - pad);
+  const right = Math.min(window.innerWidth, r.right + pad);
+  const bottom = Math.min(window.innerHeight, r.bottom + pad);
+  return {
+    selector: g.describe(scope),
+    clip: { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) },
+  };
+}
+
 /** Motion budget over the two task cards (transitions + keyframe animations). */
 function measureMotion() {
   const g = window.__vrGate;
@@ -953,6 +1063,50 @@ export function clampClip(box, viewport, margin) {
   return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
 }
 
+/** The viewport shot of record + its committed-baseline comparison. */
+async function recordViewportShot(page, entry, { screenshotPath, baselinePath, outName, updateBaselines }) {
+  const shot = await page.screenshot({ animations: "disabled" });
+  writeFileSync(screenshotPath, shot);
+  entry.screenshot = screenshotPath;
+  entry.baseline = existsSync(baselinePath) ? path.join(BASELINE_DIR_REL, `${outName}.png`) : null;
+  if (updateBaselines) {
+    mkdirSync(path.dirname(baselinePath), { recursive: true });
+    writeFileSync(baselinePath, shot);
+    entry.baseline = path.join(BASELINE_DIR_REL, `${outName}.png`);
+    entry.baselineDiffPx = 0;
+  } else if (existsSync(baselinePath)) {
+    const baselineB64 = readFileSync(baselinePath).toString("base64");
+    entry.baselineDiffPx = await page.evaluate(pixelDiff, {
+      a: shot.toString("base64"),
+      b: baselineB64,
+    });
+  } else {
+    entry.baselineDiffPx = null;
+  }
+}
+
+/** The card-anchored companion shot (`-card.png`): approval card for approval
+ *  states, completed card in the skeleton window, the other card when the
+ *  primary one is not rendered for this role. Evidence only — never a
+ *  baseline drift key (the viewport shot stays the shot of record). */
+async function recordCardShot(page, entry, { outDir, outName, state }) {
+  const primary = state === "skeleton" ? "completed" : "approval";
+  const fallback = primary === "approval" ? "completed" : "approval";
+  let anchored = await page.evaluate(cardClipFor, primary).catch(() => null);
+  if (!anchored || anchored.clip.width < 8 || anchored.clip.height < 8) {
+    anchored = await page.evaluate(cardClipFor, fallback).catch(() => null);
+  }
+  if (!anchored || anchored.clip.width < 8 || anchored.clip.height < 8) {
+    entry.screenshotCard = null;
+    return;
+  }
+  const shot = await page.screenshot({ clip: anchored.clip, animations: "disabled" });
+  await page.evaluate(() => { window.scrollTo(0, 0); });
+  const cardPath = path.join(outDir, `${outName}-card.png`);
+  writeFileSync(cardPath, shot);
+  entry.screenshotCard = cardPath;
+}
+
 async function openContext(browser, opts) {
   const { role, theme, wall, reducedMotion, fixtureRaw, fixtureBody, state, delayMs, seedInFlight, baseUrl, route } = opts;
   const vp = VIEWPORT_REGISTER[opts.viewportName];
@@ -985,7 +1139,13 @@ async function openContext(browser, opts) {
   if (delayMs > 0) {
     await context.route("**/api/tasks/sync", async (routeHandler) => {
       await sleep(delayMs);
-      await routeHandler.fallback();
+      // The skeleton window can outlive the motion twin's context; a fallback
+      // after close must not surface as an unhandled rejection.
+      try {
+        await routeHandler.fallback();
+      } catch {
+        /* context closed while the fixture window was still open */
+      }
     });
   }
 
@@ -1057,17 +1217,50 @@ async function expandCompleted(page) {
   }
 }
 
-async function measureFocusRings(page, ds, limit = 6) {
+async function measureFocusRings(page, ds, limit = 12) {
   await page.keyboard.press("Tab");
+  // The Completed controls are only measurable on an expanded panel; the
+  // skeleton state settles AFTER runEntry's own expand, so ensure it here
+  // (idempotent — no-op for the other states).
+  await expandCompleted(page);
   await page.evaluate(() => {
     const g = window.__vrGate;
     const { approval, completed } = g.cardScopes();
     const selector = 'button, [role="button"], a[href]';
-    const els = [
+    const seen = new Set();
+    const targets = [];
+    const add = (el) => {
+      if (el && !seen.has(el) && targets.length < 40) {
+        seen.add(el);
+        targets.push(el);
+      }
+    };
+    const primary = [
       ...(approval ? approval.querySelectorAll(selector) : []),
       ...(completed ? completed.querySelectorAll(selector) : []),
     ];
-    window.__vrFocusTargets = els.slice(0, 40);
+    // The gate's original six-target coverage stays first...
+    for (const el of primary.slice(0, 6)) add(el);
+    // ...and the coverage extends to the Completed disclosure, one undo button
+    // and the Open board's claim control (U3-0b #4). Criteria unchanged.
+    if (completed) {
+      add(Array.from(completed.querySelectorAll("button"))
+        .find((b) => /Show completed|Hide completed/.test(b.textContent || "")));
+      add(completed.querySelector('button[aria-label^="Undo completion of "]'));
+    }
+    const openHeading = Array.from(document.querySelectorAll("h2"))
+      .find((el) => /🫳/.test(el.textContent || ""));
+    if (openHeading) {
+      let scope = openHeading;
+      while (scope && scope !== document.body
+        && !scope.querySelector('[aria-label^="Claim "], [aria-label^="Join crew for "]')) {
+        scope = scope.parentElement;
+      }
+      if (scope && scope !== document.body) {
+        add(scope.querySelector('[aria-label^="Claim "], [aria-label^="Join crew for "]'));
+      }
+    }
+    window.__vrFocusTargets = targets;
   });
   const count = await page.evaluate(() => window.__vrFocusTargets.length);
   const viewport = page.viewportSize() ?? { width: 0, height: 0 };
@@ -1212,6 +1405,30 @@ async function runEntry(browser, opts) {
     }
     await waitForBoard(reduced.page, opts.state, opts.role);
 
+    // §H-5 / U3-0b: a `--state skeleton` entry must be captured INSIDE the
+    // fixture's loading window, at every viewport. Wait for the skeleton to
+    // mount, measure the card row heights and take the shot of record before
+    // any slow pass — the contrast pairs previously ran long enough that the
+    // delayed read landed before the shot at 768/1280 and the "skeleton" run
+    // committed settled-state evidence.
+    let skeletonRows = null;
+    let skeletonDom = null;
+    if (opts.state === "skeleton") {
+      await reduced.page.waitForFunction(
+        () => !!document.querySelector(".animate-pulse"),
+        undefined,
+        { timeout: Math.min(Math.max(1200, (opts.delayMs ?? 0) - 700), 3000) },
+      ).catch(() => {});
+      skeletonRows = await reduced.page.evaluate(measureSkeletonRows);
+      skeletonDom = await reduced.page.evaluate(measureDom);
+      await recordViewportShot(reduced.page, entry, {
+        screenshotPath, baselinePath, outName, updateBaselines: opts.updateBaselines,
+      });
+      await recordCardShot(reduced.page, entry, {
+        outDir: opts.outDir, outName, state: opts.state,
+      });
+    }
+
     // §C pass A — the board-ready window plus five programmatic expand/collapse
     // cycles. The pre-board window is recorded separately as `cls.loadWindow`:
     // the page's documented loading state (the `mounted` spinner, page.tsx:2427)
@@ -1236,23 +1453,14 @@ async function runEntry(browser, opts) {
     await expandCompleted(reduced.page);
 
     // Shot of record: viewport-only (fixed chrome must sit where a human sees it).
-    const shot = await reduced.page.screenshot({ animations: "disabled" });
-    writeFileSync(screenshotPath, shot);
-    entry.screenshot = screenshotPath;
-    entry.baseline = existsSync(baselinePath) ? path.join(BASELINE_DIR_REL, `${outName}.png`) : null;
-    if (opts.updateBaselines) {
-      mkdirSync(opts.baselinesDir, { recursive: true });
-      writeFileSync(baselinePath, shot);
-      entry.baseline = path.join(BASELINE_DIR_REL, `${outName}.png`);
-      entry.baselineDiffPx = 0;
-    } else if (existsSync(baselinePath)) {
-      const baselineB64 = readFileSync(baselinePath).toString("base64");
-      entry.baselineDiffPx = await reduced.page.evaluate(pixelDiff, {
-        a: shot.toString("base64"),
-        b: baselineB64,
+    // The skeleton state already took its shot inside the loading window above.
+    if (opts.state !== "skeleton") {
+      await recordViewportShot(reduced.page, entry, {
+        screenshotPath, baselinePath, outName, updateBaselines: opts.updateBaselines,
       });
-    } else {
-      entry.baselineDiffPx = null;
+      await recordCardShot(reduced.page, entry, {
+        outDir: opts.outDir, outName, state: opts.state,
+      });
     }
 
     // §D contrast — a full-page pair for in-flow nodes and a viewport pair for
@@ -1278,7 +1486,9 @@ async function runEntry(browser, opts) {
       ];
     }
 
-    const dom = await reduced.page.evaluate(measureDom);
+    // The skeleton entry's fixture/overflow/geometry evidence is the LOADING
+    // window's DOM (measured before the shot); every other state re-reads now.
+    const dom = skeletonDom ?? await reduced.page.evaluate(measureDom);
     const fixtureCounts = opts.fixtureCounts;
     entry.fixture = {
       syncBodyKeys: opts.fixtureSyncBodyKeys,
@@ -1301,7 +1511,12 @@ async function runEntry(browser, opts) {
     entry.overflow = dom.overflow;
     entry.geometry = dom.geometry;
     entry.tapTargets = dom.tapTargets.map((t) => ({ ...t, wallOk: !opts.wall || t.h >= 64 || t.hit44 }));
-    entry.focusRing = await measureFocusRings(reduced.page, ds, 6);
+    entry.focusRing = await measureFocusRings(reduced.page, ds, 12);
+    // The ring walk scrolls each target into view (now including the undo
+    // button deep in the Completed card). Pass B below measures shifts from the
+    // scroll origin, as it always has — restore it so the extension cannot
+    // re-scope an existing number.
+    await reduced.page.evaluate(() => { window.scrollTo(0, 0); });
     // A committed focus-ring baseline records the rings that were already
     // failing on the unmodified page (e.g. the light-theme `.glass-subtle`
     // shadow beating the ring). The gate fails on a NEW or worsened failure,
@@ -1352,6 +1567,22 @@ async function runEntry(browser, opts) {
       forcedLayout: null,
       forcedTriggers: [],
     };
+
+    // §H-5: the settled counterpart for the skeleton row, same card + viewport.
+    // Measured here (before pass B's destructive down-resizes) after the
+    // fixture's delayed read lands; the loading-window heights were frozen
+    // before the shot. Both sides of the 1px rule are now measured in ONE run.
+    if (opts.state === "skeleton" && skeletonRows) {
+      await reduced.page.waitForFunction(
+        () => document.querySelector('[data-completed-card] button[aria-label^="Undo completion of "]')
+          || document.querySelector('button[aria-label^="Approve "]'),
+        undefined,
+        { timeout: 30_000 },
+      ).catch(() => {});
+      await expandCompleted(reduced.page);
+      const settledRows = await reduced.page.evaluate(measureSettledRows);
+      entry.skeletonParity = buildSkeletonParity(skeletonRows, settledRows);
+    }
 
     // §C pass B — forced layout: smaller-width resizes + programmatic expand/collapse.
     await reduced.page.evaluate(resetCls);
@@ -1471,6 +1702,13 @@ function computeEntryGates(entry, opts) {
   const focusRingPass = entry.focusRing.length === 0
     ? !needsRings
     : entry.focusRingBaselineMisses.length === 0;
+  // §H-5's enforceable form. A `--state skeleton` entry must have measured at
+  // least one card for the parent persona the fixture describes (a signed-out
+  // guest renders no loading card — same role-applicability rule as
+  // `requiredCountsFor`); every measured card must clear the 1px rule; other
+  // states carry an empty array and pass vacuously.
+  const skeletonParityPass = entry.skeletonParity.every((parity) => parity.pass)
+    && (entry.state !== "skeleton" || entry.role !== "parent" || entry.skeletonParity.length > 0);
   const width = Number(entry.viewport.split("x")[0]);
   return {
     fixtureRendered: fixtureRendered ? "pass" : "fail",
@@ -1484,6 +1722,7 @@ function computeEntryGates(entry, opts) {
       : "pass",
     clipped: problems.clipped && !entry.overflow.worstClipped ? "pass" : "fail",
     clsTwoWay: entry.cls.inputExcluded === 0 && entry.cls.forcedLayoutDisclosure === 0 ? "pass" : "fail",
+    skeletonParity: skeletonParityPass ? "pass" : "fail",
     focusRing: focusRingPass ? "pass" : "fail",
     baselineDrift: opts.updateBaselines
       ? "pass"
@@ -1596,6 +1835,7 @@ async function runKeyboard(browser, opts) {
     recordedAt: new Date().toISOString(),
     steps: [],
     escapeReturnsFocus: false,
+    enterActivatesDisclosure: false,
     orderViolations: [],
     unreachable: [],
     unlabelled: [],
@@ -1647,6 +1887,41 @@ async function runKeyboard(browser, opts) {
       .filter((v, i) => v !== sortedVisits[i])
       .map((v, i) => `visited target[${v}] at step ${i} out of DOM order`);
 
+    // Enter-activation of the Completed disclosure (U3-0b #5): the transcript
+    // must verify a real key activation flips `aria-expanded`, not only Tab
+    // order. The walk above ends expanded, so Enter collapses it.
+    const disclosureBefore = await ctx.page.evaluate(() => {
+      const card = document.querySelector("[data-completed-card]");
+      const btn = card && Array.from(card.querySelectorAll("button"))
+        .find((b) => /Show completed|Hide completed/.test(b.textContent || ""));
+      if (!btn) return null;
+      window.__vrEnterTarget = btn;
+      btn.focus();
+      return btn.getAttribute("aria-expanded");
+    });
+    if (disclosureBefore !== null) {
+      await ctx.page.keyboard.press("Enter");
+      await sleep(450);
+      const after = await ctx.page.evaluate(
+        () => window.__vrEnterTarget.getAttribute("aria-expanded"),
+      );
+      transcript.enterActivatesDisclosure = after !== disclosureBefore;
+      transcript.steps.push({
+        i: transcript.steps.length + 1,
+        key: "Enter",
+        activeElement: "button",
+        accessibleName: "completed disclosure",
+        ringPx: null,
+        inViewport: true,
+        ariaExpanded: after,
+      });
+      if (after === "false") {
+        // Leave the end state expanded, the state the walk started from.
+        await ctx.page.keyboard.press("Enter");
+        await sleep(250);
+      }
+    }
+
     const hasApproveAll = await ctx.page.evaluate(() => {
       const btn = Array.from(document.querySelectorAll("button"))
         .find((b) => /Approve all/.test(b.textContent || ""));
@@ -1693,7 +1968,8 @@ function aggregate(entries, states, keyboard, updateBaselines) {
   };
   const keyboardGate = keyboard.unlabelled.length === 0
     && keyboard.orderViolations.length === 0
-    && keyboard.escapeReturnsFocus;
+    && keyboard.escapeReturnsFocus
+    && keyboard.enterActivatesDisclosure;
   const gates = {};
   for (const key of GATE_KEYS) {
     if (key === "keyboard") {
@@ -1805,6 +2081,7 @@ async function main() {
     recordedAt: new Date().toISOString(),
     steps: [],
     escapeReturnsFocus: false,
+    enterActivatesDisclosure: false,
     orderViolations: [],
     unreachable: [],
     unlabelled: [],
@@ -1832,7 +2109,7 @@ async function main() {
               fixtureCounts: fixture.counts,
               fixtureQueueOrder: queueOrder,
               fixtureSyncBodyKeys: Object.keys(fixtureBody),
-              delayMs: state === "skeleton" ? 4000 : 0,
+              delayMs: state === "skeleton" ? SKELETON_WINDOW_MS : 0,
               seedInFlight: null,
               motionBaseline,
               motionSink,
