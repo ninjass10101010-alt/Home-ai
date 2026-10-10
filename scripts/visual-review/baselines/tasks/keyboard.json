@@ -3,7 +3,7 @@
   "role": "parent",
   "viewport": "390x844",
   "theme": "dark",
-  "recordedAt": "2026-10-09T22:20:37.557Z",
+  "recordedAt": "2026-10-09T23:38:17.660Z",
   "steps": [
     {
       "i": 1,
@@ -126,7 +126,7 @@
       "i": 14,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Sort the recycling into the blue bins",
+      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -135,7 +135,7 @@
       "i": 15,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Sort the recycling into the blue bins",
+      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -144,7 +144,7 @@
       "i": 16,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Deep clean the family room",
+      "accessibleName": "Approve Sort the recycling into the blue bins",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -153,7 +153,7 @@
       "i": 17,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Deep clean the family room",
+      "accessibleName": "Send back Sort the recycling into the blue bins",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -162,7 +162,7 @@
       "i": 18,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
+      "accessibleName": "Approve Wipe the kitchen table after dinner",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -171,7 +171,7 @@
       "i": 19,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
+      "accessibleName": "Send back Wipe the kitchen table after dinner",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -180,7 +180,7 @@
       "i": 20,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Wash and vacuum the family car",
+      "accessibleName": "Approve Deep clean the family room",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -189,7 +189,7 @@
       "i": 21,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Wash and vacuum the family car",
+      "accessibleName": "Send back Deep clean the family room",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -198,7 +198,7 @@
       "i": 22,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Wipe the kitchen table after dinner",
+      "accessibleName": "Approve Wash and vacuum the family car",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -207,7 +207,7 @@
       "i": 23,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Wipe the kitchen table after dinner",
+      "accessibleName": "Send back Wash and vacuum the family car",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -513,7 +513,7 @@
       "i": 57,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Sort the recycling into the blue bins",
+      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -522,7 +522,7 @@
       "i": 58,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Sort the recycling into the blue bins",
+      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -531,7 +531,7 @@
       "i": 59,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Deep clean the family room",
+      "accessibleName": "Approve Sort the recycling into the blue bins",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -540,7 +540,7 @@
       "i": 60,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Deep clean the family room",
+      "accessibleName": "Send back Sort the recycling into the blue bins",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -549,7 +549,7 @@
       "i": 61,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
+      "accessibleName": "Approve Wipe the kitchen table after dinner",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -558,7 +558,7 @@
       "i": 62,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
+      "accessibleName": "Send back Wipe the kitchen table after dinner",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -567,7 +567,7 @@
       "i": 63,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Wash and vacuum the family car",
+      "accessibleName": "Approve Deep clean the family room",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -576,7 +576,7 @@
       "i": 64,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Wash and vacuum the family car",
+      "accessibleName": "Send back Deep clean the family room",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -585,7 +585,7 @@
       "i": 65,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Wipe the kitchen table after dinner",
+      "accessibleName": "Approve Wash and vacuum the family car",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -594,7 +594,7 @@
       "i": 66,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Wipe the kitchen table after dinner",
+      "accessibleName": "Send back Wash and vacuum the family car",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -900,7 +900,7 @@
       "i": 100,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Sort the recycling into the blue bins",
+      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -909,7 +909,7 @@
       "i": 101,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Sort the recycling into the blue bins",
+      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -918,7 +918,7 @@
       "i": 102,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Deep clean the family room",
+      "accessibleName": "Approve Sort the recycling into the blue bins",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -927,7 +927,7 @@
       "i": 103,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Deep clean the family room",
+      "accessibleName": "Send back Sort the recycling into the blue bins",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -936,7 +936,7 @@
       "i": 104,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
+      "accessibleName": "Approve Wipe the kitchen table after dinner",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -945,7 +945,7 @@
       "i": 105,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
+      "accessibleName": "Send back Wipe the kitchen table after dinner",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -954,7 +954,7 @@
       "i": 106,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Wash and vacuum the family car",
+      "accessibleName": "Approve Deep clean the family room",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -963,7 +963,7 @@
       "i": 107,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Wash and vacuum the family car",
+      "accessibleName": "Send back Deep clean the family room",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -972,7 +972,7 @@
       "i": 108,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Wipe the kitchen table after dinner",
+      "accessibleName": "Approve Wash and vacuum the family car",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -981,7 +981,7 @@
       "i": 109,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Wipe the kitchen table after dinner",
+      "accessibleName": "Send back Wash and vacuum the family car",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1287,7 +1287,7 @@
       "i": 143,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Sort the recycling into the blue bins",
+      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1296,7 +1296,7 @@
       "i": 144,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Sort the recycling into the blue bins",
+      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1305,7 +1305,7 @@
       "i": 145,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Deep clean the family room",
+      "accessibleName": "Approve Sort the recycling into the blue bins",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1314,7 +1314,7 @@
       "i": 146,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Deep clean the family room",
+      "accessibleName": "Send back Sort the recycling into the blue bins",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1323,7 +1323,7 @@
       "i": 147,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Drain the sink, wipe down all the kitchen counters, scrub the stovetop a",
+      "accessibleName": "Approve Wipe the kitchen table after dinner",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1332,7 +1332,7 @@
       "i": 148,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Drain the sink, wipe down all the kitchen counters, scrub the stovetop",
+      "accessibleName": "Send back Wipe the kitchen table after dinner",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1341,7 +1341,7 @@
       "i": 149,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Wash and vacuum the family car",
+      "accessibleName": "Approve Deep clean the family room",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1350,7 +1350,7 @@
       "i": 150,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Wash and vacuum the family car",
+      "accessibleName": "Send back Deep clean the family room",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1359,7 +1359,7 @@
       "i": 151,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Approve Wipe the kitchen table after dinner",
+      "accessibleName": "Approve Wash and vacuum the family car",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null
@@ -1368,7 +1368,7 @@
       "i": 152,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Send back Wipe the kitchen table after dinner",
+      "accessibleName": "Send back Wash and vacuum the family car",
       "ringPx": 0,
       "inViewport": false,
       "ariaExpanded": null

@@ -85,6 +85,7 @@ import TrophyCase from "@/components/leaderboard/TrophyCase";
 import ShareCard from "@/components/leaderboard/ShareCard";
 import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
 import ConfettiBurst from "@/components/ui/ConfettiBurst";
+import Skeleton from "@/components/ui/Skeleton";
 import TaskLedgerQuarantineNotice from "@/components/tasks/TaskLedgerQuarantineNotice";
 import AllTimeValue from "@/components/leaderboard/AllTimeValue";
 import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard/level";
@@ -108,6 +109,21 @@ function formatDueLabel(dateStr: string): string {
   }
 
   return dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/** >180 s of waiting earns a visible "⏳ waiting N min|h|d" age hint — the
+ * cross-device latency contract behind the queue banner's "up to 5 min".
+ * Null under the threshold or for an unparseable instant; never a fake "0". */
+function approvalAgeHint(atIso: string, nowMs: number = Date.now()): string | null {
+  const tapped = Date.parse(atIso);
+  if (!Number.isFinite(tapped)) return null;
+  const ageMs = nowMs - tapped;
+  if (ageMs <= 180_000) return null;
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes < 60) return `⏳ waiting ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `⏳ waiting ${hours} h`;
+  return `⏳ waiting ${Math.floor(hours / 24)} d`;
 }
 
 function migrateDueToISO(tasks: Task[]): Task[] {
@@ -795,6 +811,10 @@ export default function TasksPage() {
 
   // Restore tasks state from PocketBase snapshot on mount (bridges container restarts)
   const restoreAttempted = useRef(false);
+  // Readable twin of that ref. `syncRead` cannot say whether a read has been
+  // ISSUED (it returns to "unknown" on success), so only this state lets a
+  // render know its loading window. The ref stays the synchronous guard.
+  const [snapshotRequested, setSnapshotRequested] = useState(false);
   // The snapshot read is a TRI-STATE, never a boolean: a signed-out browser is
   // 401'd ("hidden, not done"), but /api/tasks/sync also answers 503 when the
   // rollover/projection is unavailable, and a network failure rejects outright.
@@ -886,8 +906,12 @@ export default function TasksPage() {
   useEffect(() => {
     if (!mounted || restoreAttempted.current) return;
     restoreAttempted.current = true;
+    setSnapshotRequested(true);
     const controller = new AbortController();
-    void pullSnapshot(controller.signal);
+    void pullSnapshot(controller.signal).finally(() => {
+      // An abort is this component's own teardown, not a settled read.
+      if (!controller.signal.aborted) setSnapshotRequested(false);
+    });
     return () => controller.abort();
   }, [mounted, pullSnapshot]);
 
@@ -2231,6 +2255,42 @@ export default function TasksPage() {
   // is B1a's line, which already filters `optimisticRemoved` at the selection
   // site; F2 changes the queue's SOURCE, not that contract.
   const pendingApprovals = interactiveRows.filter(isPendingApproval);
+  // Newest tap first: the queue is a parent's "what landed since I looked"
+  // scan, and source order gives no anchor. `pendingApproval.at` is the
+  // server's normalized UTC instant (task-operation-contract.ts:134 returns
+  // `toISOString()`), so a string sort would also work — `Date.parse` is used
+  // because it does not depend on the string's format surviving.
+  // owner: U1 (order). Source of the rows: F2. Do not merge the two.
+  const approvalQueue = [...pendingApprovals].sort(
+    (a, b) => (Date.parse(b.pendingApproval!.at) - Date.parse(a.pendingApproval!.at)) || (b.id - a.id),
+  );
+  // The first read is outstanding and nothing is on screen yet: the card's
+  // honest loading window, skipped when localStorage already holds rows.
+  const approvalQueueLoading =
+    isLoggedIn && currentUser?.role === "parent" && snapshotRequested && syncRead === "unknown" && tasks.length === 0;
+  // A row with a live approval command is not re-tappable; task-id precedence
+  // is the store's own (task-command-store.ts:229-239), and `failed` is terminal.
+  const approvalInFlightTaskIds = new Set<number>();
+  let approveAllInFlight = false;
+  for (const entry of outboxEntries) {
+    if (entry.route !== "/api/tasks/approve" || entry.status === "failed") continue;
+    if (entry.action === "approve-all") approveAllInFlight = true;
+    const single = Number(entry.payload?.taskId);
+    if (Number.isSafeInteger(single) && single > 0) approvalInFlightTaskIds.add(single);
+    const many = entry.payload?.taskIds;
+    if (Array.isArray(many)) {
+      for (const id of many) {
+        const taskId = Number(id);
+        if (Number.isSafeInteger(taskId) && taskId > 0) approvalInFlightTaskIds.add(taskId);
+      }
+    }
+    const target = Number(entry.displayTarget?.taskId);
+    if (Number.isSafeInteger(target) && target > 0) approvalInFlightTaskIds.add(target);
+  }
+  // Per-row kid label, only when 2+ kids are in the queue: a section header
+  // would reorder the very queue the ordering contract pins.
+  const approvalQueueHasMultipleKids =
+    new Set(approvalQueue.map((t) => t.pendingApproval!.byName.split(" ")[0]).filter(Boolean)).size >= 2;
   // The Open board: unclaimed "up for grabs" tasks (universal or late-stealable)
   // PLUS crew tasks with space — shown only when the viewer isn't on a
   // specific-member filter, sorted by points (biggest race first). Plain
@@ -3063,24 +3123,75 @@ export default function TasksPage() {
               )}
             </SectionCard>
 
-            {isLoggedIn && currentUser?.role === "parent" && pendingApprovals.length > 0 && (
+            {isLoggedIn && currentUser?.role === "parent" && (pendingApprovals.length > 0 || approvalQueueLoading) && (
               <SectionCard headingLevel="h2" title="Needs approval" description={`${pendingApprovals.length} tapped — review to award points`} icon="⏳">
+                {!approvalQueueLoading && (
+                  /* A COUNT, never a points total: the same number the
+                     description and `Approve all (N)` carry, with "chores" as
+                     the unit so it cannot be mistaken for points. */
+                  <p className="tasks-approval-summary mb-2 text-xs text-text-secondary">
+                    <span aria-hidden="true">⏳</span>
+                    <span className="font-semibold text-[var(--color-accent-ink-amber)]">{pendingApprovals.length}</span>
+                    {` chore${pendingApprovals.length === 1 ? "" : "s"} on the way`}
+                  </p>
+                )}
                 {/* One PIN pays the whole queue — the per-row grind was the
-                    biggest parent complaint in the evaluation. */}
+                    biggest parent complaint in the evaluation. Disabled while
+                    the queue is unread or an approve-all is already in flight:
+                    the button must never offer to pay a queue it cannot see. */}
                 <div className="mb-3">
-                  <SoftButton onClick={() => openApprovalDialog(null, "approve-all")} className="w-full">
+                  <SoftButton
+                    onClick={() => openApprovalDialog(null, "approve-all")}
+                    className="w-full"
+                    disabled={approveAllInFlight || approvalQueueLoading}
+                    aria-disabled={approveAllInFlight || approvalQueueLoading || undefined}
+                  >
                     ✓ Approve all ({pendingApprovals.length})
                   </SoftButton>
                 </div>
+                {approvalQueueLoading ? (
+                  /* The first snapshot read is outstanding: two placeholder
+                     rows stand in for the queue so a cold load never reads as
+                     "0 chores on the way". They mirror the settled row's
+                     anatomy — avatar, two text lines, the action line below
+                     `sm` — so the card keeps its shape when the rows land. */
+                  <div className="space-y-2" aria-hidden="true">
+                    {[0, 1].map((i) => (
+                      <div
+                        key={i}
+                        className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
+                        style={{ backgroundImage: rowTint("var(--color-accent-amber)") }}
+                      >
+                        <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-[var(--color-surface-3)]" />
+                        <div className="min-w-0 flex-1 basis-56 space-y-1">
+                          <Skeleton variant="text" className="w-3/4" />
+                          <Skeleton variant="text" className="w-1/2" />
+                        </div>
+                        <div className="flex w-full shrink-0 gap-2 sm:ml-auto sm:w-auto">
+                          <Skeleton variant="text" className="h-11 flex-1 rounded-full sm:w-24 sm:flex-none" />
+                          <Skeleton variant="text" className="h-11 flex-1 rounded-full sm:w-24 sm:flex-none" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
                 <div className="space-y-2">
-                  {pendingApprovals.map((task) => {
-                    const crew = task.pendingApproval!.crew ?? [];
+                  {approvalQueue.map((task) => {
+                    const owner = task.pendingApproval!;
+                    const crew = owner.crew ?? [];
                     const isCrew = crew.length > 0;
-                    const joined = isCrewTask(task) ? crewMemberCount(task) : 0;
+                    // The award that WILL be paid: the amount approval persisted,
+                    // else the pending record's promise, else the pre-bonus base
+                    // (B1a's three-term read). Never recomputed, never summed.
+                    const award = task.awardedPoints ?? owner.points ?? task.points;
+                    const kid = owner.byName.split(" ")[0];
+                    const checkin = isCrew ? crewCheckinProgress(task) : { checkedIn: 0, total: 0 };
+                    const rowInFlight = approvalInFlightTaskIds.has(task.id);
+                    const ageHint = approvalAgeHint(owner.at);
                     return (
-<div
+                    <div
                       key={task.id}
-                      className="schedule-row liquid-glass flex flex-wrap items-center gap-3 px-3 py-2.5"
+                      className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
                       style={{
                         backgroundImage: rowTint("var(--color-accent-amber)"),
                       }}
@@ -3094,30 +3205,48 @@ export default function TasksPage() {
                           row they could not read. The text now claims a line and
                           the two actions take the next one, full width. */}
                       <div className="min-w-0 flex-1 basis-56">
-                        <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                        {approvalQueueHasMultipleKids && (
+                          /* A label, not a control. With two or more kids in the
+                             queue the parent scans by kid, and a per-row label is
+                             the only form that keeps the queue's newest-first
+                             global order (a section header would reorder it). */
+                          <span data-testid="approval-kid-badge" className="mb-1 inline-flex rounded-full border border-border px-2 py-1 text-xs font-semibold text-text-secondary">
+                            {kid}
+                          </span>
+                        )}
+                        <div className="line-clamp-4 text-sm leading-snug text-text-primary lg:line-clamp-2" title={task.title}>{task.title}</div>
                         <div className="line-clamp-2 text-xs leading-snug text-text-secondary">
                           {isCrew
-                            ? `🤝 Crew ${crew.length}/${task.crewSize ?? crew.length} · ${task.awardedPoints ?? task.pendingApproval!.points ?? baseTaskPoints(task)}pts each · ${crew.map((n) => n.split(" ")[0]).join(", ")}`
+                            ? `🤝 ${crew.map((n) => n.split(" ")[0]).join(", ")} · tapped ${formatDueLabel(owner.at.split("T")[0])}`
                             /* The raw `at` is an ISO instant; `split("T")[0]`
                                printed "2026-10-05" where every other date on this
-                               page reads "Oct 5". Same formatDueLabel contract.
-                               The amount is the PAID one: the persisted award,
-                               else the pending record the approval will pay —
-                               never the pre-bonus base while a record exists. */
-                            : `${task.pendingApproval!.byName.split(" ")[0]} · tapped ${formatDueLabel(task.pendingApproval!.at.split("T")[0])} · ${task.awardedPoints ?? task.pendingApproval!.points ?? baseTaskPoints(task)}pts`}
-                          {isCrew && crew.length !== joined && (
-                            <span className="text-xs text-text-secondary"> · {crew.length} of {joined} checked in</span>
+                               page reads "Oct 5". Same formatDueLabel contract. */
+                            : `${approvalQueueHasMultipleKids ? "tapped" : `${kid} · tapped`} ${formatDueLabel(owner.at.split("T")[0])}`}
+                          {ageHint && <span> · {ageHint}</span>}
+                        </div>
+                        {/* The payout is its own line and its own ink: 12px
+                            semibold on the amber ink token, per head and crew
+                            size for a crew, and never the pre-bonus base while
+                            a pending record exists. */}
+                        <div className="mt-0.5 text-xs font-semibold text-[var(--color-accent-ink-amber)]">
+                          +{award}pts {isCrew ? `each · ${task.crewSize ?? crew.length} people` : `for ${kid}`}
+                          {isCrew && checkin.total > 0 && checkin.checkedIn < checkin.total && (
+                            <span className="font-normal text-text-secondary"> · {checkin.checkedIn} of {checkin.total} checked in</span>
                           )}
                         </div>
+                        {rowInFlight && (
+                          <div className="mt-0.5 text-xs font-semibold text-[var(--color-accent-ink-amber)]">⏳ Sending…</div>
+                        )}
                       </div>
                       <div className="flex w-full shrink-0 gap-2 sm:ml-auto sm:w-auto">
-                        <button type="button" aria-label={`Approve ${task.title}`} onClick={() => openApprovalDialog(task.id, "approve")} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle sm:flex-none">Approve</button>
-                        <button type="button" aria-label={`Send back ${task.title}`} onClick={() => openApprovalDialog(task.id, "sendback")} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-semibold text-text-secondary sm:flex-none">Send back</button>
+                        <button type="button" aria-label={`Approve ${task.title}`} onClick={() => openApprovalDialog(task.id, "approve")} disabled={rowInFlight} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-bold text-[var(--color-accent-ink-mint)] glass-subtle disabled:opacity-40 sm:flex-none">Approve</button>
+                        <button type="button" aria-label={`Send back ${task.title}`} onClick={() => openApprovalDialog(task.id, "sendback")} disabled={rowInFlight} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-semibold text-[var(--color-accent-ink-rose)] disabled:opacity-40 sm:flex-none">Send back</button>
                       </div>
                     </div>
                     );
                   })}
                 </div>
+                )}
               </SectionCard>
             )}
 

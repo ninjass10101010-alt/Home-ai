@@ -1482,14 +1482,17 @@ a.widget-accent-text {
   transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
 }
 
-:root[data-theme="light"] .glass-subtle {
+/* `:where` keeps these at the base material's (0-1-0) specificity; at (0-2-0)
+   they out-ranked `.tap-sm:focus-visible` by source order and erased the focus
+   ring on every Approve button in light mode (measured ringPx 0 vs 4 in dark). */
+:where(:root[data-theme="light"]) .glass-subtle {
   background: rgba(255, 255, 255, 0.4);
   border: 1px solid rgba(0, 0, 0, 0.03);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .glass-subtle {
+  :where(:root:not([data-theme="dark"])) .glass-subtle {
     background: rgba(255, 255, 255, 0.4);
     border: 1px solid rgba(0, 0, 0, 0.03);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
@@ -3860,6 +3863,19 @@ html[data-wall="true"] .hit-44::before {
 }
 html[data-wall="true"] .schedule-row {
   min-height: 56px;
+}
+/* The approval card's count strip ("N chores on the way"). Flex keeps the
+   glyph, the count and the label on one line at every width. */
+.tasks-approval-summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* A 64px band is the wall's control floor; this is the one new non-text
+   element a hand at 3 m reads first, and without the floor the bumped 14px
+   type collapses the strip. */
+html[data-wall="true"] .tasks-approval-summary {
+  min-height: 64px;
 }
 html[data-wall="true"] [data-testid="wx-hero-temp"] {
   font-size: 96px;
