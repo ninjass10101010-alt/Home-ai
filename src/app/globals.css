@@ -3885,6 +3885,59 @@ html[data-wall="true"] .tasks-approval-action,
 html[data-wall="true"] .tasks-approval-approve-all {
   min-height: 64px !important;
 }
+/* U2 — the ✅ Completed card. Each week block is layout, not a surface (no
+   fill, no border), so this radius is invisible; it is declared from the token
+   set so every measured box inside the card resolves to a token. */
+.tasks-week-group {
+  border-radius: var(--radius-lg);
+}
+/* The header separates one week's rows from the next; the wall lifts it to the
+   64px control floor so the split still reads at 3m. */
+html[data-wall="true"] .tasks-week-group-header {
+  min-height: 64px;
+}
+/* The disclosure is CSS-only expansion on the CapsuleNav precedent
+   (`--capsule-col-active` 0fr → 1fr; CapsuleNav.tsx:231-249): one grid row
+   animates while the inner clips the overflow, so collapsed costs zero height
+   without unmounting the rows. One glyph rotates; both transitions ride the
+   same `--motion-base`/`--ease-standard` pair and add no keyframe. Reduced
+   motion zeroes them through the global blanket, so the end states are
+   identical to the motion-on ones. */
+.tasks-disclosure-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--motion-base) var(--ease-standard);
+}
+.tasks-disclosure-panel[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.tasks-disclosure-panel > .tasks-disclosure-inner {
+  min-height: 0;
+  overflow: hidden;
+  /* Hides the collapsed rows from tab order and AT; delayed so it cannot cut
+     the closing animation short. */
+  visibility: hidden;
+  transition: visibility 0s linear var(--motion-base);
+}
+.tasks-disclosure-panel[data-open="true"] > .tasks-disclosure-inner {
+  visibility: visible;
+  transition-delay: 0s;
+}
+.tasks-disclosure-chevron {
+  display: inline-block;
+  line-height: 1;
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+.tasks-disclosure[aria-expanded="true"] .tasks-disclosure-chevron {
+  transform: rotate(180deg);
+}
+/* It is a control: the base is min-h-[44px] and nothing lifted it on the wall.
+   `!important` matches the `.tasks-approval-action` precedent — the page-wide
+   wall touch floor (`html[data-wall="true"] :is(button, …)`, 0-3-2) pins any
+   button to 44px, and this control must reach the wall's 64px floor. */
+html[data-wall="true"] .tasks-disclosure {
+  min-height: 64px !important;
+}
 html[data-wall="true"] [data-testid="wx-hero-temp"] {
   font-size: 96px;
 }

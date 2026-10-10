@@ -2321,6 +2321,9 @@ export default function TasksPage() {
   // purpose: a filter+sort+group over the family's small task list is cheaper
   // than the manual memo the compiler could not preserve.
   const completedGroups = groupCompletedTasksByWeek(completed);
+  // The first snapshot read is outstanding and nothing is on screen yet: the
+  // card's honest loading window, skipped when localStorage already holds rows.
+  const completedLoading = isLoggedIn && snapshotRequested && syncRead === "unknown" && tasks.length === 0;
   // Everything that reads "the family's chores" reads the SUBSTITUTED copy, so
   // a queued edit is reflected on the completed list, the streaks, the leaderboard
   // and the member sheet until the acknowledgment replaces it with the real row.
@@ -3267,29 +3270,59 @@ export default function TasksPage() {
                 this-week count: `openPinEntry` is the only setter of `undoTaskId`
                 and is reachable only from a rendered row, so gating on the week
                 count made the whole undo path dead on a Monday morning. */}
-            {completed.length > 0 && (
+            {(completed.length > 0 || completedLoading) && (
               <div data-completed-card="">
-              <SectionCard headingLevel="h2" title="Completed" description={`${completed.length} done`} icon="✅">
-                <button type="button" onClick={() => setShowCompleted(!showCompleted)} aria-expanded={showCompleted} className="mb-3 flex min-h-[44px] w-full items-center justify-between rounded-xl px-1 text-sm font-semibold text-text-secondary">
+              <SectionCard headingLevel="h2" title="Completed" description={completedLoading ? "checking…" : `${completed.length} done`} icon="✅">
+                {completedLoading ? (
+                  /* Three placeholders mirroring the settled row's anatomy: the
+                     first read is unknown, never a fabricated "0 done". No
+                     disclosure — collapsed is the default and there is no list
+                     to disclose yet (§H-5). */
+                  <div className="space-y-2" aria-hidden="true">
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
+                        style={{ backgroundImage: rowTint("var(--color-accent-mint)") }}
+                      >
+                        <div className="h-8 w-0.5 shrink-0 rounded-full bg-[var(--color-surface-3)]" />
+                        <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-[var(--color-surface-3)]" />
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <Skeleton variant="text" className="w-3/4" />
+                          <Skeleton variant="text" className="w-1/2" />
+                        </div>
+                        <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:ml-auto sm:w-auto">
+                          <Skeleton variant="text" className="h-6 w-14 rounded-full" />
+                          <Skeleton variant="text" className="h-9 w-9 rounded-full" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                <>
+                <button type="button" onClick={() => setShowCompleted(!showCompleted)} aria-expanded={showCompleted} aria-controls="completed-list" className="tasks-disclosure mb-3 flex min-h-[44px] w-full items-center justify-between rounded-xl px-1 text-sm font-semibold text-text-secondary">
                   <span>{showCompleted ? "Hide completed" : "Show completed"}</span>
-                  <span>{showCompleted ? "↑" : "↓"}</span>
+                  <span aria-hidden="true" className="tasks-disclosure-chevron">⌄</span>
                 </button>
-                {showCompleted && (
+                <div id="completed-list" className="tasks-disclosure-panel" data-open={showCompleted ? "true" : "false"}>
+                <div className="tasks-disclosure-inner">
                   <div className="space-y-4">
                     {/* ── PINNED: awaiting a decision, not history ─────────── */}
                     {completedGroups.pending.length > 0 && (
-                      <section className="space-y-2" aria-labelledby="completed-pending">
-                        <h3 id="completed-pending" className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
-                          Waiting on approval
-                          {/* A COUNT, never a points total: summing this group's
-                              rows would be client-side points arithmetic, and
-                              `task.points` is exactly the field the approval
-                              pipeline rewrites (task-claim.ts:1366 vs
-                              task-approval.ts:1270). */}
-                          <span className="ml-2 font-normal text-text-muted">
-                            {completedGroups.pending.length} chore{completedGroups.pending.length === 1 ? "" : "s"}
-                          </span>
-                        </h3>
+                      <section className="tasks-week-group space-y-2" aria-labelledby="completed-pending">
+                        {/* A HEADING, not a control: the 44px tap rule covers
+                            buttons and role="button" only. The count is a COUNT,
+                            never a points total — summing this group's rows would
+                            be client-side arithmetic over `task.points`, exactly
+                            the field the approval pipeline rewrites. */}
+                        <div className="tasks-week-group-header mb-1 border-b border-border py-2">
+                          <h3 id="completed-pending" className="flex items-baseline justify-between gap-2 text-xs font-semibold text-text-primary">
+                            <span>Waiting on approval</span>
+                            <span className="font-normal text-text-secondary">
+                              {completedGroups.pending.length} chore{completedGroups.pending.length === 1 ? "" : "s"}
+                            </span>
+                          </h3>
+                        </div>
                         <div className="space-y-2">
                           {completedGroups.pending.map((task) => {
                             const owner = task.pendingApproval!;
@@ -3304,7 +3337,7 @@ export default function TasksPage() {
                               aria-label={mine ? `Cancel completion of ${task.title}` : `${task.title} waiting for parent approval`}
                               onClick={mine ? () => openPinEntry(task.id) : undefined}
                               onKeyDown={mine ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPinEntry(task.id); } } : undefined}
-                              className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
+                              className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
                               style={{
                                 backgroundImage: rowTint("var(--color-accent-amber)"),
                               }}
@@ -3315,9 +3348,16 @@ export default function TasksPage() {
                               />
                               <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                               <div className="min-w-0 flex-1">
-                                <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                                <div className="line-clamp-5 text-sm leading-snug text-text-primary lg:line-clamp-2" title={task.title}>{task.title}</div>
                                 <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{owner.byName.split(" ")[0]} · tapped {formatDueLabel(owner.at.split("T")[0])} · {task.awardedPoints ?? task.pendingApproval!.points ?? baseTaskPoints(task)}pts on the way</div>
                               </div>
+                              {/* The chip wraps to its own full-width line below
+                                  `sm`: as an inline `shrink-0` sibling it squeezed
+                                  the text column to 53px at 320, where no clamp
+                                  shows these titles without an ellipsis. Same
+                                  geometry as the settled rows — the two differ
+                                  by chip, not structure. */}
+                              <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:ml-auto sm:w-auto">
                               <span
                                 className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
                                 style={{
@@ -3326,6 +3366,7 @@ export default function TasksPage() {
                               >
                                 ⏳ On the way
                               </span>
+                              </div>
                             </div>
                             );
                           })}
@@ -3335,16 +3376,18 @@ export default function TasksPage() {
 
                     {/* ── Week groups: this week, then newest-first ────────── */}
                     {completedGroups.weeks.map((group) => (
-                      <section key={group.key} className="space-y-2" aria-labelledby={`completed-week-${group.key}`}>
+                      <section key={group.key} className="tasks-week-group space-y-2" aria-labelledby={`completed-week-${group.key}`}>
                         {/* A HEADING, not a control: the 44px tap rule covers
                             buttons and role="button" only. The `id` derives
                             from the stable week key, never from an index. */}
-                        <h3 id={`completed-week-${group.key}`} className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
-                          {group.label}
-                          <span className="ml-2 font-normal text-text-muted">
-                            {group.tasks.length} chore{group.tasks.length === 1 ? "" : "s"}
-                          </span>
-                        </h3>
+                        <div className="tasks-week-group-header mb-1 border-b border-border py-2">
+                          <h3 id={`completed-week-${group.key}`} className="flex items-baseline justify-between gap-2 text-xs font-semibold text-text-primary">
+                            <span>{group.label}</span>
+                            <span className="font-normal text-text-secondary">
+                              {group.tasks.length} chore{group.tasks.length === 1 ? "" : "s"}
+                            </span>
+                          </h3>
+                        </div>
                         <div className="space-y-2">
                           {group.tasks.map((task) => {
                             const rowColor = "var(--color-accent-mint)";
@@ -3355,7 +3398,7 @@ export default function TasksPage() {
                             // a nested-interactive ARIA violation.
                             <div
                               key={task.id}
-                              className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                              className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
                               style={{
                                 backgroundImage: rowTint(rowColor),
                               }}
@@ -3366,12 +3409,13 @@ export default function TasksPage() {
                               />
                               <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                               <div className="min-w-0 flex-1">
-                                <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                                <div className="line-clamp-5 text-sm leading-snug text-text-primary lg:line-clamp-2" title={task.title}>{task.title}</div>
                                 {/* The week is the header directly above; the
                                     old per-row week token mislabelled every
                                     unstamped this-week row as last week's. */}
-                                <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]}</div>
+                                <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]}</div>
                               </div>
+                              <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:ml-auto sm:w-auto">
                               <span
                                 className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
                                 style={{
@@ -3381,6 +3425,7 @@ export default function TasksPage() {
                                 Done
                               </span>
                               <IconButton size="sm" variant="ghost" aria-label={`Undo completion of ${task.title}`} className="hit-44" onClick={() => openPinEntry(task.id)}>↩</IconButton>
+                              </div>
                             </div>
                             );
                           })}
@@ -3390,13 +3435,15 @@ export default function TasksPage() {
 
                     {/* ── Honest null: never dated, never guessed ──────────── */}
                     {completedGroups.unattributed.length > 0 && (
-                      <section className="space-y-2" aria-labelledby="completed-undated">
-                        <h3 id="completed-undated" className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
-                          Earlier
-                          <span className="ml-2 font-normal text-text-muted">
-                            {completedGroups.unattributed.length} chore{completedGroups.unattributed.length === 1 ? "" : "s"}
-                          </span>
-                        </h3>
+                      <section className="tasks-week-group space-y-2" aria-labelledby="completed-undated">
+                        <div className="tasks-week-group-header mb-1 border-b border-border py-2">
+                          <h3 id="completed-undated" className="flex items-baseline justify-between gap-2 text-xs font-semibold text-text-primary">
+                            <span>Earlier</span>
+                            <span className="font-normal text-text-secondary">
+                              {completedGroups.unattributed.length} chore{completedGroups.unattributed.length === 1 ? "" : "s"}
+                            </span>
+                          </h3>
+                        </div>
                         {/* Names the missing data instead of inventing a date. */}
                         <p className="text-xs text-text-muted">
                           Finished, but the family server never recorded a day for these.
@@ -3407,7 +3454,7 @@ export default function TasksPage() {
                             return (
                             <div
                               key={task.id}
-                              className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                              className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
                               style={{
                                 backgroundImage: rowTint(rowColor),
                               }}
@@ -3418,9 +3465,10 @@ export default function TasksPage() {
                               />
                               <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                               <div className="min-w-0 flex-1">
-                                <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
-                                <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]}</div>
+                                <div className="line-clamp-5 text-sm leading-snug text-text-primary lg:line-clamp-2" title={task.title}>{task.title}</div>
+                                <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]}</div>
                               </div>
+                              <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:ml-auto sm:w-auto">
                               <span
                                 className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
                                 style={{
@@ -3430,6 +3478,7 @@ export default function TasksPage() {
                                 Done
                               </span>
                               <IconButton size="sm" variant="ghost" aria-label={`Undo completion of ${task.title}`} className="hit-44" onClick={() => openPinEntry(task.id)}>↩</IconButton>
+                              </div>
                             </div>
                             );
                           })}
@@ -3438,9 +3487,8 @@ export default function TasksPage() {
                     )}
 
                     {/* Defensive empty branch, reachable only if the helper
-                        returns nothing while `completed` is non-empty. The card
-                        is gated on `completed.length > 0`, so this is a named
-                        state, not the normal path. */}
+                        returns nothing while `completed` is non-empty — the
+                        loading window renders placeholders instead. */}
                     {completedGroups.pending.length === 0 &&
                      completedGroups.weeks.length === 0 &&
                      completedGroups.unattributed.length === 0 && (
@@ -3448,6 +3496,9 @@ export default function TasksPage() {
                                   description="Chores you complete show up here, newest week first." />
                     )}
                   </div>
+                </div>
+                </div>
+                </>
                 )}
               </SectionCard>
               </div>

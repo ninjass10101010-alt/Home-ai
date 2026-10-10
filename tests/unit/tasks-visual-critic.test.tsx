@@ -392,3 +392,23 @@ describe("the visual gate's JSON contract (U3-0)", () => {
     }
   });
 });
+
+// ─── U2: the Completed card's disclosure is CSS-only, on the motion tokens ──
+// The browser gate measures the rendered result; these pins hold the source
+// contracts the gate cannot read: no keyframes, the CapsuleNav 0fr→1fr
+// precedent on --motion-base, and the declared 64px wall floors (§E-1).
+
+describe("U2 — the Completed card's disclosure contracts", () => {
+  it("pins the 0fr→1fr expansion and the wall floors in globals.css", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(css).toContain(".tasks-disclosure-panel");
+    expect(css).toMatch(/grid-template-rows:\s*0fr/);
+    expect(css).toMatch(/transition:\s*grid-template-rows var\(--motion-base\) var\(--ease-standard\)/);
+    expect(css).toContain('.tasks-disclosure[aria-expanded="true"] .tasks-disclosure-chevron');
+    expect(css).toContain('html[data-wall="true"] .tasks-disclosure');
+    expect(css).toContain('html[data-wall="true"] .tasks-week-group-header');
+  });
+});
+

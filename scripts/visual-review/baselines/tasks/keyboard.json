@@ -3,7 +3,7 @@
   "role": "parent",
   "viewport": "390x844",
   "theme": "dark",
-  "recordedAt": "2026-10-10T01:05:47.040Z",
+  "recordedAt": "2026-10-10T02:49:01.682Z",
   "steps": [
     {
       "i": 1,
@@ -216,7 +216,7 @@
       "i": 24,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Hide completed↑",
+      "accessibleName": "Hide completed⌄",
       "ringPx": 2,
       "inViewport": false,
       "ariaExpanded": "true"
@@ -603,7 +603,7 @@
       "i": 67,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Hide completed↑",
+      "accessibleName": "Hide completed⌄",
       "ringPx": 2,
       "inViewport": false,
       "ariaExpanded": "true"
@@ -990,7 +990,7 @@
       "i": 110,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Hide completed↑",
+      "accessibleName": "Hide completed⌄",
       "ringPx": 2,
       "inViewport": false,
       "ariaExpanded": "true"
@@ -1377,7 +1377,7 @@
       "i": 153,
       "key": "Tab",
       "activeElement": "button",
-      "accessibleName": "Hide completed↑",
+      "accessibleName": "Hide completed⌄",
       "ringPx": 2,
       "inViewport": false,
       "ariaExpanded": "true"

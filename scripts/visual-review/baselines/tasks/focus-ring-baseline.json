@@ -1,6 +1,6 @@
 {
   "route": "/tasks",
-  "recordedAt": "2026-10-10T01:05:48.793Z",
+  "recordedAt": "2026-10-10T02:49:03.657Z",
   "rings": {
     "parent|320x568|dark": {
       "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
@@ -384,6 +384,390 @@
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.39,
         "deltaLuminanceBorderOut": 8.38
+      }
+    },
+    "guest|320x568|dark": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.79,
+        "deltaLuminanceBorderOut": 18.01
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.26,
+        "deltaLuminanceBorderOut": 92.39
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.26,
+        "deltaLuminanceBorderOut": 92.44
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.61,
+        "deltaLuminanceBorderOut": 93.61
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.34,
+        "deltaLuminanceBorderOut": 92.52
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.4,
+        "deltaLuminanceBorderOut": 92.52
+      }
+    },
+    "guest|320x568|light": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.33,
+        "deltaLuminanceBorderOut": 64.17
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 15.58,
+        "deltaLuminanceBorderOut": 19.33
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 13.97,
+        "deltaLuminanceBorderOut": 17.95
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 7.8,
+        "deltaLuminanceBorderOut": 5.4
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 15.42,
+        "deltaLuminanceBorderOut": 18.43
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 13.31,
+        "deltaLuminanceBorderOut": 17.31
+      }
+    },
+    "guest|390x844|dark": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.78,
+        "deltaLuminanceBorderOut": 18.01
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.97,
+        "deltaLuminanceBorderOut": 92.97
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.77,
+        "deltaLuminanceBorderOut": 20.86
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.85,
+        "deltaLuminanceBorderOut": 20.86
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.85,
+        "deltaLuminanceBorderOut": 20.94
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.4,
+        "deltaLuminanceBorderOut": 92.52
+      }
+    },
+    "guest|390x844|light": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 81.19,
+        "deltaLuminanceBorderOut": 62.87
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 67.3,
+        "deltaLuminanceBorderOut": 66.35
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 62.31,
+        "deltaLuminanceBorderOut": 59.59
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 62.7,
+        "deltaLuminanceBorderOut": 59.75
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 62.86,
+        "deltaLuminanceBorderOut": 60.44
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 14.16,
+        "deltaLuminanceBorderOut": 18.11
+      }
+    },
+    "guest|768x1024|dark": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.83,
+        "deltaLuminanceBorderOut": 18.03
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.83,
+        "deltaLuminanceBorderOut": 20.93
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.91,
+        "deltaLuminanceBorderOut": 20.93
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.91,
+        "deltaLuminanceBorderOut": 20.93
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.98,
+        "deltaLuminanceBorderOut": 21
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.98,
+        "deltaLuminanceBorderOut": 20.99
+      }
+    },
+    "guest|768x1024|light": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.33,
+        "deltaLuminanceBorderOut": 64.17
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.19,
+        "deltaLuminanceBorderOut": 61.84
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.19,
+        "deltaLuminanceBorderOut": 61.84
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.36,
+        "deltaLuminanceBorderOut": 62
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.3,
+        "deltaLuminanceBorderOut": 62.7
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.36,
+        "deltaLuminanceBorderOut": 62.54
+      }
+    },
+    "guest|1280x900|dark": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.93,
+        "deltaLuminanceBorderOut": 17.98
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.11,
+        "deltaLuminanceBorderOut": 93.11
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.11,
+        "deltaLuminanceBorderOut": 93.11
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.11,
+        "deltaLuminanceBorderOut": 93.11
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.18,
+        "deltaLuminanceBorderOut": 93.19
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 93.19,
+        "deltaLuminanceBorderOut": 93.19
+      }
+    },
+    "guest|1280x900|light": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.33,
+        "deltaLuminanceBorderOut": 64.34
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.18,
+        "deltaLuminanceBorderOut": 76.17
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.85,
+        "deltaLuminanceBorderOut": 76.17
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 78.03,
+        "deltaLuminanceBorderOut": 76.17
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.79,
+        "deltaLuminanceBorderOut": 76.34
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 77.96,
+        "deltaLuminanceBorderOut": 76.34
+      }
+    },
+    "guest|1536x900|dark": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.89,
+        "deltaLuminanceBorderOut": 18.03
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.83,
+        "deltaLuminanceBorderOut": 20.86
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.91,
+        "deltaLuminanceBorderOut": 20.93
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.91,
+        "deltaLuminanceBorderOut": 20.93
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.98,
+        "deltaLuminanceBorderOut": 21
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 20.99,
+        "deltaLuminanceBorderOut": 21.01
+      }
+    },
+    "guest|1536x900|light": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.33,
+        "deltaLuminanceBorderOut": 64.41
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.19,
+        "deltaLuminanceBorderOut": 61.78
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.19,
+        "deltaLuminanceBorderOut": 61.78
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.36,
+        "deltaLuminanceBorderOut": 62
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.3,
+        "deltaLuminanceBorderOut": 62.7
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 3.5,
+        "deltaLuminanceBorderIn": 68.93,
+        "deltaLuminanceBorderOut": 62.54
+      }
+    },
+    "guest|1920x1080|dark": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 18.93,
+        "deltaLuminanceBorderOut": 18.07
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.32,
+        "deltaLuminanceBorderOut": 92.46
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.32,
+        "deltaLuminanceBorderOut": 92.46
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.39,
+        "deltaLuminanceBorderOut": 92.46
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.39,
+        "deltaLuminanceBorderOut": 92.46
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 92.4,
+        "deltaLuminanceBorderOut": 92.52
+      }
+    },
+    "guest|1920x1080|light": {
+      "button.tasks-disclosure.mb-3.flex \"Hide completed⌄\"": {
+        "ringPx": 2,
+        "deltaLuminanceBorderIn": 80.33,
+        "deltaLuminanceBorderOut": 64.34
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Feed the dog and refi\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.4,
+        "deltaLuminanceBorderOut": 17.15
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Set the table for din\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.46,
+        "deltaLuminanceBorderOut": 16.93
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Put away the clean la\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.23,
+        "deltaLuminanceBorderOut": 16.93
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Take out the kitchen \"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.23,
+        "deltaLuminanceBorderOut": 15.63
+      },
+      "button.grid.place-items-center.rounded-full \"Undo completion of Sweep the front porch\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 9.29,
+        "deltaLuminanceBorderOut": 16.45
       }
     }
   }
