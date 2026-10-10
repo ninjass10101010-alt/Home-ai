@@ -1,69 +1,69 @@
 {
   "route": "/tasks",
-  "recordedAt": "2026-10-09T23:38:19.287Z",
+  "recordedAt": "2026-10-10T01:05:48.793Z",
   "rings": {
     "parent|320x568|dark": {
       "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 92.39,
-        "deltaLuminanceBorderOut": 95.8
+        "deltaLuminanceBorderOut": 95.72
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 20.47,
-        "deltaLuminanceBorderOut": 20.63
+        "deltaLuminanceBorderIn": 20.48,
+        "deltaLuminanceBorderOut": 20.76
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 20.92,
-        "deltaLuminanceBorderOut": 20.84
+        "deltaLuminanceBorderIn": 20.55,
+        "deltaLuminanceBorderOut": 20.92
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 20.64,
-        "deltaLuminanceBorderOut": 20.62
+        "deltaLuminanceBorderIn": 20.39,
+        "deltaLuminanceBorderOut": 20.68
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 20.94,
-        "deltaLuminanceBorderOut": 20.85
+        "deltaLuminanceBorderIn": 20.55,
+        "deltaLuminanceBorderOut": 20.87
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 20.65,
-        "deltaLuminanceBorderOut": 20.71
+        "deltaLuminanceBorderIn": 20.48,
+        "deltaLuminanceBorderOut": 20.77
       }
     },
     "parent|320x568|light": {
       "button.inline-flex.items-center.justify-center \"✓ Approve all (5)\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 95.39,
-        "deltaLuminanceBorderOut": 22.94
+        "deltaLuminanceBorderOut": 22.23
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 73.89,
-        "deltaLuminanceBorderOut": 67.18
+        "deltaLuminanceBorderIn": 73.71,
+        "deltaLuminanceBorderOut": 67.12
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 66.22,
-        "deltaLuminanceBorderOut": 69.09
+        "deltaLuminanceBorderIn": 75.19,
+        "deltaLuminanceBorderOut": 68.64
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 75.13,
-        "deltaLuminanceBorderOut": 69.32
+        "deltaLuminanceBorderIn": 77.64,
+        "deltaLuminanceBorderOut": 70.99
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 68.46,
-        "deltaLuminanceBorderOut": 71.62
+        "deltaLuminanceBorderIn": 77.76,
+        "deltaLuminanceBorderOut": 72.37
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 75.13,
-        "deltaLuminanceBorderOut": 70.01
+        "deltaLuminanceBorderIn": 77.64,
+        "deltaLuminanceBorderOut": 71.57
       }
     },
     "parent|390x844|dark": {
@@ -72,30 +72,30 @@
         "deltaLuminanceBorderIn": 92.39,
         "deltaLuminanceBorderOut": 95.75
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
+        "ringPx": 4,
+        "deltaLuminanceBorderIn": 98.01,
+        "deltaLuminanceBorderOut": 98.15
+      },
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.17,
-        "deltaLuminanceBorderOut": 98.37
+        "deltaLuminanceBorderOut": 98.39
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
-        "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.6,
-        "deltaLuminanceBorderOut": 98.48
-      },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.51,
-        "deltaLuminanceBorderOut": 98.56
+        "deltaLuminanceBorderOut": 98.57
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.71,
-        "deltaLuminanceBorderOut": 98.77
+        "deltaLuminanceBorderIn": 98.65,
+        "deltaLuminanceBorderOut": 98.78
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 20.46,
-        "deltaLuminanceBorderOut": 20.71
+        "deltaLuminanceBorderIn": 20.57,
+        "deltaLuminanceBorderOut": 20.63
       }
     },
     "parent|390x844|light": {
@@ -104,30 +104,30 @@
         "deltaLuminanceBorderIn": 95.36,
         "deltaLuminanceBorderOut": 22.23
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 11.08,
-        "deltaLuminanceBorderOut": 16.95
+        "deltaLuminanceBorderIn": 11.02,
+        "deltaLuminanceBorderOut": 16.1
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 17.14,
-        "deltaLuminanceBorderOut": 14.78
+        "deltaLuminanceBorderIn": 8.87,
+        "deltaLuminanceBorderOut": 13.9
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 15.23,
-        "deltaLuminanceBorderOut": 28.16
+        "deltaLuminanceBorderIn": 15.86,
+        "deltaLuminanceBorderOut": 28.73
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 24.35,
-        "deltaLuminanceBorderOut": 27.38
+        "deltaLuminanceBorderIn": 14.54,
+        "deltaLuminanceBorderOut": 27.54
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 78.01,
-        "deltaLuminanceBorderOut": 73.2
+        "deltaLuminanceBorderIn": 77.83,
+        "deltaLuminanceBorderOut": 74.85
       }
     },
     "parent|768x1024|dark": {
@@ -136,30 +136,30 @@
         "deltaLuminanceBorderIn": 14.76,
         "deltaLuminanceBorderOut": 18.38
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 20.55,
+        "deltaLuminanceBorderIn": 20.53,
         "deltaLuminanceBorderOut": 20.71
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 20.86,
+        "deltaLuminanceBorderIn": 20.55,
         "deltaLuminanceBorderOut": 20.86
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.18,
-        "deltaLuminanceBorderOut": 98.49
+        "deltaLuminanceBorderIn": 98.16,
+        "deltaLuminanceBorderOut": 98.44
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.58,
-        "deltaLuminanceBorderOut": 98.58
+        "deltaLuminanceBorderIn": 98.42,
+        "deltaLuminanceBorderOut": 98.63
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 20.64,
-        "deltaLuminanceBorderOut": 20.94
+        "deltaLuminanceBorderIn": 20.63,
+        "deltaLuminanceBorderOut": 20.89
       }
     },
     "parent|768x1024|light": {
@@ -168,27 +168,27 @@
         "deltaLuminanceBorderIn": 8.81,
         "deltaLuminanceBorderOut": 65.59
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 81.12,
+        "deltaLuminanceBorderIn": 81.06,
         "deltaLuminanceBorderOut": 75.98
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 76.63,
+        "deltaLuminanceBorderIn": 81.12,
         "deltaLuminanceBorderOut": 76.57
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.21,
         "deltaLuminanceBorderOut": 10.01
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 10.01,
-        "deltaLuminanceBorderOut": 9.95
+        "deltaLuminanceBorderIn": 6.25,
+        "deltaLuminanceBorderOut": 10.13
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 81.12,
         "deltaLuminanceBorderOut": 76.51
@@ -200,27 +200,27 @@
         "deltaLuminanceBorderIn": 14.76,
         "deltaLuminanceBorderOut": 18.53
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.18,
         "deltaLuminanceBorderOut": 98.47
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.57,
+        "deltaLuminanceBorderIn": 98.36,
         "deltaLuminanceBorderOut": 98.56
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 20.65,
         "deltaLuminanceBorderOut": 20.92
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 21.01,
+        "deltaLuminanceBorderIn": 20.65,
         "deltaLuminanceBorderOut": 21.01
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 20.66,
         "deltaLuminanceBorderOut": 21
@@ -232,27 +232,27 @@
         "deltaLuminanceBorderIn": 8.81,
         "deltaLuminanceBorderOut": 65.59
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.39,
         "deltaLuminanceBorderOut": 9.29
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 9.95,
-        "deltaLuminanceBorderOut": 9.95
+        "deltaLuminanceBorderIn": 5.39,
+        "deltaLuminanceBorderOut": 9.88
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 81.12,
         "deltaLuminanceBorderOut": 77.29
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 3.5,
-        "deltaLuminanceBorderIn": 77.89,
+        "deltaLuminanceBorderIn": 81.18,
         "deltaLuminanceBorderOut": 77.29
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 3.5,
         "deltaLuminanceBorderIn": 81.12,
         "deltaLuminanceBorderOut": 77.41
@@ -264,27 +264,27 @@
         "deltaLuminanceBorderIn": 92.39,
         "deltaLuminanceBorderOut": 96.03
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.17,
         "deltaLuminanceBorderOut": 98.4
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.6,
+        "deltaLuminanceBorderIn": 98.34,
         "deltaLuminanceBorderOut": 98.55
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.18,
+        "deltaLuminanceBorderIn": 98.27,
         "deltaLuminanceBorderOut": 98.48
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.56,
-        "deltaLuminanceBorderOut": 98.57
+        "deltaLuminanceBorderIn": 98.28,
+        "deltaLuminanceBorderOut": 98.62
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.27,
         "deltaLuminanceBorderOut": 98.54
@@ -296,27 +296,27 @@
         "deltaLuminanceBorderIn": 95.29,
         "deltaLuminanceBorderOut": 21.69
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.39,
         "deltaLuminanceBorderOut": 9.76
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 10.19,
-        "deltaLuminanceBorderOut": 10.01
+        "deltaLuminanceBorderIn": 6.25,
+        "deltaLuminanceBorderOut": 10.78
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.45,
         "deltaLuminanceBorderOut": 9.16
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 8.44,
-        "deltaLuminanceBorderOut": 10.19
+        "deltaLuminanceBorderIn": 5.39,
+        "deltaLuminanceBorderOut": 10.78
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.39,
         "deltaLuminanceBorderOut": 9.22
@@ -328,30 +328,30 @@
         "deltaLuminanceBorderIn": 92.39,
         "deltaLuminanceBorderOut": 96.16
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.28,
-        "deltaLuminanceBorderOut": 98.47
+        "deltaLuminanceBorderOut": 98.42
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.49,
+        "deltaLuminanceBorderIn": 98.35,
         "deltaLuminanceBorderOut": 98.64
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.18,
-        "deltaLuminanceBorderOut": 98.55
+        "deltaLuminanceBorderOut": 98.49
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 98.64,
+        "deltaLuminanceBorderIn": 98.44,
         "deltaLuminanceBorderOut": 98.64
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 98.27,
-        "deltaLuminanceBorderOut": 98.63
+        "deltaLuminanceBorderOut": 98.58
       }
     },
     "parent|1920x1080|light": {
@@ -360,30 +360,30 @@
         "deltaLuminanceBorderIn": 95.29,
         "deltaLuminanceBorderOut": 20.98
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Drain the sink, wipe down all th\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Drain the sink, wipe down all th\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.45,
-        "deltaLuminanceBorderOut": 9.29
+        "deltaLuminanceBorderOut": 9.1
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Drain the sink, wipe down all \"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Drain the sink, wipe down all \"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 9.23,
+        "deltaLuminanceBorderIn": 5.39,
         "deltaLuminanceBorderOut": 9.88
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Sort the recycling into the blue\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Sort the recycling into the blue\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.39,
-        "deltaLuminanceBorderOut": 8.69
+        "deltaLuminanceBorderOut": 8.5
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Send back Sort the recycling into the bl\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Send back Sort the recycling into the bl\"": {
         "ringPx": 4,
-        "deltaLuminanceBorderIn": 9.29,
+        "deltaLuminanceBorderIn": 5.39,
         "deltaLuminanceBorderOut": 9.29
       },
-      "button.tap-sm.min-h-[44px].flex-1 \"Approve Wipe the kitchen table after din\"": {
+      "button.tasks-approval-action.tap-sm.min-h-[44px] \"Approve Wipe the kitchen table after din\"": {
         "ringPx": 4,
         "deltaLuminanceBorderIn": 5.39,
-        "deltaLuminanceBorderOut": 8.56
+        "deltaLuminanceBorderOut": 8.38
       }
     }
   }

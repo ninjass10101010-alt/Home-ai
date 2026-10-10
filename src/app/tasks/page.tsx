@@ -3124,7 +3124,12 @@ export default function TasksPage() {
             </SectionCard>
 
             {isLoggedIn && currentUser?.role === "parent" && (pendingApprovals.length > 0 || approvalQueueLoading) && (
-              <SectionCard headingLevel="h2" title="Needs approval" description={`${pendingApprovals.length} tapped — review to award points`} icon="⏳">
+              <SectionCard
+                headingLevel="h2"
+                title="Needs approval"
+                description={approvalQueueLoading ? "checking the queue…" : `${pendingApprovals.length} tapped — review to award points`}
+                icon="⏳"
+              >
                 {!approvalQueueLoading && (
                   /* A COUNT, never a points total: the same number the
                      description and `Approve all (N)` carry, with "chores" as
@@ -3142,11 +3147,11 @@ export default function TasksPage() {
                 <div className="mb-3">
                   <SoftButton
                     onClick={() => openApprovalDialog(null, "approve-all")}
-                    className="w-full"
+                    className="tasks-approval-approve-all w-full"
                     disabled={approveAllInFlight || approvalQueueLoading}
                     aria-disabled={approveAllInFlight || approvalQueueLoading || undefined}
                   >
-                    ✓ Approve all ({pendingApprovals.length})
+                    {approvalQueueLoading ? "✓ Approve all" : `✓ Approve all (${pendingApprovals.length})`}
                   </SoftButton>
                 </div>
                 {approvalQueueLoading ? (
@@ -3196,15 +3201,16 @@ export default function TasksPage() {
                         backgroundImage: rowTint("var(--color-accent-amber)"),
                       }}
                     >
+                      {/* Avatar and text are ONE flex item so the `w-full` action
+                          row is the only thing that ever wraps. With the avatar
+                          as a sibling of a `basis-56` text column, the 320px row
+                          wrapped the whole text column under the avatar — ~40px
+                          of empty first line on every row. The action row keeps
+                          `w-full` below `sm`, so the title never competes with
+                          the ~170px of buttons. */}
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
                       <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={isCrew ? "🤝" : assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
-                      {/* `basis-56` is the whole point of the wrap: "Approve" +
-                          "Send back" are ~170px of `shrink-0` buttons, which at
-                          390px left this text column 90px — the title broke to
-                          two words and the meta truncated to "Jasmine ·", so the
-                          one row a parent is about to pay points on was the one
-                          row they could not read. The text now claims a line and
-                          the two actions take the next one, full width. */}
-                      <div className="min-w-0 flex-1 basis-56">
+                      <div className="min-w-0 flex-1">
                         {approvalQueueHasMultipleKids && (
                           /* A label, not a control. With two or more kids in the
                              queue the parent scans by kid, and a per-row label is
@@ -3214,15 +3220,21 @@ export default function TasksPage() {
                             {kid}
                           </span>
                         )}
-                        <div className="line-clamp-4 text-sm leading-snug text-text-primary lg:line-clamp-2" title={task.title}>{task.title}</div>
+                        <div className="line-clamp-5 text-sm leading-snug text-text-primary lg:line-clamp-2" title={task.title}>{task.title}</div>
                         <div className="line-clamp-2 text-xs leading-snug text-text-secondary">
                           {isCrew
-                            ? `🤝 ${crew.map((n) => n.split(" ")[0]).join(", ")} · tapped ${formatDueLabel(owner.at.split("T")[0])}`
-                            /* The raw `at` is an ISO instant; `split("T")[0]`
-                               printed "2026-10-05" where every other date on this
-                               page reads "Oct 5". Same formatDueLabel contract. */
-                            : `${approvalQueueHasMultipleKids ? "tapped" : `${kid} · tapped`} ${formatDueLabel(owner.at.split("T")[0])}`}
-                          {ageHint && <span> · {ageHint}</span>}
+                            ? `🤝 ${crew.map((n) => n.split(" ")[0]).join(", ")} · `
+                            : `${approvalQueueHasMultipleKids ? "" : `${kid} · `}`}
+                          {/* The tap time and the age hint are ONE unbreakable
+                              group, so the hint never wraps onto its own lone
+                              second line. The raw `at` is an ISO instant;
+                              `split("T")[0]` printed "2026-10-05" where every
+                              other date reads "Oct 5" — same formatDueLabel
+                              contract. */}
+                          <span className="whitespace-nowrap">
+                            {`tapped ${formatDueLabel(owner.at.split("T")[0])}`}
+                            {ageHint && ` · ${ageHint}`}
+                          </span>
                         </div>
                         {/* The payout is its own line and its own ink: 12px
                             semibold on the amber ink token, per head and crew
@@ -3238,9 +3250,10 @@ export default function TasksPage() {
                           <div className="mt-0.5 text-xs font-semibold text-[var(--color-accent-ink-amber)]">⏳ Sending…</div>
                         )}
                       </div>
+                      </div>
                       <div className="flex w-full shrink-0 gap-2 sm:ml-auto sm:w-auto">
-                        <button type="button" aria-label={`Approve ${task.title}`} onClick={() => openApprovalDialog(task.id, "approve")} disabled={rowInFlight} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-bold text-[var(--color-accent-ink-mint)] glass-subtle disabled:opacity-40 sm:flex-none">Approve</button>
-                        <button type="button" aria-label={`Send back ${task.title}`} onClick={() => openApprovalDialog(task.id, "sendback")} disabled={rowInFlight} className="tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-semibold text-[var(--color-accent-ink-rose)] disabled:opacity-40 sm:flex-none">Send back</button>
+                        <button type="button" aria-label={`Approve ${task.title}`} onClick={() => openApprovalDialog(task.id, "approve")} disabled={rowInFlight} className="tasks-approval-action tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-bold text-[var(--color-accent-ink-mint)] glass-subtle disabled:opacity-40 sm:flex-none">Approve</button>
+                        <button type="button" aria-label={`Send back ${task.title}`} onClick={() => openApprovalDialog(task.id, "sendback")} disabled={rowInFlight} className="tasks-approval-action tap-sm min-h-[44px] flex-1 shrink-0 rounded-full px-3 text-xs font-semibold text-[var(--color-accent-ink-rose)] glass-subtle disabled:opacity-40 sm:flex-none">Send back</button>
                       </div>
                     </div>
                     );

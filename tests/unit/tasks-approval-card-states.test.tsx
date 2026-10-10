@@ -204,6 +204,24 @@ describe("U1 — named states", () => {
     expect(el.querySelector(".tasks-approval-summary")).toBeNull();
   });
 
+  it("never fabricates a zero in the loading window", async () => {
+    seed([]);
+    vi.stubGlobal("fetch", vi.fn((input: any) => {
+      const url = String(input);
+      if (url === "/api/tasks/sync") return new Promise(() => {});
+      return Promise.resolve({ ok: false, status: 401, json: async () => ({}) } as any);
+    }));
+    const el = await renderAsync(<TasksPage />);
+    await settle(250);
+    // An unread queue is unknown, never "0 tapped" / "Approve all (0)".
+    expect(el.textContent).not.toContain("0 tapped");
+    expect(el.textContent).not.toContain("Approve all (0)");
+    expect(el.textContent).toContain("checking the queue…");
+    const approveAll = [...el.querySelectorAll("button")].find((b) => /Approve all/i.test(b.textContent || "")) as HTMLButtonElement;
+    expect(approveAll, "the button keeps its literal 'Approve all' during loading").toBeTruthy();
+    expect(approveAll.disabled).toBe(true);
+  });
+
   it("marks a row with a queued approval as Sending… and disables both actions", async () => {
     seed([pendingRow({ id: 12, title: "Drain the sink" })]);
     localStorage.setItem("consuela-task-operation-outbox-v1", JSON.stringify([{

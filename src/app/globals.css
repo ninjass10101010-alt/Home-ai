@@ -3877,6 +3877,14 @@ html[data-wall="true"] .schedule-row {
 html[data-wall="true"] .tasks-approval-summary {
   min-height: 64px;
 }
+/* U1's approval controls are 44px at normal density (the house floor); this
+   card takes the frame's 64px wall floor. `!important` is required: the
+   page-wide wall touch floor (`html[data-wall="true"] :is(button, …)` below)
+   is (0-3-2) and pins min-height 44px. */
+html[data-wall="true"] .tasks-approval-action,
+html[data-wall="true"] .tasks-approval-approve-all {
+  min-height: 64px !important;
+}
 html[data-wall="true"] [data-testid="wx-hero-temp"] {
   font-size: 96px;
 }
