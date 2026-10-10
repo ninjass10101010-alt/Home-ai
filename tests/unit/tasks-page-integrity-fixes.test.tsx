@@ -1191,8 +1191,12 @@ describe("P2 the remaining visual and a11y contract", () => {
     seed([]);
     const el = await renderAsync(<TasksPage />);
     await settle();
-    // The Open card is present even with nothing claimable.
-    expect(text()).toContain("🫳 Open");
+    // The Open card is present even with nothing claimable. U3 moved the glyph
+    // out of the title into the card's icon seat, so the title is the word
+    // alone and the glyph lives in the header's aria-hidden badge.
+    expect(text()).toContain("Open");
+    expect(text()).toContain("🫳");
+    expect(text()).not.toContain("🫳 Open");
     expect(text()).toContain("Nothing up for grabs");
     expect(el).toBeTruthy();
   });
@@ -1320,8 +1324,11 @@ describe("P2 the remaining visual and a11y contract", () => {
     const headings = Array.from(board.querySelectorAll("h1, h2, h3, h4, h5, h6"));
     expect(headings.length).toBeGreaterThan(0);
     // The card TITLES are the top level of this page, so they are h2s…
+    // U3 moved the Open card's glyph into its icon seat, so the h2 text is the
+    // title alone while the 🫳 stays in the card's header badge.
     const titles = Array.from(board.querySelectorAll("h2")).map((h) => (h.textContent || "").trim());
-    expect(titles).toContain("🫳 Open");
+    expect(titles).toContain("Open");
+    expect(titles).not.toContain("🫳 Open");
     expect(titles).toContain("Pending");
     // …and the page itself emits no h3/h4 of its own (every remaining h3 belongs
     // to a nested component such as a card's EmptyState, which is a valid nest).

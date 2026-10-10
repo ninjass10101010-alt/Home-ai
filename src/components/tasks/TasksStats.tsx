@@ -49,7 +49,7 @@ export default function TasksStats({
     <>
     {/* One compact 3-up stat row at every width — on phones the stacked
         tiles used to eat 405px of prime screen before the first chore. */}
-    <div className="grid grid-cols-3 gap-3 md:col-span-2">
+    <div className="grid grid-cols-3 gap-2 md:col-span-2">
       <StatTile label="Pending" value={pendingCount} detail="Open tasks" icon="📋" tone="warning" compact />
       <StatTile label="Completed" value={completedCount} detail="This week" icon="🎉" tone="success" compact />
       <StatTile

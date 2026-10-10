@@ -2411,8 +2411,13 @@ export default function TasksPage() {
   }, [weekData, membersData, visibleTasks, hallOfFame, allTime.totals]);
 
   const topScorer = dynamicLeaderboard[0];
+  // Pre-existing sum, carved out by the frame's Global Constraints (the
+  // three-sum carve-out, 2026-10-08 plan): source is `dynamicLeaderboard[].points`
+  // — server-authored per-member week values. Unchanged by U3; never extended.
   const familyTotal = dynamicLeaderboard.reduce((sum, entry) => sum + entry.points, 0);
   const championShare = familyTotal > 0 ? topScorer.points / familyTotal : 0;
+  // Pre-existing sum, same carve-out and same source rule: the server's
+  // `weekData.points` map, never task rows. Unchanged by U3; never extended.
   const weeklyEarned = Object.values(weekData.points).reduce((a, b) => a + b, 0);
   const daysUntilReset = getDaysUntilWeekReset();
   // Everything the user can still take back: a `reconciling` entry has already
@@ -2557,6 +2562,15 @@ export default function TasksPage() {
           truncating for it. At 1536px+ the left column stops being an even half
           and becomes a real 26rem rail, because a panel of chore rows wants the
           width and the filters want the height. */}
+      {/* ONE RHYTHM — 24/16/8/12, each number a literal rule held in this file
+          or globals.css and measured by the gate's `rhythm.panelGaps` /
+          `rhythm.railGaps`:
+            24 between cards in a panel — `space-y-6` on this shell (the phone
+               stack) and on both panel wrappers; `md:gap-6` on the md grid.
+            16 inside the rail — `space-y-4` on `.wall-board-rail`.
+            8 between rows in a list — `space-y-2` on every row stack (and the
+               member strip's own `.5rem` tile gap).
+            12 inside a row — `px-3 py-3` on every `.schedule-row`. */}
       <div className="px-4 pb-8 2xl:pb-28 [html[data-wall='true']_&]:pb-28 space-y-6 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0 2xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] 2xl:grid-rows-[auto_1fr]">
         {/* ── The rail ────────────────────────────────────────────────────
             Stats, view switch and the roster filter are ONE grid cell, not
@@ -2903,7 +2917,10 @@ export default function TasksPage() {
 
             <TaskLedgerQuarantineNotice localWeekData={weekData} isParent={isParent} />
 
-            <SectionCard headingLevel="h2" title="🫳 Open" description="Nobody's claimed these — fastest fingers earn the bonus." icon="⚡">
+            {/* One glyph per card header, in the icon seat: Open 🫳 (was a
+                double — `title="🫳 Open"` AND `icon="⚡"`), Pending 📋, Needs
+                approval ⏳, Completed ✅. The title is the word alone. */}
+            <SectionCard headingLevel="h2" title="Open" description="Nobody's claimed these — fastest fingers earn the bonus." icon="🫳">
               {/* The card used to cease to exist when nothing was claimable,
                   which reads as "this section is broken", not "nothing is up for
                   grabs". */}
@@ -2916,17 +2933,24 @@ export default function TasksPage() {
                     const crew = isCrewTask(task);
                     const joined = crewMemberCount(task);
                     const full = crewFull(task);
+                    // The Pending board's row anatomy, shared verbatim: the 2px
+                    // saturated rail (the board's cyan), `px-3 py-3`, the
+                    // 3-line title clamp with `title` kept.
                     return (
                       <div
                         key={task.id}
-                        className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                        className="schedule-row liquid-glass flex items-center gap-3 px-3 py-3"
                         style={{
                           backgroundImage: rowTint("var(--color-accent-cyan)"),
                         }}
                       >
+                        <div
+                          className="h-8 w-0.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: "var(--color-accent-cyan)", boxShadow: "0 0 8px var(--color-accent-cyan)" }}
+                        />
                         <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={crew ? "🤝" : "🫳"} size="sm" variant="emoji" />
                         <div className="min-w-0 flex-1">
-                          <div className="line-clamp-2 text-sm leading-snug text-text-primary" title={task.title}>{task.title}</div>
+                          <div className="line-clamp-3 text-sm leading-snug text-text-primary lg:line-clamp-2" title={task.title}>{task.title}</div>
                           <div className="line-clamp-2 text-xs leading-snug text-text-secondary">
                             {crew
                               ? `🤝 Crew ${joined}/${task.crewSize} joined${full ? " — full" : ""} · +${task.points} pts each`
@@ -2941,7 +2965,7 @@ export default function TasksPage() {
                           aria-label={crew ? `Join crew for ${task.title}` : `Claim ${task.title}`}
                           disabled={crew && full}
                           onClick={() => openPinEntry(task.id)}
-                          className="tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle disabled:opacity-40"
+                          className="tasks-open-claim tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle disabled:opacity-40"
                         >
                           {crew ? (full ? "Full" : "Join crew") : `🫳 Claim +${task.points + speed}`}
                         </button>
@@ -3075,7 +3099,7 @@ export default function TasksPage() {
                             wallConfirm(task.id, () => openPinEntry(task.id));
                           }
                         }}
-                        className="schedule-row liquid-glass flex cursor-pointer items-center gap-3 px-3 py-2.5 animate-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
+                        className="schedule-row liquid-glass flex cursor-pointer items-center gap-3 px-3 py-3 animate-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
                         style={{
                           animationDelay: `${Math.min(idx, 8) * 0.05}s`,
                           backgroundImage: rowTint(rowColor),
@@ -3595,7 +3619,11 @@ export default function TasksPage() {
             className="panel-swap space-y-6 md:col-span-2 2xl:col-span-1 2xl:col-start-2"
           >
           <>
-            <Surface variant="warm" radius="2xl" padding="lg" glow>
+            {/* The champion leads with a Surface, but it now wears the
+                SectionCard internal rhythm — a `p-5` body, `space-y-3` between
+                blocks and one `border-border` hairline under the identity row
+                — so the tab carries ONE card language, not two. */}
+            <Surface variant="warm" radius="2xl" padding="none" className="p-5" glow>
               {familyTotal === 0 ? (
                 <div className="py-2 text-center">
                   <span className="text-2xl animate-crown-glow">👑</span>
@@ -3618,7 +3646,7 @@ export default function TasksPage() {
                 {/* pr-24 keeps the avatar clear of the absolutely-positioned
                     Share button that occupies this card's top-right corner
                     (96px = Share 76px + hit-area + gap). */}
-                <div className="flex items-center justify-between gap-4 pr-24">
+                <div className="flex items-center justify-between gap-4 border-b border-border pr-24 pb-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">This week&apos;s champion</p>
                     <div className="flex items-center gap-2 mt-1">
@@ -3645,16 +3673,14 @@ export default function TasksPage() {
                     <Avatar name={topScorer.name} color={memberColors[topScorer.name] || "green"} emoji={topScorer.emoji} size="lg" variant="emoji" glow />
                   </div>
                 </div>
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <ProgressRing value={championShare} max={1} label="Champion share" detail={`${topScorer.name.split(" ")[0]} leads`} size={96} stroke={8} />
-                  <StatTile label="Rewards" value={rewards.length} detail="Available" icon="🎁" tone="accent" />
-                  <StatTile label="Penalties" value={penalties.length} detail="Configured" tone="accent" />
-                </div>
-                {topScorer.badges.length > 0 && (
-                  <div className="mt-3">
-                    <TrophyCase badges={topScorer.badges} />
+                <div className="mt-3 space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <ProgressRing value={championShare} max={1} label="Champion share" detail={`${topScorer.name.split(" ")[0]} leads`} size={96} stroke={8} />
+                    <StatTile label="Rewards" value={rewards.length} detail="Available" icon="🎁" tone="accent" />
+                    <StatTile label="Penalties" value={penalties.length} detail="Configured" tone="accent" />
                   </div>
-                )}
+                  {topScorer.badges.length > 0 && <TrophyCase badges={topScorer.badges} />}
+                </div>
               </div>
               )}
             </Surface>
@@ -3735,7 +3761,11 @@ export default function TasksPage() {
                 weeklyPoints={sheetEntry.points}
                 pendingTasks={visibleTasks.filter(t => !t.completed && (t.assignee === sheetEntry.name || t.universal))}
                 affordableRewards={rewards.filter(r => r.cost <= sheetEntry.points)}
-                weekGraph={["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
+                weekGraph={/* Pre-existing per-day sum, the same three-sum
+                  carve-out as `familyTotal`/`weeklyEarned`: source is the
+                  server's `weekData.history` earn transactions. Unchanged by
+                  U3; never extended. */
+                  ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
                   day,
                   points: weekData.history
                     .filter(tx => tx.member === sheetEntry.name && tx.type === "earn" && new Date(tx.timestamp).toLocaleDateString("en-US", { weekday: "short" }) === day)
@@ -4229,7 +4259,7 @@ aria-describedby="crew-close-dialog-error"               onChange={(e) => { setC
               return (
                 <div
                   key={`${def.title}-${idx}`}
-                  className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                  className="schedule-row liquid-glass flex items-center gap-3 px-3 py-3"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm text-text-primary" title={def.title}>{def.title}</div>

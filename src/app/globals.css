@@ -2655,15 +2655,24 @@ a.widget-accent-text {
   box-shadow: 0 0 24px color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 12%, transparent);
 }
 
-/* ─── Member filter tiles (Tasks — vertical avatar + name, Podium language) ─── */
-.member-strip-tiles { gap: .6rem; }
+/* ─── Member filter tiles (Tasks — vertical avatar + name, Podium language) ───
+   Kept hand-rolled, and the reason is honest: `Chip`'s `as="span"` branch is a
+   passive label and a member filter is a control, so converting the eleven
+   tiles would be a design change, not a cleanup. What the tiles conform to:
+   the page's one rhythm — the 8px tile gap, the 12-inside-a-row padding step,
+   `--radius-lg` instead of a raw 1.1rem, and a DECLARED 44px floor (64px on
+   the wall, below) instead of one arriving by accident of padding + a 32px
+   avatar. The tile's own `transition` is deleted — `.tap-sm` on the button
+   already carries the one transition (150ms), and two per element was the
+   defect. */
+.member-strip-tiles { gap: .5rem; }
 .member-tile {
-  display: inline-flex; flex-direction: column; align-items: center; gap: .4rem;
-  min-width: 4.2rem; padding: .55rem .7rem .5rem;
-  border-radius: 1.1rem;
+  display: inline-flex; flex-direction: column; align-items: center; gap: .5rem;
+  min-width: 4.2rem; padding: 8px 12px; min-height: 44px;
+  border-radius: var(--radius-lg);
   background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
   color: var(--color-text-secondary);
-  transition: all .25s ease; cursor: pointer;
+  cursor: pointer;
 }
 .member-tile-name {
   font-size: .78rem; font-weight: 600; line-height: 1;
@@ -2684,6 +2693,16 @@ a.widget-accent-text {
    leg keeps a per-member tile recognisable at a glance while clearing 4.5:1.
    Unlayered, the only declaration of this property in either stylesheet. */
 .member-tile.is-active .member-tile-name { color: color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 55%, var(--color-text-primary)); }
+/* `.tap-sm` supplies its ring as a box-shadow, and the unlayered
+   `.member-tile.is-active` glow is ALSO a box-shadow that out-ranks the utility
+   layer — so the active tile could paint the ring away, and the gate must
+   measure the ring on an active AND an inactive tile. An outline sits outside
+   the box the tile fills and cannot be out-painted by it; this is the one
+   declaration of this property for the tile in either stylesheet. */
+.member-tile:focus-visible {
+  outline: 2px solid var(--color-accent-selected);
+  outline-offset: 2px;
+}
 
 /* ─── Tabs ───
    DELETED. `.calendar-tabs` / `.calendar-tab` were a hand-rolled duplicate of
@@ -3657,7 +3676,7 @@ main.wall-home-fit .wall-widget-grid {
   .wall-board-member-strip {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.6rem;
+    gap: 0.5rem;
     overflow: visible;
     overscroll-behavior: auto;
     mask-image: none;
@@ -4001,6 +4020,18 @@ html[data-wall="true"] .tasks-week-group-header {
    wall touch floor (`html[data-wall="true"] :is(button, …)`, 0-3-2) pins any
    button to 44px, and this control must reach the wall's 64px floor. */
 html[data-wall="true"] .tasks-disclosure {
+  min-height: 64px !important;
+}
+/* §E-1: the member tile's 64px floor becomes declared, not emergent (padding +
+   a 32px avatar happened to reach 64). `!important` matches the precedent
+   above — the page-wide wall touch floor pins buttons to 44px. */
+html[data-wall="true"] .member-tile {
+  min-height: 64px !important;
+}
+/* §E-1: the Open board's claim control is a control like U1's approval actions;
+   its 64px wall floor is declared for the same reason and by the same
+   mechanism. */
+html[data-wall="true"] .tasks-open-claim {
   min-height: 64px !important;
 }
 html[data-wall="true"] [data-testid="wx-hero-temp"] {

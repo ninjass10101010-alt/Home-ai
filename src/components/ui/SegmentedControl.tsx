@@ -58,9 +58,11 @@ const EMPHASIZE_PILL =
 
 export default function SegmentedControl({ options, value, onChange, className = "", compact = false, emphasize = false, "aria-label": ariaLabel, id, ariaControls }: SegmentedControlProps) {
   const activeIndex = Math.max(options.findIndex((option) => option.id === value), 0);
+  // Non-compact gap is 8px: the /tasks view switch is measured inside the
+  // rail's panel scope, and 6px read off the page's 8px rhythm grid (U3).
   const densityClass = compact
     ? "min-w-0 basis-0 gap-1 rounded-xl px-1 py-2 text-xs"
-    : "gap-1.5 rounded-xl px-3 py-2 text-xs";
+    : "gap-2 rounded-xl px-3 py-2 text-xs";
 
   const trackRef = useRef<HTMLDivElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);

@@ -55,7 +55,10 @@ describe("SegmentedControl", () => {
     expect(radios).toHaveLength(4);
     expect(radios[0].getAttribute("aria-checked")).toBe("true");
     expect(radios[0].className).toContain("px-3");
-    expect(radios[0].className).toContain("gap-1.5");
+    // Non-compact density moved 6px → 8px (U3): the /tasks view switch is
+    // measured inside the rail's panel scope, where 6px read off the page's
+    // 8px rhythm grid.
+    expect(radios[0].className).toContain("gap-2");
     expect(radios[0].className).toContain("text-xs");
     expect(radios[0].className).not.toContain("basis-0");
     expect(radios[0].querySelector("span")?.className).toBe("whitespace-nowrap");

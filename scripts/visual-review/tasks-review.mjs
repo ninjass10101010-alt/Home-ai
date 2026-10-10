@@ -128,6 +128,8 @@ export const ENTRY_KEYS = Object.freeze([
   "cls",
   "skeletonParity",
   "geometry",
+  "rhythm",
+  "memberTileTransitionMs",
   "tapTargets",
   "focusRing",
   "text",
@@ -280,6 +282,8 @@ export function buildEntrySkeleton(meta = {}) {
     cls: {},
     skeletonParity: [],
     geometry: [],
+    rhythm: { panelGaps: [], railGaps: [] },
+    memberTileTransitionMs: null,
     tapTargets: [],
     focusRing: [],
     text: [],
@@ -750,6 +754,44 @@ function measureDom() {
     };
   });
 
+  // U3's rhythm evidence: the vertical gap between consecutive in-flow blocks
+  // of the active panel (the declared 24px) and of the rail (the declared
+  // 16px) — measured, never inferred — plus the member tile's computed
+  // transition (must be `.tap-sm`'s 150ms; the tile declares none of its own).
+  const gapTable = (container, expectedPx) => {
+    if (!container) return [];
+    const blocks = Array.from(container.children)
+      .filter((el) => g.isVisible(el) && el.getBoundingClientRect().height > 0);
+    const out = [];
+    for (let i = 1; i < blocks.length; i += 1) {
+      const prev = blocks[i - 1].getBoundingClientRect();
+      const cur = blocks[i].getBoundingClientRect();
+      const gapPx = Math.round((cur.top - prev.bottom) * 10) / 10;
+      out.push({
+        from: g.describe(blocks[i - 1]),
+        to: g.describe(blocks[i]),
+        gapPx,
+        expectedPx,
+        pass: Math.abs(gapPx - expectedPx) <= 1,
+      });
+    }
+    return out;
+  };
+  const rhythm = {
+    panelGaps: gapTable(document.querySelector('[role="tabpanel"]'), 24),
+    railGaps: gapTable(document.querySelector(".wall-board-rail"), 16),
+  };
+  // The member tile's computed `transition-duration` (ms). In this context it
+  // is the reduced-motion value (the global blanket zeroes it); the motion-on
+  // twin is measured in the motion context below.
+  const memberTileTransitionMs = (() => {
+    const tile = document.querySelector(".member-tile");
+    if (!tile) return null;
+    const durations = (getComputedStyle(tile).transitionDuration || "0s")
+      .split(",").map((v) => (parseFloat(v) || 0) * 1000);
+    return Math.max(0, ...durations);
+  })();
+
   const emptyMessages = Array.from(document.querySelectorAll("body *"))
     .filter((el) => g.isVisible(el) && /All caught up|All quiet|Nothing finished yet|Nothing is up for grabs/.test(el.textContent || ""))
     .map((el) => g.describe(el));
@@ -764,6 +806,8 @@ function measureDom() {
     approvalTitles,
     completedRows,
     weekGroups,
+    rhythm,
+    memberTileTransitionMs,
     titlesEllipsised: clamped,
     overflow: {
       root: Math.max(0, root.scrollWidth - window.innerWidth),
@@ -1248,17 +1292,19 @@ async function measureFocusRings(page, ds, limit = 12) {
         .find((b) => /Show completed|Hide completed/.test(b.textContent || "")));
       add(completed.querySelector('button[aria-label^="Undo completion of "]'));
     }
-    const openHeading = Array.from(document.querySelectorAll("h2"))
-      .find((el) => /🫳/.test(el.textContent || ""));
-    if (openHeading) {
-      let scope = openHeading;
-      while (scope && scope !== document.body
-        && !scope.querySelector('[aria-label^="Claim "], [aria-label^="Join crew for "]')) {
-        scope = scope.parentElement;
-      }
-      if (scope && scope !== document.body) {
-        add(scope.querySelector('[aria-label^="Claim "], [aria-label^="Join crew for "]'));
-      }
+    // The claim control's accessible name is unique to the Open board (a
+    // heading-text search stopped being reliable when U3 moved the 🫳 glyph
+    // from the title into the card's icon seat).
+    add(document.querySelector('[aria-label^="Claim "], [aria-label^="Join crew for "]'));
+    // U3: the member tile's ring must be measured on an active AND an inactive
+    // tile — `.tap-sm`'s box-shadow ring and the unlayered `.member-tile`
+    // background/glow rules can paint over each other, and only the measured
+    // deltas settle which one wins.
+    const strip = document.querySelector(".member-strip-tiles");
+    if (strip) {
+      add(strip.querySelector('button.member-tile[aria-pressed="true"]'));
+      add(Array.from(strip.querySelectorAll("button.member-tile"))
+        .find((b) => b.getAttribute("aria-pressed") === "false"));
     }
     window.__vrFocusTargets = targets;
   });
@@ -1510,6 +1556,8 @@ async function runEntry(browser, opts) {
     };
     entry.overflow = dom.overflow;
     entry.geometry = dom.geometry;
+    entry.rhythm = dom.rhythm;
+    entry.memberTileTransitionMs = dom.memberTileTransitionMs;
     entry.tapTargets = dom.tapTargets.map((t) => ({ ...t, wallOk: !opts.wall || t.h >= 64 || t.hit44 }));
     entry.focusRing = await measureFocusRings(reduced.page, ds, 12);
     // The ring walk scrolls each target into view (now including the undo
@@ -1630,6 +1678,17 @@ async function runEntry(browser, opts) {
     await expandCompleted(motion.page);
     const motionShot = await motion.page.screenshot({ animations: "disabled" });
     const styles = await motion.page.evaluate(measureMotion);
+    // The member tile's motion-on transition (`entry.memberTileTransitionMs`
+    // is the reduced-motion twin from measureDom): `.tap-sm` must own the
+    // tile's ONE transition with `.member-tile`'s own deleted, so the
+    // blanket's ~0 here becomes the expected 150ms.
+    const memberTileTransitionMotionMs = await motion.page.evaluate(() => {
+      const tile = document.querySelector(".member-tile");
+      if (!tile) return null;
+      const durations = (getComputedStyle(tile).transitionDuration || "0s")
+        .split(",").map((v) => (parseFloat(v) || 0) * 1000);
+      return Math.max(0, ...durations);
+    });
     const listenerBefore = await motion.page.evaluate(listenerCount);
     for (let i = 0; i < 5; i += 1) {
       await motion.page.evaluate(toggleCompletedDisclosure);
@@ -1679,6 +1738,9 @@ async function runEntry(browser, opts) {
       hiddenTabAnimationsDelta: animationsAfter - animationsBefore,
       listenerCountDelta: Math.max(entry.motion.listenerCountDelta, listenerAfter - listenerBefore),
       endStateDiffPx,
+      // The motion-on twin of `entry.memberTileTransitionMs` (measured in the
+      // reduced context): `.tap-sm`'s 150ms must be the tile's ONE transition.
+      memberTileTransitionMs: memberTileTransitionMotionMs,
     };
     entry.consoleErrors = [...new Set([...entry.consoleErrors, ...motion.consoleErrors])];
     entry.pageErrors = [...new Set([...entry.pageErrors, ...motion.pageErrors])];

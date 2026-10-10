@@ -201,6 +201,28 @@ describe("Tasks heading outline (visual critic 2026-10-05)", () => {
     }
   });
 
+  it("the leaderboard tab keeps the same outline depth (no skipped level)", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent", emoji: "👩", color: "violet" };
+    mockAuth.isLoggedIn = true;
+    seed([{ id: 1, title: "Sweep the floor", assignee: "Jasmine Garcia", assigneeEmoji: "👧", due: "2026-10-05", points: 12, recurring: null, category: "Chores", completed: false, priority: "medium" }]);
+    const root = await renderAsync(<TasksPage />);
+    await settle();
+
+    const tab = [...root.querySelectorAll('button[role="radio"]')]
+      .find((b) => (b.textContent || "").includes("Leaderboard")) as HTMLButtonElement;
+    expect(tab, "the view switch renders").toBeTruthy();
+    await act(async () => { tab.click(); });
+    await settle();
+
+    const levels = [...root.querySelectorAll("h1,h2,h3,h4,h5,h6")].map((h) => Number(h.tagName[1]));
+    expect(levels.filter((l) => l === 1).length, "one h1").toBe(1);
+    for (let i = 1; i < levels.length; i++) {
+      expect(levels[i] - levels[i - 1], `h${levels[i - 1]} → h${levels[i]}`).toBeLessThanOrEqual(1);
+    }
+    mockAuth.currentUser = null;
+    mockAuth.isLoggedIn = false;
+  });
+
   it("Crew tasks is a peer of the h2 sections, so it is an h2 too", async () => {
     mockAuth.currentUser = { name: "Rebecca Garcia", role: "parent", emoji: "👩", color: "violet" };
     mockAuth.isLoggedIn = true;
@@ -423,6 +445,11 @@ describe("the visual gate's JSON contract (U3-0)", () => {
       "measureSettledRows",
       "enterActivatesDisclosure",
       "cardClipFor",
+      // U3: the sweep's own measurements — the inter-card/rail gap tables the
+      // rhythm rubric reads, and the member tile's computed transition.
+      "panelGaps",
+      "railGaps",
+      "memberTileTransitionMs",
     ]) {
       expect(src, token).toContain(token);
     }
