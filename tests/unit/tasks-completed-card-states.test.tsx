@@ -211,6 +211,35 @@ describe("U2 — the loading window", () => {
   });
 });
 
+describe("U2 — the done-row meta collapses a duplicate name", () => {
+  it("prints one name when the completer resolves to the assignee", async () => {
+    // "Rebecca" (session/roster short name) resolves to "Rebecca Mom", the
+    // assignee — the resolved-ledger space `resolveMemberName` defines.
+    seed([row({ id: 1, title: "Stamped this week", completedBy: "Rebecca", completedAt: "2026-09-29T01:00:00.000Z", completedInWeek: MONDAY })]);
+    const el = await renderAsync();
+    await settle(120);
+    await expand(el);
+
+    const card = el.querySelector("[data-completed-card]")!;
+    const title = [...card.querySelectorAll("div")].find((d) => d.textContent === "Stamped this week") as HTMLElement;
+    const meta = title.nextElementSibling as HTMLElement;
+    expect(meta.textContent).toBe("Rebecca");
+    expect(meta.textContent).not.toContain("·");
+  });
+
+  it("keeps both names when the completer differs", async () => {
+    seed([row({ id: 2, title: "Done by another", completedBy: "Caspian Garcia", completedAt: "2026-09-29T01:00:00.000Z", completedInWeek: MONDAY })]);
+    const el = await renderAsync();
+    await settle(120);
+    await expand(el);
+
+    const card = el.querySelector("[data-completed-card]")!;
+    const title = [...card.querySelectorAll("div")].find((d) => d.textContent === "Done by another") as HTMLElement;
+    const meta = title.nextElementSibling as HTMLElement;
+    expect(meta.textContent).toBe("Rebecca · Caspian");
+  });
+});
+
 describe("U2 — §H-5 skeleton parity contract", () => {
   it("puts the shared floor class on the placeholders, at the settled line heights", async () => {
     seed([]);

@@ -195,6 +195,19 @@ function chipFill(color: string): string {
   return `linear-gradient(135deg, color-mix(in srgb, ${color} 22%, transparent), color-mix(in srgb, ${color} 10%, transparent))`;
 }
 
+/** The done-row meta. When the assignee and the completer resolve to the SAME
+ *  member — compared in the resolved-ledger space `resolveMemberName` and
+ *  `myIdentity` define, so "Rebecca" and "Rebecca Mom" agree — one name is the
+ *  whole truth and "Rebecca · Rebecca" reads as a bug. Two names survive when
+ *  they differ ("Alex · Rebecca"). */
+function completedByMeta(members: any[], task: Task): string {
+  const assignee = resolveMemberName(members, task.assignee);
+  if (!task.completedBy) return task.assignee.split(" ")[0];
+  const completer = resolveMemberName(members, task.completedBy);
+  if (completer === assignee) return task.assignee.split(" ")[0];
+  return `${task.assignee.split(" ")[0]} · ${task.completedBy.split(" ")[0]}`;
+}
+
 const initialTasks: Task[] = [];
 
 // The ONE "nobody owns this yet" assignee sentinel. `universal: true` is the
@@ -3432,7 +3445,7 @@ export default function TasksPage() {
                                 {/* The week is the header directly above; the
                                     old per-row week token mislabelled every
                                     unstamped this-week row as last week's. */}
-                                <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]}</div>
+                                <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{completedByMeta(membersData, task)}</div>
                               </div>
                               <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:ml-auto sm:w-auto">
                               <span
@@ -3485,7 +3498,7 @@ export default function TasksPage() {
                               <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                               <div className="min-w-0 flex-1">
                                 <div className="line-clamp-5 text-sm leading-snug text-text-primary lg:line-clamp-2" title={task.title}>{task.title}</div>
-                                <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]}</div>
+                                <div className="line-clamp-2 text-xs leading-snug text-text-secondary">{completedByMeta(membersData, task)}</div>
                               </div>
                               <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:ml-auto sm:w-auto">
                               <span

@@ -1518,11 +1518,15 @@ async function runEntry(browser, opts) {
     // re-scope an existing number.
     await reduced.page.evaluate(() => { window.scrollTo(0, 0); });
     // A committed focus-ring baseline records the rings that were already
-    // failing on the unmodified page (e.g. the light-theme `.glass-subtle`
+    // failing on the unmodified page (e.g., the light-theme `.glass-subtle`
     // shadow beating the ring). The gate fails on a NEW or worsened failure,
     // and any item that fixes a recorded one re-records the baseline in the
-    // same commit — the same contract the PNG baselines carry.
-    const focusRingKey = `${opts.role}|${entry.viewport}|${opts.theme}`;
+    // same commit — the same contract the PNG baselines carry. The key carries
+    // the wall discriminator: the wall profile renders different type/paddings
+    // and its ring readings do not describe the non-wall layout, so a
+    // wall-recorded floor must never excuse a non-wall regression (the PNG
+    // baselines make the same split via their `__wall` suffix).
+    const focusRingKey = `${opts.role}|${entry.viewport}|${opts.theme}${opts.wall ? "|wall" : ""}`;
     const knownRings = opts.focusRingBaseline?.rings?.[focusRingKey] ?? {};
     entry.focusRingBaselineMisses = entry.focusRing
       .filter((ring) => !(ring.ringPx >= 2 && ring.deltaLuminanceBorderIn >= 2 && ring.deltaLuminanceBorderOut >= 2))
@@ -2165,7 +2169,15 @@ async function main() {
       motionBaselinePath,
       `${JSON.stringify({ route: args.route, recordedAt: new Date().toISOString(), animationNames, transitions }, null, 2)}\n`,
     );
-    const rings = {};
+    // MERGE, don't replace: a recording run covers one profile (wall on or
+    // off) and one matrix, and replacing would silently drop the other
+    // profile's keys — the exact way a wall-recorded floor could end up standing
+    // in for a non-wall one. Keys the run did not cover keep their committed
+    // values; keys it did cover are overwritten with the fresh measurement.
+    const existingRings = existsSync(focusRingBaselinePath)
+      ? (JSON.parse(readFileSync(focusRingBaselinePath, "utf8")).rings ?? {})
+      : {};
+    const rings = { ...existingRings };
     for (const { key, rings: measured } of focusRingSink) {
       rings[key] = {};
       for (const ring of measured) {
