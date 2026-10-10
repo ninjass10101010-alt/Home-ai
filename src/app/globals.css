@@ -3885,11 +3885,76 @@ html[data-wall="true"] .tasks-approval-action,
 html[data-wall="true"] .tasks-approval-approve-all {
   min-height: 64px !important;
 }
-/* U2 — the ✅ Completed card. Each week block is layout, not a surface (no
-   fill, no border), so this radius is invisible; it is declared from the token
-   set so every measured box inside the card resolves to a token. */
+/* The tap-time group is unbreakable at normal density so the age hint can
+   never orphan onto its own line (the 390px check). The wall's 14px bump
+   widens it past a handset column, where a hard clip is worse than a wrap —
+   so on the wall it may wrap. Wide wall panels fit it on one line anyway. */
+html[data-wall="true"] .tasks-approval-tap {
+  white-space: normal;
+}
+/* U2 — the ✅ Completed card. Each week block is a real surface, not a bare
+   layout wrapper: a 3%-of-ink plate whose `--radius-lg` corners show in its
+   8px top/bottom bands. The padding is vertical-only on purpose — horizontal
+   padding narrows the title column enough to reintroduce an ellipsis on the
+   longest chore title at 320px, which is the defect this card exists to
+   remove. (A transparent group would read as an untokenized radius in the
+   geometry audit — radius 0 resolves to no token.) */
 .tasks-week-group {
   border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-text-primary) 3%, transparent);
+  padding: 8px 0;
+}
+/* §H-5 skeleton/settled parity, declared once for both row types. The loading
+   placeholder and the settled row carry the same class, so the skeleton
+   reserves exactly the settled row's floor (the gate measures the rendered
+   pair within 1px). The floors are the clamped-content ceilings: approval =
+   badge + the title clamp's line count at each range + meta + payout + the
+   action row; completed = two title lines folding to one at `sm` + the meta. */
+.tasks-approval-row {
+  min-height: 240px;
+}
+@media (min-width: 640px) {
+  .tasks-approval-row {
+    min-height: 188px;
+  }
+}
+@media (min-width: 1024px) {
+  .tasks-approval-row {
+    min-height: 130px;
+  }
+}
+.tasks-completed-row {
+  min-height: 125px;
+}
+@media (min-width: 640px) {
+  .tasks-completed-row {
+    min-height: 62px;
+  }
+}
+/* The wall bumps type sizes (18px titles, 14px sub-lines), so the placeholder
+   line boxes must scale with them or the skeleton stops reserving the settled
+   row's space there; the wall floors are the same clamped-content ceilings at
+   the bumped sizes. Wall ships at 1536/1920, where `lg:hidden` already folds
+   the three reserve-only title bars. */
+html[data-wall="true"] .tasks-skeleton-title {
+  height: 24.75px;
+}
+html[data-wall="true"] .tasks-skeleton-meta {
+  height: 19.25px;
+}
+html[data-wall="true"] .tasks-skeleton-payout {
+  height: 18.7px;
+}
+html[data-wall="true"] .tasks-skeleton-badge {
+  height: 28.7px;
+}
+@media (min-width: 1024px) {
+  html[data-wall="true"] .tasks-approval-row {
+    min-height: 149px;
+  }
+  html[data-wall="true"] .tasks-completed-row {
+    min-height: 70px;
+  }
 }
 /* The header separates one week's rows from the next; the wall lifts it to the
    64px control floor so the split still reads at 3m. */

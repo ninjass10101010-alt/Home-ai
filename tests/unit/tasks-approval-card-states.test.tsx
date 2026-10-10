@@ -275,6 +275,50 @@ describe("U1 — named states", () => {
   });
 });
 
+describe("U1 — §H-5 skeleton parity contract", () => {
+  it("puts the shared floor class on the placeholders, line-for-line", async () => {
+    seed([]);
+    vi.stubGlobal("fetch", vi.fn((input: any) => {
+      const url = String(input);
+      if (url === "/api/tasks/sync") return new Promise(() => {});
+      return Promise.resolve({ ok: false, status: 401, json: async () => ({}) } as any);
+    }));
+    const el = await renderAsync(<TasksPage />);
+    await settle(250);
+
+    const placeholders = el.querySelectorAll(".tasks-approval-row.schedule-row");
+    expect(placeholders.length).toBe(2);
+    for (const row of placeholders) {
+      // The title rows mirror the settled clamp: five lines, three fold at lg.
+      const titleBars = row.querySelectorAll('[class*="h-[19.25px]"]');
+      expect(titleBars.length).toBe(5);
+      expect(row.querySelectorAll('[class*="h-[19.25px]"][class*="lg:hidden"]').length).toBe(3);
+      // The kid badge, meta and payout each have a placeholder at the settled line-height.
+      expect(row.querySelector('[class*="h-[26px]"]')).toBeTruthy();
+      expect(row.querySelector('[class*="h-[16.5px]"]')).toBeTruthy();
+    }
+  });
+
+  it("puts the same floor class on the settled rows", async () => {
+    seed([pendingRow({ id: 1 })]);
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+
+    const approve = el.querySelector('button[aria-label^="Approve "]') as HTMLButtonElement;
+    expect(approve, "the settled row renders").toBeTruthy();
+    expect(approve.closest(".tasks-approval-row"), "the settled row shares the skeleton's floor").toBeTruthy();
+  });
+
+  it("pins the declared floors in globals.css", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(css).toMatch(/\.tasks-approval-row\s*\{\s*min-height:\s*240px;\s*\}/);
+    expect(css).toMatch(/@media \(min-width: 640px\)\s*\{\s*\.tasks-approval-row\s*\{\s*min-height:\s*188px;\s*\}/);
+    expect(css).toMatch(/@media \(min-width: 1024px\)\s*\{\s*\.tasks-approval-row\s*\{\s*min-height:\s*130px;\s*\}/);
+  });
+});
+
 describe("U1 — the 180 s age hint", () => {
   it("shows an age hint once a pending row is older than 180s", async () => {
     vi.spyOn(Date, "now").mockReturnValue(NOW);

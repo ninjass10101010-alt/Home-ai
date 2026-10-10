@@ -3160,20 +3160,32 @@ export default function TasksPage() {
                 {approvalQueueLoading ? (
                   /* The first snapshot read is outstanding: two placeholder
                      rows stand in for the queue so a cold load never reads as
-                     "0 chores on the way". They mirror the settled row's
-                     anatomy — avatar, two text lines, the action line below
-                     `sm` — so the card keeps its shape when the rows land. */
+                     "0 chores on the way". They mirror the settled row line for
+                     line — the kid badge, the five title lines the clamp
+                     reserves (three fold away at `lg`), the meta and payout
+                     lines, the action row — at the settled line-heights, and
+                     share `.tasks-approval-row`'s declared floor with the
+                     settled rows, so §H-5's 1px parity is a contract rather
+                     than a coincidence. */
                   <div className="space-y-2" aria-hidden="true">
                     {[0, 1].map((i) => (
                       <div
                         key={i}
-                        className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
+                        className="tasks-approval-row schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
                         style={{ backgroundImage: rowTint("var(--color-accent-amber)") }}
                       >
-                        <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-[var(--color-surface-3)]" />
-                        <div className="min-w-0 flex-1 basis-56 space-y-1">
-                          <Skeleton variant="text" className="w-3/4" />
-                          <Skeleton variant="text" className="w-1/2" />
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-[var(--color-surface-3)]" />
+                          <div className="min-w-0 flex-1">
+                            <span className="tasks-skeleton-badge mb-1 block h-[26px] w-12 animate-pulse rounded-full bg-[var(--color-surface-3)]" />
+                            <Skeleton variant="text" className="tasks-skeleton-title h-[19.25px] w-11/12" />
+                            <Skeleton variant="text" className="tasks-skeleton-title h-[19.25px] w-4/5" />
+                            <Skeleton variant="text" className="tasks-skeleton-title h-[19.25px] w-2/3 lg:hidden" />
+                            <Skeleton variant="text" className="tasks-skeleton-title h-[19.25px] w-3/5 lg:hidden" />
+                            <Skeleton variant="text" className="tasks-skeleton-title h-[19.25px] w-1/2 lg:hidden" />
+                            <Skeleton variant="text" className="tasks-skeleton-meta h-[16.5px] w-2/3" />
+                            <Skeleton variant="text" className="tasks-skeleton-payout mt-0.5 h-4 w-1/3" />
+                          </div>
                         </div>
                         <div className="flex w-full shrink-0 gap-2 sm:ml-auto sm:w-auto">
                           <Skeleton variant="text" className="h-11 flex-1 rounded-full sm:w-24 sm:flex-none" />
@@ -3199,7 +3211,7 @@ export default function TasksPage() {
                     return (
                     <div
                       key={task.id}
-                      className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
+                      className="tasks-approval-row schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
                       style={{
                         backgroundImage: rowTint("var(--color-accent-amber)"),
                       }}
@@ -3233,8 +3245,10 @@ export default function TasksPage() {
                               second line. The raw `at` is an ISO instant;
                               `split("T")[0]` printed "2026-10-05" where every
                               other date reads "Oct 5" — same formatDueLabel
-                              contract. */}
-                          <span className="whitespace-nowrap">
+                              contract. On the wall the group may wrap again
+                              (`.tasks-approval-tap`, globals.css) — the 14px
+                              bump overflows a handset column. */}
+                          <span className="tasks-approval-tap whitespace-nowrap">
                             {`tapped ${formatDueLabel(owner.at.split("T")[0])}`}
                             {ageHint && ` · ${ageHint}`}
                           </span>
@@ -3277,19 +3291,24 @@ export default function TasksPage() {
                   /* Three placeholders mirroring the settled row's anatomy: the
                      first read is unknown, never a fabricated "0 done". No
                      disclosure — collapsed is the default and there is no list
-                     to disclose yet (§H-5). */
+                     to disclose yet. The text bars carry the settled line
+                     heights (two title lines folding to one at `sm`, then the
+                     meta) and every completed row shares
+                     `.tasks-completed-row`'s declared floor — §H-5's 1px parity
+                     is a contract, not a coincidence. */
                   <div className="space-y-2" aria-hidden="true">
                     {[0, 1, 2].map((i) => (
                       <div
                         key={i}
-                        className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
+                        className="tasks-completed-row schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
                         style={{ backgroundImage: rowTint("var(--color-accent-mint)") }}
                       >
                         <div className="h-8 w-0.5 shrink-0 rounded-full bg-[var(--color-surface-3)]" />
                         <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-[var(--color-surface-3)]" />
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <Skeleton variant="text" className="w-3/4" />
-                          <Skeleton variant="text" className="w-1/2" />
+                        <div className="min-w-0 flex-1">
+                          <Skeleton variant="text" className="tasks-skeleton-title h-[19.25px] w-3/4" />
+                          <Skeleton variant="text" className="tasks-skeleton-title h-[19.25px] w-1/2 sm:hidden" />
+                          <Skeleton variant="text" className="tasks-skeleton-meta h-[16.5px] w-1/3" />
                         </div>
                         <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:ml-auto sm:w-auto">
                           <Skeleton variant="text" className="h-6 w-14 rounded-full" />
@@ -3337,7 +3356,7 @@ export default function TasksPage() {
                               aria-label={mine ? `Cancel completion of ${task.title}` : `${task.title} waiting for parent approval`}
                               onClick={mine ? () => openPinEntry(task.id) : undefined}
                               onKeyDown={mine ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPinEntry(task.id); } } : undefined}
-                              className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
+                              className="tasks-completed-row schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
                               style={{
                                 backgroundImage: rowTint("var(--color-accent-amber)"),
                               }}
@@ -3398,7 +3417,7 @@ export default function TasksPage() {
                             // a nested-interactive ARIA violation.
                             <div
                               key={task.id}
-                              className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
+                              className="tasks-completed-row schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
                               style={{
                                 backgroundImage: rowTint(rowColor),
                               }}
@@ -3454,7 +3473,7 @@ export default function TasksPage() {
                             return (
                             <div
                               key={task.id}
-                              className="schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
+                              className="tasks-completed-row schedule-row liquid-glass flex flex-wrap items-center gap-2 px-3 py-3"
                               style={{
                                 backgroundImage: rowTint(rowColor),
                               }}

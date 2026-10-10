@@ -210,3 +210,46 @@ describe("U2 — the loading window", () => {
     expect(card!.textContent).toContain("checking");
   });
 });
+
+describe("U2 — §H-5 skeleton parity contract", () => {
+  it("puts the shared floor class on the placeholders, at the settled line heights", async () => {
+    seed([]);
+    const el = await renderAsync(vi.fn((input: any) => (
+      String(input) === "/api/tasks/sync"
+        ? new Promise(() => {})
+        : Promise.resolve({ ok: false, status: 401, json: async () => ({}) })
+    )));
+    await settle(250);
+
+    const placeholders = el.querySelectorAll(".tasks-completed-row.schedule-row");
+    expect(placeholders.length).toBe(3);
+    for (const row of placeholders) {
+      // Two title lines, one folding away at `sm`, then the meta line.
+      expect(row.querySelectorAll('[class*="h-[19.25px]"]').length).toBe(2);
+      expect(row.querySelectorAll('[class*="h-[19.25px]"][class*="sm:hidden"]').length).toBe(1);
+      expect(row.querySelector('[class*="h-[16.5px]"]')).toBeTruthy();
+    }
+  });
+
+  it("puts the same floor class on every settled row, pending included", async () => {
+    seed();
+    const el = await renderAsync();
+    await settle(120);
+    await expand(el);
+
+    const card = el.querySelector("[data-completed-card]")!;
+    const rows = [...card.querySelectorAll(".schedule-row")];
+    expect(rows.length).toBe(3);
+    for (const row of rows) {
+      expect(row.className).toContain("tasks-completed-row");
+    }
+  });
+
+  it("pins the declared floors in globals.css", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(css).toMatch(/\.tasks-completed-row\s*\{\s*min-height:\s*125px;\s*\}/);
+    expect(css).toMatch(/@media \(min-width: 640px\)\s*\{\s*\.tasks-completed-row\s*\{\s*min-height:\s*62px;\s*\}/);
+  });
+});
