@@ -309,6 +309,7 @@ describe("the visual gate's JSON contract (U3-0)", () => {
       "clipped",
       "clsTwoWay",
       "skeletonParity",
+      "rhythm",
       "focusRing",
       "baselineDrift",
       "keyboard",

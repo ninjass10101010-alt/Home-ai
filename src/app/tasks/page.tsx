@@ -2570,7 +2570,8 @@ export default function TasksPage() {
             16 inside the rail — `space-y-4` on `.wall-board-rail`.
             8 between rows in a list — `space-y-2` on every row stack (and the
                member strip's own `.5rem` tile gap).
-            12 inside a row — `px-3 py-3` on every `.schedule-row`. */}
+            12 inside a row — `px-3 py-3` on every `.schedule-row` on /tasks
+               (other routes' rows are out of this sweep). */}
       <div className="px-4 pb-8 2xl:pb-28 [html[data-wall='true']_&]:pb-28 space-y-6 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0 2xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] 2xl:grid-rows-[auto_1fr]">
         {/* ── The rail ────────────────────────────────────────────────────
             Stats, view switch and the roster filter are ONE grid cell, not

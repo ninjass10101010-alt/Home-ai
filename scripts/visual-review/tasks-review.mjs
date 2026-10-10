@@ -101,6 +101,7 @@ export const GATE_KEYS = Object.freeze([
   "clipped",
   "clsTwoWay",
   "skeletonParity",
+  "rhythm",
   "focusRing",
   "baselineDrift",
   "keyboard",
@@ -1775,6 +1776,12 @@ function computeEntryGates(entry, opts) {
   // states carry an empty array and pass vacuously.
   const skeletonParityPass = entry.skeletonParity.every((parity) => parity.pass)
     && (entry.state !== "skeleton" || entry.role !== "parent" || entry.skeletonParity.length > 0);
+  // The declared 24/16 rhythm is GATING (the U3 critic's mutation proved it
+  // was evidence-only): every measured inter-card/rail gap must sit within
+  // ±1px of its declared step. No gap measured (a surface that renders none)
+  // passes vacuously — the same rule every structurally-empty array follows.
+  const rhythmPass = [...entry.rhythm.panelGaps, ...entry.rhythm.railGaps]
+    .every((gap) => gap.pass);
   const width = Number(entry.viewport.split("x")[0]);
   return {
     fixtureRendered: fixtureRendered ? "pass" : "fail",
@@ -1789,6 +1796,7 @@ function computeEntryGates(entry, opts) {
     clipped: problems.clipped && !entry.overflow.worstClipped ? "pass" : "fail",
     clsTwoWay: entry.cls.inputExcluded === 0 && entry.cls.forcedLayoutDisclosure === 0 ? "pass" : "fail",
     skeletonParity: skeletonParityPass ? "pass" : "fail",
+    rhythm: rhythmPass ? "pass" : "fail",
     focusRing: focusRingPass ? "pass" : "fail",
     baselineDrift: opts.updateBaselines
       ? "pass"
