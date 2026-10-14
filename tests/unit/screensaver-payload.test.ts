@@ -117,6 +117,24 @@ it("missing daily high/low is a weather failure — null zone, wxCache not poiso
   expect(p2.weather).toEqual({ tempF: 70, hiF: 75, loF: 60, condition: "Clear", weatherCode: 0, isDay: 1 });
 });
 
+it("is_day: 0 maps to isDay: 0 (night is pinned, not defaulted)", async () => {
+  collection.mockImplementation((name: string) => ({
+    getFullList: async () => pbRowsFor(name),
+  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        current: { temperature_2m: 70, weather_code: 0, is_day: 0 },
+        daily: { temperature_2m_max: [75], temperature_2m_min: [60] },
+      }),
+    }))
+  );
+  const p = await composeScreensaverPayload(now);
+  expect(p.weather).toEqual({ tempF: 70, hiF: 75, loF: 60, condition: "Clear", weatherCode: 0, isDay: 0 });
+});
+
 it("PB failure propagates (route maps to 503)", async () => {
   collection.mockImplementation(() => {
     throw new Error("pb down");
