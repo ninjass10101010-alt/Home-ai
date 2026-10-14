@@ -62,7 +62,7 @@ it("composes the full payload from PB rows + weather", async () => {
     vi.fn(async () => ({
       ok: true,
       json: async () => ({
-        current: { temperature_2m: 72.4, weather_code: 1 },
+        current: { temperature_2m: 72.4, weather_code: 1, is_day: 1 },
         daily: { temperature_2m_max: [78], temperature_2m_min: [61] },
       }),
     }))
@@ -74,7 +74,7 @@ it("composes the full payload from PB rows + weather", async () => {
   expect(p.dinner).toEqual({ name: "Tacos" });
   expect(p.tasks).toEqual({ done: 1, total: 2 });
   expect(p.briefing).toEqual(["📅 3 events today", "✅ 1 chore still open", "💡 Milk low"]);
-  expect(p.weather).toEqual({ tempF: 72, hiF: 78, loF: 61, condition: "Partly cloudy" });
+  expect(p.weather).toEqual({ tempF: 72, hiF: 78, loF: 61, condition: "Partly cloudy", weatherCode: 1, isDay: 1 });
 });
 
 it("weather failure degrades to null, rest intact", async () => {
@@ -114,7 +114,7 @@ it("missing daily high/low is a weather failure — null zone, wxCache not poiso
   vi.stubGlobal("fetch", goodFetch);
   const p2 = await composeScreensaverPayload(new Date(now.getTime() + 46_000));
   expect(goodFetch).toHaveBeenCalledTimes(1);
-  expect(p2.weather).toEqual({ tempF: 70, hiF: 75, loF: 60, condition: "Clear" });
+  expect(p2.weather).toEqual({ tempF: 70, hiF: 75, loF: 60, condition: "Clear", weatherCode: 0, isDay: 1 });
 });
 
 it("PB failure propagates (route maps to 503)", async () => {

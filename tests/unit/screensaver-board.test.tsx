@@ -23,7 +23,7 @@ const payload: ScreensaverPayload = {
   dinner: { name: "Tacos" },
   tasks: { done: 6, total: 11 },
   briefing: ["📅 2 events today", "✅ 5 chores still open"],
-  weather: { tempF: 72, hiF: 78, loF: 61, condition: "Partly cloudy" },
+  weather: { tempF: 72, hiF: 78, loF: 61, condition: "Partly cloudy", weatherCode: 1, isDay: 1 },
 };
 
 let root: Root | null = null;

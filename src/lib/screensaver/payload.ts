@@ -42,12 +42,12 @@ async function fetchWeather(now: Date): Promise<ScreensaverPayload["weather"]> {
   const lon = (await getServiceConfig("weather_location", "LON")) || "-86.1089";
   const url =
     `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}` +
-    `&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min` +
+    `&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min` +
     `&temperature_unit=fahrenheit&timezone=auto&forecast_days=1`;
   const res = await fetch(url, { signal: AbortSignal.timeout(12_000) });
   if (!res.ok) throw new Error(`open-meteo ${res.status}`);
   const j = (await res.json()) as {
-    current?: { temperature_2m?: number; weather_code?: number };
+    current?: { temperature_2m?: number; weather_code?: number; is_day?: number };
     daily?: { temperature_2m_max?: number[]; temperature_2m_min?: number[] };
   };
   const temp = j.current?.temperature_2m;
@@ -66,6 +66,8 @@ async function fetchWeather(now: Date): Promise<ScreensaverPayload["weather"]> {
     hiF: Math.round(hi),
     loF: Math.round(lo),
     condition: wxConditionLabel(j.current?.weather_code ?? -1),
+    weatherCode: typeof j.current?.weather_code === "number" ? j.current.weather_code : -1,
+    isDay: j.current?.is_day !== 0 ? 1 : 0,
   };
   wxCache = { at: now.getTime(), wx };
   return wx;

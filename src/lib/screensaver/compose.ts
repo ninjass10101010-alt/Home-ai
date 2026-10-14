@@ -23,7 +23,9 @@ export interface ScreensaverPayload {
   dinner: { name: string } | null;
   tasks: { done: number; total: number };
   briefing: string[];
-  weather: { tempF: number; hiF: number; loF: number; condition: string } | null;
+  weather:
+    | { tempF: number; hiF: number; loF: number; condition: string; weatherCode: number; isDay: number }
+    | null;
 }
 
 /** "16:30" → "4:30 PM". Assumes valid input (guarded by parseMinutes upstream). */
