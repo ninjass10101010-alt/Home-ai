@@ -7,6 +7,10 @@
 > The three legacy sections below preserve the historical blocks verbatim (moved 2026-09-22 from AGENTS.md); their internal orderings are preserved, not strictly global-chronological.
 
 ## Long-form entries (formerly "Change Log (this manual only)") — NEW ENTRIES PREPEND HERE
+- 2026-10-13 — feat(screensaver): /api/consuela/screensaver weather gains
+  weatherCode + isDay (Open-Meteo is_day now fetched) so the wall panel's
+  screensaver strip renders data-true condition art instead of guessing from
+  condition text. Backwards-compatible: the three original fields unchanged.
 - 2026-10-10 — fix(tasks): U3 critic minors — the rhythm becomes a GATING key, and the shell comment's quantifier scopes to /tasks — **Files:** `scripts/visual-review/tasks-review.mjs` (`GATE_KEYS` + `computeEntryGates`'s `rhythmPass`: every measured gap within ±1px of its declared 24/16), `src/app/tasks/page.tsx` (the ONE RHYTHM comment's 12px line only), `tests/unit/tasks-visual-critic.test.tsx` (the `GATE_KEYS` pin); `CHANGELOG.md`. No pixel change, no baseline re-record.
   - **Minor 1 — evidence → gating.** `rhythm` was reported but not gated: the U3 critic nudged one inter-card gap (`space-y-6`→`space-y-5`) and the run still exited 0. `rhythm` is now in `GATE_KEYS` and flows through the aggregate like every other key; a gap past ±1px of its declared step fails the run. **Mutation proof (atomic, reverted):** the same nudge + rebuild prints `[parent/320x568/dark] exit=1 … FAILED: rhythm`, `panelGaps` `[20,20,20,20]` each `expectedPx 24, pass: false`, `gates.rhythm: "fail"`, run exit 1; reverted, the full matrix is **exit 0** with `rhythm: "pass"`. Redirected entries pass through the same `GATE_KEYS` map; an entry measuring no gaps passes vacuously, like every other structurally-empty array.
   - **Minor 2 — the quantifier.** The comment claimed `px-3 py-3` on "every `.schedule-row`", but Home's `ScheduleDisplay.tsx` (a non-/tasks surface) still uses `py-2.5`. The line now reads: "12 inside a row — `px-3 py-3` on every `.schedule-row` on /tasks (other routes' rows are out of this sweep)." The four numbers are unchanged and still each trace to a rule.
