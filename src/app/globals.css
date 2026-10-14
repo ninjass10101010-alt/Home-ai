@@ -383,6 +383,39 @@
   /* Gradient palette */
   --color-gradient-start: #7c3aed;
   --color-gradient-end: #e11d48;
+
+  /* ─── Monsters weather surface tokens (wall-panel weather skin) ───
+     Palette parity: src/components/ui/wx-tokens.ts MONSTER (78-91). Washes:
+     WeatherSkins DAY_SKINS.summer + WX_POSTER.clear + NIGHT_SKIN; storm/snow
+     are the severity mixes pre-computed (62% toward #9AA3AE/#7E8794, 55%
+     toward #8B99B5/#7C8BA3). Consumed by Home-native's gen-tokens pipeline;
+     theme-invariant on purpose — the monster poster is art, not chrome. */
+  --color-monster-red: #EF4D6F;
+  --color-monster-blue: #2E6DB4;
+  --color-monster-purple: #A98BDC;
+  --color-monster-orange: #F6A83C;
+  --color-monster-teal: #7DCDE4;
+  --color-monster-glint: #FFFFFF;
+  --color-monster-ink-blue: #10284A;
+  --color-monster-ink-red: #5F1230;
+  --color-monster-ink-orange: #7A4A16;
+  --color-monster-knot-red: #C2304F;
+  --color-monster-knot-orange: #DE8F2E;
+  --color-monster-knot-purple: #8B6BC2;
+  --color-monster-pupil: #101418;
+  --color-monster-star-cream: #FFF9E6;
+  --color-monster-star-warm: #F6D7A8;
+  --color-monster-ink-day: #211310;
+  --color-monster-wash-clear-top: #55BCE8;
+  --color-monster-wash-clear-bottom: #D8F2F4;
+  --color-monster-wash-day-top: #A8DFF8;
+  --color-monster-wash-day-bottom: #E3F4FC;
+  --color-monster-wash-storm-top: #9FBACA;
+  --color-monster-wash-storm-bottom: #A4B0BC;
+  --color-monster-wash-snow-top: #98B8D3;
+  --color-monster-wash-snow-bottom: #AABACB;
+  --color-monster-wash-night-top: #1B1E33;
+  --color-monster-wash-night-bottom: #2A2440;
 }
 
 /* Light-theme channel triples, keyed per accent (see the rgb note above).
@@ -500,6 +533,39 @@
   /* Gradient palette */
   --color-gradient-start: #b583ff;
   --color-gradient-end: #ff6b8a;
+
+  /* ─── Monsters weather surface tokens (wall-panel weather skin) ───
+     Palette parity: src/components/ui/wx-tokens.ts MONSTER (78-91). Washes:
+     WeatherSkins DAY_SKINS.summer + WX_POSTER.clear + NIGHT_SKIN; storm/snow
+     are the severity mixes pre-computed (62% toward #9AA3AE/#7E8794, 55%
+     toward #8B99B5/#7C8BA3). Consumed by Home-native's gen-tokens pipeline;
+     theme-invariant on purpose — the monster poster is art, not chrome. */
+  --color-monster-red: #EF4D6F;
+  --color-monster-blue: #2E6DB4;
+  --color-monster-purple: #A98BDC;
+  --color-monster-orange: #F6A83C;
+  --color-monster-teal: #7DCDE4;
+  --color-monster-glint: #FFFFFF;
+  --color-monster-ink-blue: #10284A;
+  --color-monster-ink-red: #5F1230;
+  --color-monster-ink-orange: #7A4A16;
+  --color-monster-knot-red: #C2304F;
+  --color-monster-knot-orange: #DE8F2E;
+  --color-monster-knot-purple: #8B6BC2;
+  --color-monster-pupil: #101418;
+  --color-monster-star-cream: #FFF9E6;
+  --color-monster-star-warm: #F6D7A8;
+  --color-monster-ink-day: #211310;
+  --color-monster-wash-clear-top: #55BCE8;
+  --color-monster-wash-clear-bottom: #D8F2F4;
+  --color-monster-wash-day-top: #A8DFF8;
+  --color-monster-wash-day-bottom: #E3F4FC;
+  --color-monster-wash-storm-top: #9FBACA;
+  --color-monster-wash-storm-bottom: #A4B0BC;
+  --color-monster-wash-snow-top: #98B8D3;
+  --color-monster-wash-snow-bottom: #AABACB;
+  --color-monster-wash-night-top: #1B1E33;
+  --color-monster-wash-night-bottom: #2A2440;
 }
 
 /* ─── High Contrast Mode ───
