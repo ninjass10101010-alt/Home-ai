@@ -13,6 +13,7 @@ import {
   type MemberPickerIdentity,
 } from "@/lib/member-picker-identity";
 import SettingsSignInDialog from "@/components/settings/SettingsSignInDialog";
+import DeviceNotificationsCard from "@/components/settings/DeviceNotificationsCard";
 
 function ProfileSummary({ member, onOpen }: { member: AuthUser; onOpen: () => void }) {
   return (
@@ -161,6 +162,7 @@ export default function MeSettingsSection() {
           <KidProfile member={currentUser} />
         )}
       </div>
+      <DeviceNotificationsCard />
     </section>
   );
 }
