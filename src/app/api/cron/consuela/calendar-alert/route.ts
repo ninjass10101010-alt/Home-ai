@@ -128,7 +128,7 @@ async function handle(req: NextRequest) {
           dateKey: today,
         });
 
-        const { alerts: eventAlerts } = eventNotifyDecisions({
+        const { alerts: eventAlerts, nextState: nextState } = eventNotifyDecisions({
           events: allEvents.map((e) => ({ id: e.id, title: e.title, date: e.date, time: e.time, notify: e.notify })),
           now,
           alerted: nextRoutine,
@@ -144,7 +144,10 @@ async function handle(req: NextRequest) {
           });
         }
 
-        await withAdmin((rawPb) => saveAlertState(rawPb as unknown as PBAlertState, "routine-alert", { alerted: allAlerts.length ? nextRoutine : alerted }, stateLoaded.raw));
+        // Persist BOTH cores' refs: eventNotifyDecisions was seeded with
+        // nextRoutine and returns the merged (pruned routine + event) state, so
+        // a delivered event cannot re-fire on the next 15-min run.
+        await withAdmin((rawPb) => saveAlertState(rawPb as unknown as PBAlertState, "routine-alert", { alerted: nextState }, stateLoaded.raw));
       });
     } catch (err) {
       console.warn("[cron/calendar-alert] routine lane", err);

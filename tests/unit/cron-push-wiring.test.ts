@@ -99,6 +99,19 @@ describe("calendar-alert cron pushes schedule alerts", () => {
     expect(cal.some((p: any) => p.title.includes("Dentist"))).toBe(true);
   });
 
+  it("does not re-fire a notify event on a second run (dedupe persisted)", async () => {
+    events = [{ id: "event-dentist", title: "Dentist", date: "2026-01-05", time: "3:20 PM", notify: true, importanceScore: 10 }];
+    prefs = [{ key: "calendar", enabled: true }];
+    const req = () => new NextRequest("http://localhost/x", { method: "POST", headers: { authorization: "Bearer secret" } });
+    await POST(req());
+    const firstRun = mocks.pushFanout.mock.calls.filter((c: any) => c[0].url === "/calendar").length;
+    expect(firstRun).toBeGreaterThan(0);
+    mocks.pushFanout.mockClear();
+    await POST(req());
+    const secondRun = mocks.pushFanout.mock.calls.filter((c: any) => c[0].url === "/calendar").length;
+    expect(secondRun).toBe(0);
+  });
+
   it("does not fan out when calendar pref disabled", async () => {
     schedules = [{ id: "sched-yes", title: "X", time: "3:10 PM", days: "all", notify: true }];
     prefs = [{ key: "calendar", enabled: false }];
