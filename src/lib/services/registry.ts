@@ -123,6 +123,36 @@ export const SERVICES_REGISTRY: ServiceDef[] = [
       { key: "KHAN_API_KEY", label: "API key", secret: true, required: false, helpText: "Stored for when the integration is enabled" },
     ],
   },
+  {
+    id: "push_notifications",
+    displayName: "Push notifications",
+    description: "Browser web-push (VAPID) for suggestions, briefing, weather, and family schedule alerts",
+    testFnId: "push_notifications",
+    fields: [
+      {
+        key: "VAPID_PUBLIC_KEY",
+        label: "VAPID public key",
+        secret: false,
+        required: true,
+        publicRuntime: true,
+        helpText: "Generate with: npx web-push generate-vapid-keys — the Public Key",
+      },
+      {
+        key: "VAPID_PRIVATE_KEY",
+        label: "VAPID private key",
+        secret: true,
+        required: true,
+        helpText: "The Private Key from the same generation. Stored encrypted; never shown.",
+      },
+      {
+        key: "VAPID_SUBJECT",
+        label: "VAPID subject",
+        secret: true,
+        required: false,
+        helpText: "A mailto: or https: contact for push services, e.g. mailto:family@example.com",
+      },
+    ],
+  },
 ];
 
 // These NEVER become registry-configurable — they are required for the app

@@ -18,6 +18,7 @@ describe("services registry", () => {
         "home_assistant",
         "instacart",
         "khanacademy",
+        "push_notifications",
         "telegram_alert",
         "telegram_mirror",
         "themealdb",

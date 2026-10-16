@@ -1,9 +1,21 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// Task 5 creates src/lib/push/fanout.ts. Vitest 4 cannot register a mock for a
+// module that does not resolve, so the fanout-dependent assertions below stay
+// skipped (and would error, not fail) until that file exists — at which point
+// the vi.mock factory takes over and they run. This keeps Task 4 landable
+// without pre-creating Task 5's module. See task-4-report.md for the concern.
+const fanoutExists = existsSync(resolve(__dirname, "../../src/lib/push/fanout.ts"));
 
 const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
+
+const pushMocks = vi.hoisted(() => ({ pushFanout: vi.fn() }));
+vi.mock("@/lib/push/fanout", () => ({ pushFanout: pushMocks.pushFanout }));
 
 import { runServiceTest } from "../../src/lib/services/tests";
 
@@ -123,6 +135,56 @@ describe("runServiceTest", () => {
 
     expect(seenSignal).toBeTruthy();
     delete process.env.INSTACART_API_KEY;
+  });
+});
+
+describe("runServiceTest — push_notifications", () => {
+  beforeEach(() => {
+    pushMocks.pushFanout.mockReset();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
+  });
+
+  it("reports not_configured when VAPID is unset", async () => {
+    vi.stubEnv("VAPID_PUBLIC_KEY", "");
+    vi.stubEnv("VAPID_PRIVATE_KEY", "");
+
+    const result = await runServiceTest("push_notifications");
+
+    expect(result).toMatchObject({ ok: false, detail: "not_configured" });
+    expect(pushMocks.pushFanout).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(!fanoutExists)("reports sent-to-N-devices on a successful fanout", async () => {
+    vi.stubEnv("VAPID_PUBLIC_KEY", "pub");
+    vi.stubEnv("VAPID_PRIVATE_KEY", "priv");
+    pushMocks.pushFanout.mockResolvedValue({ sent: 3, pruned: 0, failed: 0 });
+
+    const result = await runServiceTest("push_notifications");
+
+    expect(result).toMatchObject({ ok: true, detail: "sent to 3 device(s)" });
+    expect(pushMocks.pushFanout).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringContaining("Push notifications"), url: "/" })
+    );
+  });
+
+  it.skipIf(!fanoutExists)("reports no subscribed devices when nothing was sent", async () => {
+    vi.stubEnv("VAPID_PUBLIC_KEY", "pub");
+    vi.stubEnv("VAPID_PRIVATE_KEY", "priv");
+    pushMocks.pushFanout.mockResolvedValue({ sent: 0, pruned: 0, failed: 0 });
+
+    const result = await runServiceTest("push_notifications");
+
+    expect(result).toMatchObject({ ok: false, detail: "no subscribed devices" });
+  });
+
+  it.skipIf(!fanoutExists)("reports not_configured when fanout self-skips", async () => {
+    vi.stubEnv("VAPID_PUBLIC_KEY", "pub");
+    vi.stubEnv("VAPID_PRIVATE_KEY", "priv");
+    pushMocks.pushFanout.mockResolvedValue({ sent: 0, pruned: 0, failed: 0, skipped: "push_not_configured" });
+
+    const result = await runServiceTest("push_notifications");
+
+    expect(result).toMatchObject({ ok: false, detail: "not_configured" });
   });
 });
 

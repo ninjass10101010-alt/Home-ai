@@ -171,6 +171,29 @@ async function testComposio(): Promise<ServiceTestResult> {
   }
 }
 
+async function testPush(): Promise<ServiceTestResult> {
+  const t = timed();
+  const pub = await required("push_notifications", "VAPID_PUBLIC_KEY");
+  const priv = await required("push_notifications", "VAPID_PRIVATE_KEY");
+  if (!pub || !priv) return { ok: false, detail: "not_configured", ms: t.done() };
+  try {
+    const { pushFanout } = await import("@/lib/push/fanout");
+    const result = await pushFanout({
+      title: "🔔 Push notifications",
+      body: "This is a test from Services & Keys.",
+      url: "/",
+    });
+    if (result.skipped === "push_not_configured") return { ok: false, detail: "not_configured", ms: t.done() };
+    return {
+      ok: result.sent > 0,
+      detail: result.sent > 0 ? `sent to ${result.sent} device(s)` : "no subscribed devices",
+      ms: t.done(),
+    };
+  } catch (err) {
+    return { ok: false, detail: errDetail(err), ms: t.done() };
+  }
+}
+
 /** Registry-driven entry point. */
 export async function runServiceTest(service: string): Promise<ServiceTestResult> {
   switch (service) {
@@ -181,6 +204,7 @@ export async function runServiceTest(service: string): Promise<ServiceTestResult
     case "instacart": return testInstacart();
     case "themealdb": return testThemealdb();
     case "composio": return testComposio();
+    case "push_notifications": return testPush();
     case "greenlight":
     case "khanacademy": {
       // Stored-only integrations: report configuration state honestly.
