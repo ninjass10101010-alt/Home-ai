@@ -8,7 +8,6 @@ import { routineLeadDecisions, eventNotifyDecisions } from "@/lib/push/decisions
 import { localTodayISO } from "@/lib/local-date";
 import { loadAlertState, saveAlertState, type PBAlertState } from "@/lib/ha/alert-state";
 import { withKeyedLock } from "@/lib/keyed-lock";
-import { weekdayOfISO } from "@/lib/local-date";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

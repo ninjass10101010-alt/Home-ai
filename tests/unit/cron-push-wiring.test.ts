@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const mocks = vi.hoisted(() => ({
   isCronAuthorized: vi.fn(() => true),
@@ -119,5 +121,20 @@ describe("calendar-alert cron pushes schedule alerts", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(mocks.pushFanout).not.toHaveBeenCalled();
+  });
+});
+
+describe("emergency is never a web-push channel", () => {
+  const routes = [
+    "src/app/api/cron/consuela/calendar-alert/route.ts",
+    "src/app/api/cron/consuela/suggestions/route.ts",
+    "src/app/api/cron/consuela/briefing/route.ts",
+    "src/app/api/cron/consuela/weather-alert/route.ts",
+  ];
+  it("none of the push cron routes reference the emergency path", () => {
+    for (const rel of routes) {
+      const src = readFileSync(join(process.cwd(), rel), "utf8");
+      expect(src).not.toMatch(/api\/emergency|emergency\//i);
+    }
   });
 });
