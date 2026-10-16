@@ -87,6 +87,7 @@ interface CalEvent {
   googleId?: string;
   calendarId?: string;
   colorHex?: string;
+  notify?: boolean;
 }
 
 type ScheduleColor =
@@ -107,7 +108,7 @@ function eventCreateWrite(ev: CalEvent, year: number, month: number): PendingWri
     key: `event:create:${ev.title}|${date}|${ev.time}`,
     collection: "events",
     op: "create",
-    payload: { title: ev.title, date, time: ev.time, icon: ev.emoji, color: ev.color, member: ev.member },
+    payload: { title: ev.title, date, time: ev.time, icon: ev.emoji, color: ev.color, member: ev.member, notify: ev.notify === true },
     queuedAt: new Date().toISOString(),
   };
 }
@@ -118,7 +119,7 @@ function eventUpdateWrite(id: string, ev: CalEvent): PendingWrite {
     collection: "events",
     op: "update",
     id,
-    payload: { title: ev.title, time: ev.time, icon: ev.emoji, color: ev.color, member: ev.member },
+    payload: { title: ev.title, time: ev.time, icon: ev.emoji, color: ev.color, member: ev.member, notify: ev.notify === true },
     queuedAt: new Date().toISOString(),
   };
 }
@@ -147,6 +148,7 @@ function scheduleCreateWrite(s: ScheduleItem): PendingWrite {
       title: s.title, time: s.time, icon: s.icon, type: s.type,
       color: s.color, days: s.days, member: (s as any).member || "",
       mealType: s.mealType || "none",
+      notify: s.notify === true,
     },
     queuedAt: new Date().toISOString(),
   };
@@ -162,6 +164,7 @@ function scheduleUpdateWrite(id: string | number, s: ScheduleItem): PendingWrite
       title: s.title, time: s.time, icon: s.icon, type: s.type,
       color: s.color, days: s.days, member: (s as any).member || "",
       mealType: s.mealType || "none",
+      notify: s.notify === true,
     },
     queuedAt: new Date().toISOString(),
   };
@@ -229,6 +232,7 @@ interface ScheduleItem {
   icon: string;
   color: ScheduleColor;
   mealType?: "breakfast" | "lunch" | "dinner" | "snack" | "none";
+  notify?: boolean;
 }
 
 const getInitialSchedules = (): ScheduleItem[] => [];
@@ -281,6 +285,7 @@ const emptySchedule = (): ScheduleItem => ({
   icon: "⏰",
   color: "green",
   mealType: "none",
+  notify: false,
 });
 
 const EVENTS_STORAGE_KEY = "consuela-events";
@@ -1267,6 +1272,14 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                       />
                     ))}
                   </div>
+                  <label className="flex items-center gap-3 py-1">
+                    <input
+                      type="checkbox"
+                      checked={eventForm.notify === true}
+                      onChange={(e) => setEventForm({ ...eventForm, notify: e.target.checked })}
+                    />
+                    <span>Notify devices when this starts</span>
+                  </label>
                   <div className="calendar-form-actions">
                     <button onClick={saveEvent} disabled={!eventForm.title.trim()} className="calendar-primary-btn">
                       {isAddingEvent ? "Add Event" : "Save"}
@@ -1407,6 +1420,14 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                       <option value="dinner">{`\uD83C\uDF19 Dinner`}</option>
                       <option value="snack">{`\uD83C\uDF4E Snack`}</option>
                     </select>
+                    <label className="calendar-input col-span-2 flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={schedForm.notify === true}
+                        onChange={(e) => setSchedForm({ ...schedForm, notify: e.target.checked })}
+                      />
+                      <span>Notify devices when this starts</span>
+                    </label>
                   </div>
                   <div className="calendar-color-swatches">
                     {(["green", "amber", "cyan", "violet", "rose", "blue", "indigo", "pink", "teal"] as const).map((c) => (

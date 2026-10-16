@@ -266,6 +266,7 @@ export interface DbEventRow {
   icon?: string;
   color?: string;
   member?: string;
+  notify?: boolean;
 }
 
 export interface MappedDbEvent {
@@ -278,6 +279,7 @@ export interface MappedDbEvent {
   day: number;
   month: number;
   year: number;
+  notify?: boolean;
 }
 
 // Maps a PocketBase `events` row (manually added family events) to the
@@ -298,6 +300,7 @@ export function dbEventToCalEvent(row: DbEventRow | null | undefined): MappedDbE
     day: d,
     month: mo - 1,
     year: y,
+    notify: row.notify === true,
   };
 }
 
@@ -311,6 +314,7 @@ export interface DbScheduleRow {
   color?: string;
   member?: string;
   mealType?: string;
+  notify?: boolean;
 }
 
 export interface MappedDbSchedule {
@@ -323,6 +327,7 @@ export interface MappedDbSchedule {
   color: string;
   mealType: "breakfast" | "lunch" | "dinner" | "snack" | "none";
   member?: string;
+  notify?: boolean;
 }
 
 const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"] as const;
@@ -346,5 +351,6 @@ export function dbScheduleToScheduleItem(row: DbScheduleRow | null | undefined):
     color: row.color || "green",
     mealType,
     member: row.member || "",
+    notify: row.notify === true,
   };
 }

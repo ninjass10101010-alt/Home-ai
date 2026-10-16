@@ -106,6 +106,7 @@ describe("dbEventToCalEvent", () => {
       day: 15,
       month: 8,
       year: 2026,
+      notify: false,
     });
   });
 

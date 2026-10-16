@@ -293,7 +293,7 @@ describe("dead HA seed collections removed (F8c)", () => {
     }
   });
 
-  it("collection count is 47 (45 + weekly_prizes + task_command_queue)", () => {
-    expect(COLLECTIONS.length).toBe(47);
+  it("collection count is 48 (45 + weekly_prizes + task_command_queue + push_subscriptions)", () => {
+    expect(COLLECTIONS.length).toBe(48);
   });
 });

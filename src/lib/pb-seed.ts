@@ -119,6 +119,9 @@ export const COLLECTIONS = [
       { name: "icon", type: "text" },
       { name: "color", type: "text" },
       { name: "member", type: "text" },
+      // Per-event notify toggle (Web Push Task 7): whether devices are
+      // notified when this event starts.
+      { name: "notify", type: "bool" },
       // Optional: legacy live field was required — Calendar-page event
       // writes never send userId, so family-added events only landed via
       // the chat tool path (which hardcodes "demo").
@@ -156,6 +159,8 @@ export const COLLECTIONS = [
       // The Calendar form's meal-type picker never persisted (field missing
       // from the collection) — PB silently dropped it on every write.
       { name: "mealType", type: "text", required: false },
+      // Per-routine notify toggle (Web Push Task 7).
+      { name: "notify", type: "bool" },
     ],
   },
   {
