@@ -41,6 +41,17 @@ export const metadata: Metadata = {
     "chore management",
     "grocery list",
   ],
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Consuela",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+  },
+  formatDetection: { telephone: false },
   openGraph: {
     title: "Consuela — AI Family Organizer",
     description: "Your AI-powered family coordinator.",
