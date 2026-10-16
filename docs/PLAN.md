@@ -27,6 +27,13 @@
 
 ### Needs a human decision (cannot be automated)
 
+- [ ] **PWA + Web Push (2026-10-16) — remaining ops + deferred kiosk.** The push pipeline is built and
+      tested (see CHANGELOG 2026-10-16). Remaining: (1) ops — `npm run pb:seed` on the NAS, enter VAPID
+      keys in Settings → Services & Keys → Push notifications, enable Tailscale Serve HTTPS, then opt each
+      device in from Settings → Me; (2) **deferred Phase F:** the read-only kiosk session from the approved
+      `2026-09-05-pwa-conversion-design.md`; (3) product call: "Send test" is parent-only but the card is
+      shown to every role.
+
 - [ ] 🚨 **Rotate the burned Telegram bot token at BotFather.** A live token reached
       `origin/warm-glass-v2` in `scripts/restart-consuela.sh:17`; redacted forward-only in `2d14e19`.
       The live `/tmp/new.env` value differs from the committed one, so something rotated before, but

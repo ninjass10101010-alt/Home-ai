@@ -186,6 +186,14 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
   > "On the Home screen the chat bubble now gently floats up and down..."
 ```
 
+### UI Change Record — 2026-10-16 — PWA install + per-device push notifications (Settings → Me)
+- Added / Changed: `src/app/manifest.ts` (NEW web app manifest), `public/icons/{icon-192,icon-512,maskable-192,maskable-512}.png` (NEW), `src/app/layout.tsx` (`metadata.manifest`, `appleWebApp`, icons, `formatDetection`; mounts `ServiceWorkerRegistrar`), `src/components/ui/ServiceWorkerRegistrar.tsx` (NEW, prod-only module-SW registration), `public/sw.js` + `public/sw-policy.js` + `public/offline.html` (NEW), `src/components/settings/DeviceNotificationsCard.tsx` (NEW), `src/components/settings/MeSettingsSection.tsx` (mounts the card after the profile card).
+- Visual / Motion: one new `SectionCard` (title "This device's notifications", 🔔, `--color-accent-amber`, `headingLevel="h2"`) rendered for every role in Settings → Me. States: unsupported (no secure context / no service worker), signed-out, denied, off (Enable on this device), on (`On · this device` success Chip + Send test + Turn off). Uses only the canonical primitives (`SectionCard`, `SoftButton`, `Chip`), 12px type floor, `.hit-44` via the primitives, AA contrast both themes. No new motion.
+- Contracts: web push is delivered by the service worker (`push` → `showNotification`; `notificationclick` deep-links to `data.url`). **Emergency is never a web-push channel.** The VAPID public key is served at runtime from `GET /api/push/vapid-public` (never `NEXT_PUBLIC_*`); keys live in Services & Keys. `sw.js` never caches `/api/*`, `/ledger-app/*`, `/assets/*`, `/api/data/*`, `/api/ofx/*`, or `/_next/data/*`.
+- Agent action required: keep the Settings → Me card state machine (unsupported/signed-out/denied/off/on) when touching it; do not add a second nav or a `NEXT_PUBLIC_VAPID_*` var.
+- User-facing description (copy-paste ready for responses):
+  > "On each phone or tablet, open Settings → Me → This device's notifications and tap Enable. You'll get a buzz when a family routine or event you've flagged is about to start — even when the dashboard is closed. iPhones need the dashboard added to the Home Screen first (Share → Add to Home Screen)."
+
 ### Weather sky re-skin — dawn/dusk axis, god-rays, phase-lit moon, Drive particle craft (2026-09-25)
 
 CONTRACTS:

@@ -40,6 +40,9 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/photos`, `/api/photos/file` | GET | Session (middleware); the feed's `PATCH` (moderation) is **parent session and a live PB `parent` row** (`verifyLiveParentSession`; 401/403/503 fail closed), and an unknown record id is `404 not_found`. `?order=shuffle\|newest\|oldest` (`400 invalid_order` otherwise); `?all=1` returns every record un-curated, newest-first |
 | `/api/photos/upload` | POST | Session; `413 file_too_large` past 100 MB original (`Content-Length` pre-check), `400 invalid_taken_at` / `unsupported_wall_type` |
 | `/api/photos/settings` | GET / PATCH | GET: session (any signed-in member) — **never 5xx**, returns normalized defaults with `200` (plus `degraded: true` when it could not read the row). PATCH: parent session + live PB `parent` row (`verifyLiveParentSession`; 401/403/503 fail closed); subset body; `400 invalid_rotate_seconds`/`invalid_transition`/`invalid_order`/`invalid_show_caption`; write outage `503 settings_unreachable`; upserts the `key = "wall"` singleton |
+| `/api/push/vapid-public` | GET | Session (any signed-in member). Returns ONLY the VAPID public key (from Services & Keys), never the private key |
+| `/api/push/subscribe` | POST / DELETE | Session + live member row (`requireLiveSession`); POST upserts `push_subscriptions` by `endpoint` (caps 6 per member), DELETE removes by `endpoint` |
+| `/api/push/test` | POST | Parent session + live PB `parent` row (`requireLiveSession({ requireRole: "parent" })`); sends a test push to every subscription; `409 push_not_configured` when VAPID is unset |
 
 ---
 
@@ -137,10 +140,11 @@ User → Ask Consuela → POST /api/hermes/chat
 
 | Route | Schedule | What it does |
 |-------|----------|--------------|
-| `POST /api/cron/consuela/suggestions` | every 5 min | Runs the proactive-suggestion engine (pantry lows, task-penalty streaks, calendar conflicts, no-meals-this-week, routines-due-soon) into `proactive_suggestions` |
-| `POST /api/cron/consuela/briefing` | 7am daily | Writes today's morning briefing (events/tasks/meals/suggestions); pushes to phones when the `briefing` pref is on |
-| `POST /api/cron/consuela/weather-alert` | every 15 min | Reads Open-Meteo; pushes a severe-weather heads-up (storm/heavy-snow) once per episode via `broadcastHouseAlert` when the `weather` pref is on; deduped in `ha_alert_state`; 9pm–7am quiet hours |
-| `POST /api/cron/consuela/calendar-alert` | every 15 min | Pushes a ~60-min lead-time heads-up for important (`importanceScore ≥ 50`) events today via `broadcastHouseAlert` when the `calendar` pref is on; one push per event/date deduped in `ha_alert_state`; quiet hours |
+| `POST /api/cron/consuela/suggestions` | every 5 min | Runs the proactive-suggestion engine (pantry lows, task-penalty streaks, calendar conflicts, no-meals-this-week, routines-due-soon) into `proactive_suggestions`; fans each new suggestion out as a browser push (`pushFanout`) |
+| `POST /api/cron/consuela/briefing` | 7am daily | Writes today's morning briefing (events/tasks/meals/suggestions); pushes to phones (HA/Telegram via `broadcastHouseAlert` **and** browser push via `pushFanout`) when the `briefing` pref is on |
+| `POST /api/cron/consuela/weather-alert` | every 15 min | Reads Open-Meteo; pushes a severe-weather heads-up (storm/heavy-snow) once per episode via `broadcastHouseAlert` + `pushFanout` when the `weather` pref is on; deduped in `ha_alert_state`; 9pm–7am quiet hours |
+| `POST /api/cron/consuela/calendar-alert` | every 15 min | Two lanes: (a) a ~60-min lead-time heads-up for important (`importanceScore ≥ 50`) events today via `broadcastHouseAlert`; (b) `pushFanout` for opted-in routines (`schedules.notify`) within 30 min and opted-in events (`events.notify`) within 60 min. Both when the `calendar` pref is on; deduped in `ha_alert_state` (`calendar-alert` + `routine-alert`); quiet hours. **Emergency is never a push channel.** |
+| `POST /api/cron/calendar/score-importance` | every 15 min | Scores today's/upcoming events' `importanceScore` from keyword heuristics (feeds the calendar-alert threshold) |
 | `POST /api/cron/consuela/google-sync` | every 5 min | Pulls Google Calendar + updates last-auto-sync state (quota-guarded) |
 | `POST /api/cron/consuela/telegram-poll` | every 5 min | Polls Telegram and mirrors group messages into the daily chat thread |
 | `POST /api/cron/time-capsules/unlock` | hourly | Flips `time_capsules.status` → `unlocked` for every capsule whose `unlockDate` has passed (`checkAndUnlockCapsules`) |
