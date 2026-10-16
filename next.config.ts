@@ -13,6 +13,7 @@ const FINANCE_DASHBOARD_URL =
   process.env.FINANCE_DASHBOARD_URL?.trim() || "http://192.168.0.28:9080";
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["web-push"],
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   // The Next.js dev-tools indicator ("N" badge) renders bottom-left and
   // covers the CapsuleNav Home button on phone widths — hide it (dev-only,
