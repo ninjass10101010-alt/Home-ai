@@ -491,6 +491,22 @@ export const COLLECTIONS = [
       "CREATE UNIQUE INDEX idx_ha_alert_state_key ON ha_alert_state (key)",
     ],
   },
+  {
+    // Web-push subscriptions (one row per browser/device). VAPID keys live in
+    // Services & Keys; this collection holds only the public subscription
+    // material. Admin-locked like every seeded collection.
+    name: "push_subscriptions",
+    schema: [
+      { name: "endpoint", type: "text", required: true },
+      { name: "p256dh", type: "text", required: true },
+      { name: "auth", type: "text", required: true },
+      { name: "memberName", type: "text", required: false },
+      { name: "deviceLabel", type: "text", required: false },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_push_subscriptions_endpoint ON push_subscriptions (endpoint)",
+    ],
+  },
   // Services & Keys registry overrides (src/lib/services/*). Secrets stored
   // AES-256-GCM encrypted; absence of a row = .env fallback.
   {
