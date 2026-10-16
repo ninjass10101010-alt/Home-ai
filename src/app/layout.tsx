@@ -10,6 +10,7 @@ import { LayoutProvider } from "@/hooks/useHomeLayout";
 import { FogProvider } from "@/hooks/useFogConfig";
 import { CacheRefresher } from "@/components/ui/CacheRefresher";
 import WallModeSync from "@/components/ui/WallModeSync";
+import ServiceWorkerRegistrar from "@/components/ui/ServiceWorkerRegistrar";
 import "./globals.css";
 import "@/modes/modes.css";
 
@@ -118,6 +119,7 @@ export default function RootLayout({
                   <FogProvider>
                     <LayoutProvider>
                       <WallModeSync />
+                      <ServiceWorkerRegistrar />
                       <CacheRefresher>
                         {children}
                       </CacheRefresher>

@@ -27,6 +27,14 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-store, must-revalidate" }],
+      },
+    ];
+  },
   async rewrites() {
     return [
       // The ledger SPA lives at its server root; /ledger-app/* is our mount.

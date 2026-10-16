@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Consuela — offline</title>
+<style>
+  :root { color-scheme: dark light; }
+  body { margin: 0; min-height: 100svh; display: grid; place-items: center;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0f1117; color: #f5f5f4; text-align: center; padding: 24px; }
+  @media (prefers-color-scheme: light) { body { background: #faf7f2; color: #1c1917; } }
+  .card { max-width: 22rem; }
+  .mark { font-size: 2rem; font-weight: 600; letter-spacing: -0.02em; }
+  p { opacity: 0.75; line-height: 1.5; }
+  a { display: inline-block; margin-top: 16px; padding: 12px 20px; min-height: 44px;
+    border-radius: 999px; background: #e8b06a; color: #1c1917; text-decoration: none; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="mark">Consuela</div>
+    <p>You're offline — the family server is unreachable. Everything will catch up when you're back.</p>
+    <a href="/">Retry</a>
+  </div>
+</body>
+</html>
