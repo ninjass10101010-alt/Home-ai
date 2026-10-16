@@ -1,7 +1,7 @@
 {
-  "hash": "59271810876d538e9204460344acccbcd4924d24",
-  "short": "5927181",
-  "message": "chore(version): stamp tasks-integrity build stamp",
-  "date": "2026-10-05 19:54:13 -0400",
+  "hash": "33cca64b9421aa96cbe38d16b5937378287a785c",
+  "short": "33cca64",
+  "message": "feat(pwa): add service worker (offline shell + push) and registrar",
+  "date": "2026-10-16 10:01:59 -0400",
   "author": "GarciaFam"
 }
