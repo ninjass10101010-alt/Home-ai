@@ -47,6 +47,15 @@ async function handle(req: NextRequest) {
       let nextState = decision.nextState;
       if (decision.fire) {
         const { sent } = await broadcastHouseAlert(decision.title!, decision.message!);
+        try {
+          await (await import("@/lib/push/fanout")).pushFanout({
+            title: decision.title!,
+            body: decision.message!,
+            url: "/",
+          });
+        } catch (err) {
+          console.warn("[weather-alert] push fanout failed:", err);
+        }
         // Only stamp alerted when something actually landed — a dead channel
         // retries on the next run instead of silently swallowing the alert.
         nextState = { ...nextState, alertedAtISO: sent > 0 ? now.toISOString() : null };

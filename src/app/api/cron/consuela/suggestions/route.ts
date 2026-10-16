@@ -17,5 +17,12 @@ export async function POST(request: NextRequest) {
   }
   const result = await runEngine({ scopeDate: localTodayISO() });
   await db.deleteStaleSuggestions(weekAgoISO());
+  try {
+    for (const s of result.insertedSuggestions ?? []) {
+      await (await import("@/lib/push/fanout")).pushFanout({ title: "Consuela suggests", body: s.title, url: "/suggestions" });
+    }
+  } catch (err) {
+    console.warn("[cron/suggestions] push fanout failed", err);
+  }
   return NextResponse.json({ ok: true, ...result });
 }

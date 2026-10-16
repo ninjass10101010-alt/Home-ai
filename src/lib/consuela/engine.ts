@@ -270,7 +270,7 @@ async function fetchExistingConditionKeys(): Promise<Set<string>> {
   });
 }
 
-export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{ scanned: number; inserted: number; rejected: number }> {
+export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{ scanned: number; inserted: number; rejected: number; insertedSuggestions: NewSuggestion[] }> {
   const scanners = [scanPantryLow, scanTaskPenaltyStreak, scanCalendarConflicts, scanStaleData, scanGroceryStoreOptimization, scanRoutinesDue];
   const results = await Promise.all(scanners.map(async (s) => {
     try {
@@ -281,7 +281,7 @@ export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{
     }
   }));
   const all = results.flat();
-  if (all.length === 0) return { scanned: 0, inserted: 0, rejected: 0 };
+  if (all.length === 0) return { scanned: 0, inserted: 0, rejected: 0, insertedSuggestions: [] };
   const existingKeys = await fetchExistingConditionKeys();
   const seen = new Set<string>();
   const fresh = all.filter((s) => {
@@ -290,7 +290,7 @@ export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{
     seen.add(key);
     return true;
   });
-  if (fresh.length === 0) return { scanned: all.length, inserted: 0, rejected: 0 };
+  if (fresh.length === 0) return { scanned: all.length, inserted: 0, rejected: 0, insertedSuggestions: [] };
   const result = await db.insertProactiveSuggestions(fresh);
-  return { scanned: all.length, inserted: result.inserted, rejected: result.rejected };
+  return { scanned: all.length, inserted: result.inserted, rejected: result.rejected, insertedSuggestions: fresh };
 }

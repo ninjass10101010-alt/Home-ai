@@ -50,6 +50,15 @@ export async function POST(request: NextRequest) {
         "Open Consuela for today's events, chores, meals, and what she noticed."
       );
       notified = { sent: result.sent };
+      try {
+        await (await import("@/lib/push/fanout")).pushFanout({
+          title: "Good morning ☀️",
+          body: "Open Consuela for today's events, chores, meals, and what she noticed.",
+          url: "/",
+        });
+      } catch (err) {
+        console.warn("[briefing] push fanout failed:", err);
+      }
     }
   } catch (err) {
     console.warn("[briefing] house-alert push failed:", err);
