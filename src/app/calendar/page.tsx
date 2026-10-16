@@ -1272,7 +1272,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                       />
                     ))}
                   </div>
-                  <label className="flex items-center gap-3 py-1">
+                  <label className="flex min-h-11 items-center gap-3 py-1">
                     <input
                       type="checkbox"
                       checked={eventForm.notify === true}
@@ -1420,7 +1420,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                       <option value="dinner">{`\uD83C\uDF19 Dinner`}</option>
                       <option value="snack">{`\uD83C\uDF4E Snack`}</option>
                     </select>
-                    <label className="calendar-input col-span-2 flex items-center gap-3">
+                    <label className="calendar-input col-span-2 flex min-h-11 items-center gap-3">
                       <input
                         type="checkbox"
                         checked={schedForm.notify === true}

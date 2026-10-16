@@ -32,7 +32,10 @@
       keys in Settings → Services & Keys → Push notifications, enable Tailscale Serve HTTPS, then opt each
       device in from Settings → Me; (2) **deferred Phase F:** the read-only kiosk session from the approved
       `2026-09-05-pwa-conversion-design.md`; (3) product call: "Send test" is parent-only but the card is
-      shown to every role.
+      shown to every role; (4) **deferred offline-shell subset:** the shipped `sw.js` provides the offline
+      navigation fallback + push, but not the spec §2 version-check `skipWaiting`/update-toast flow, the §1
+      `beforeinstallprompt` install chip, or a cached `start_url` navigation (navigations go straight to
+      `/offline.html`). Record these when the offline shell is next touched.
 
 - [ ] 🚨 **Rotate the burned Telegram bot token at BotFather.** A live token reached
       `origin/warm-glass-v2` in `scripts/restart-consuela.sh:17`; redacted forward-only in `2d14e19`.

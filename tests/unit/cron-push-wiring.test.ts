@@ -114,6 +114,21 @@ describe("calendar-alert cron pushes schedule alerts", () => {
     expect(secondRun).toBe(0);
   });
 
+  it("retries an undelivered schedule alert on the next run", async () => {
+    events = [];
+    schedules = [{ id: "sched-yes", title: "Drink water", time: "3:10 PM", days: "all", notify: true }];
+    prefs = [{ key: "calendar", enabled: true }];
+    mocks.pushFanout.mockResolvedValue({ sent: 0, pruned: 0, failed: 0 });
+    const req = () => new NextRequest("http://localhost/x", { method: "POST", headers: { authorization: "Bearer secret" } });
+    await POST(req());
+    const first = mocks.pushFanout.mock.calls.filter((c: any) => c[0].url === "/calendar").length;
+    expect(first).toBeGreaterThan(0);
+    mocks.pushFanout.mockClear();
+    await POST(req());
+    const second = mocks.pushFanout.mock.calls.filter((c: any) => c[0].url === "/calendar").length;
+    expect(second).toBeGreaterThan(0);
+  });
+
   it("does not fan out when calendar pref disabled", async () => {
     schedules = [{ id: "sched-yes", title: "X", time: "3:10 PM", days: "all", notify: true }];
     prefs = [{ key: "calendar", enabled: false }];

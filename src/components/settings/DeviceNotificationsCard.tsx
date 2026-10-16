@@ -38,6 +38,23 @@ function isIosNotInstalled(): boolean {
   return ios && !standalone;
 }
 
+/**
+ * `navigator.serviceWorker.ready` never settles when no worker becomes active
+ * (registration rejected, or dev where the registrar is prod-only). Resolve to
+ * null after a short wait so the card can show its honest unsupported state.
+ */
+async function readyWithTimeout(ms = 2500): Promise<ServiceWorkerRegistration | null> {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
+  try {
+    return await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
 export default function DeviceNotificationsCard() {
   const { currentUser, hydrated } = useAuth();
   const [status, setStatus] = useState<Status>("loading");
@@ -56,7 +73,8 @@ export default function DeviceNotificationsCard() {
 
   const currentSubscription = useCallback(async (): Promise<PushSubscription | null> => {
     try {
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await readyWithTimeout();
+      if (!reg) return null;
       return await reg.pushManager.getSubscription();
     } catch {
       return null;
@@ -80,9 +98,22 @@ export default function DeviceNotificationsCard() {
       setStatus("denied");
       return;
     }
-    const sub = await currentSubscription();
+    // If no worker becomes active (registration failed, dev where the
+    // registrar is prod-only), the device cannot receive push at all — fail
+    // honestly instead of waiting on `serviceWorker.ready` forever.
+    const reg = await readyWithTimeout();
+    if (!reg) {
+      setStatus("unsupported");
+      return;
+    }
+    let sub: PushSubscription | null = null;
+    try {
+      sub = await reg.pushManager.getSubscription();
+    } catch {
+      sub = null;
+    }
     setStatus(sub ? "subscribed" : "default");
-  }, [capable, currentSubscription, currentUser, hydrated]);
+  }, [capable, currentUser, hydrated]);
 
   useEffect(() => {
     let alive = true;
@@ -113,7 +144,11 @@ export default function DeviceNotificationsCard() {
         setError("Notifications aren't configured yet. Ask a parent to set up Push notifications in Services & Keys.");
         return;
       }
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await readyWithTimeout();
+      if (!reg) {
+        setError("Notifications aren't available on this device yet. Try reloading.");
+        return;
+      }
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey) as unknown as BufferSource,

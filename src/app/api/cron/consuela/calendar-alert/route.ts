@@ -118,7 +118,7 @@ async function handle(req: NextRequest) {
           ? ((stateLoaded.value as { alerted: AlertedRef[] }).alerted as AlertedRef[])
           : [];
 
-        const { alerts: routineAlerts, nextState: nextRoutine } = routineLeadDecisions({
+        const { alerts: routineAlerts } = routineLeadDecisions({
           routines: routinesToday,
           now,
           alerted,
@@ -127,26 +127,38 @@ async function handle(req: NextRequest) {
           dateKey: today,
         });
 
-        const { alerts: eventAlerts, nextState: nextState } = eventNotifyDecisions({
+        const { alerts: eventAlerts } = eventNotifyDecisions({
           events: allEvents.map((e) => ({ id: e.id, title: e.title, date: e.date, time: e.time, notify: e.notify })),
           now,
-          alerted: nextRoutine,
+          alerted,
           todayISO: today,
         });
         const allAlerts = [...routineAlerts, ...eventAlerts];
 
+        // Only a DELIVERED alert is remembered — a no-subscription or
+        // push_not_configured run must retry next cycle (a one-off event is
+        // otherwise permanently lost). Mirrors the first lane's `sent > 0`.
+        const delivered: AlertedRef[] = [];
         for (const a of allAlerts) {
-          await pushFanout({
+          const { sent } = await pushFanout({
             title: `⏰ ${a.title}`,
             body: `Starts at ${a.time} — about ${a.minutesLeft} min from now.`,
             url: "/calendar",
           });
+          if (sent > 0) delivered.push({ id: a.id, date: today });
         }
 
-        // Persist BOTH cores' refs: eventNotifyDecisions was seeded with
-        // nextRoutine and returns the merged (pruned routine + event) state, so
-        // a delivered event cannot re-fire on the next 15-min run.
-        await withAdmin((rawPb) => saveAlertState(rawPb as unknown as PBAlertState, "routine-alert", { alerted: nextState }, stateLoaded.raw));
+        // Persist: prior refs pruned to the last 48h, plus the newly delivered.
+        const horizon = now.getTime() - 48 * 60 * 60_000;
+        const pruned = alerted.filter((a) => {
+          const st = new Date(`${a.date}T23:59:00`).getTime();
+          return isFinite(st) ? st > horizon : true;
+        });
+        const merged = [...pruned];
+        const seen = new Set(merged.map((a) => `${a.id}|${a.date}`));
+        for (const d of delivered) if (!seen.has(`${d.id}|${d.date}`)) merged.push(d);
+
+        await withAdmin((rawPb) => saveAlertState(rawPb as unknown as PBAlertState, "routine-alert", { alerted: merged }, stateLoaded.raw));
       });
     } catch (err) {
       console.warn("[cron/calendar-alert] routine lane", err);
