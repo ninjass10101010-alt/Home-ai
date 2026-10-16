@@ -124,7 +124,12 @@ export default function DeviceNotificationsCard() {
         body: JSON.stringify({ ...sub.toJSON(), deviceLabel: deviceLabel() }),
       });
       const saveBody = (await save.json().catch(() => null)) as { ok?: boolean } | null;
-      if (!save.ok || saveBody?.ok !== true) throw new Error("subscribe failed");
+      if (!save.ok || saveBody?.ok !== true) {
+        // Roll back the browser subscription so the device cannot report "On"
+        // with no server row to deliver to.
+        await sub.unsubscribe().catch(() => undefined);
+        throw new Error("subscribe failed");
+      }
       setStatus("subscribed");
     } catch {
       setError("Couldn't turn on notifications on this device. Try again.");
@@ -143,12 +148,20 @@ export default function DeviceNotificationsCard() {
       const sub = await currentSubscription();
       if (sub) {
         const endpoint = sub.endpoint;
-        await sub.unsubscribe().catch(() => false);
-        await fetch("/api/push/subscribe", {
+        const unsubscribed = await sub.unsubscribe().catch(() => false);
+        const del = await fetch("/api/push/subscribe", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ endpoint }),
-        }).catch(() => undefined);
+        }).catch(() => null);
+        // Only claim "off" when the browser subscription is really gone.
+        if (!unsubscribed && (await currentSubscription())) {
+          setError("Couldn't turn off notifications. Try again.");
+          return;
+        }
+        if (del && !del.ok) {
+          setError("Turned off on this device, but the server didn't confirm. Try again if it reappears.");
+        }
       }
       setStatus("default");
     } catch {
