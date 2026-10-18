@@ -37,6 +37,7 @@ function track(id: string, seconds: number | null = 200): MediaTrack {
     album: "",
     durationSeconds: seconds,
     artworkUrl: null,
+    explicit: false,
     source: "youtube_music",
   };
 }

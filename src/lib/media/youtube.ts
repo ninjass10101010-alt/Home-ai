@@ -68,6 +68,8 @@ export interface MediaTrack {
   /** Seconds, or null when YouTube reports no duration (live streams). */
   durationSeconds: number | null;
   artworkUrl: string | null;
+  /** YouTube's explicit-content flag, for the family-safe filter. */
+  explicit: boolean;
   source: "youtube_music";
 }
 
@@ -161,6 +163,7 @@ interface RawMusicItem {
   artists?: Array<{ name?: string }>;
   album?: { name?: string };
   thumbnails?: Array<{ url: string; width?: number }>;
+  badges?: unknown;
 }
 
 /** Prefer the largest thumbnail offered; the browser scales it down. */
@@ -168,6 +171,20 @@ function artworkUrlFor(thumbnails: Array<{ url: string; width?: number }>): stri
   if (!thumbnails.length) return null;
   const best = [...thumbnails].sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0];
   return best?.url ?? null;
+}
+
+/**
+ * Explicit detection. YouTube Music exposes the flag only as a badge node whose
+ * shape changes between clients, so scan the badge subtree for the word rather
+ * than binding to a renderer class that may disappear.
+ */
+function isExplicit(item: RawMusicItem): boolean {
+  if (!item.badges) return false;
+  try {
+    return JSON.stringify(item.badges).toLowerCase().includes("explicit");
+  } catch {
+    return false;
+  }
 }
 
 function toTrack(item: RawMusicItem): MediaTrack | null {
@@ -179,6 +196,7 @@ function toTrack(item: RawMusicItem): MediaTrack | null {
     album: item.album?.name ?? "",
     durationSeconds: typeof item.duration?.seconds === "number" ? item.duration.seconds : null,
     artworkUrl: artworkUrlFor(item.thumbnails ?? []),
+    explicit: isExplicit(item),
     source: "youtube_music",
   };
 }
@@ -351,4 +369,5 @@ export const __testing = {
   GUEST_IDENTITY_TTL_MS,
   ITAG_PREFERENCE,
   WEB_USER_AGENT,
+  toTrack,
 };
