@@ -12,12 +12,21 @@
  * Nothing reads the clock: recency is applied only when the caller passes a
  * `now`, so the same input always produces the same output.
  *
- * ACCENT CONTRACT: a query is folded to ASCII ("Begoña" → "begona") and every
- * comparison this module owns compares folded text, so the query side and the
- * scoring side agree. A PocketBase `LIKE` cannot fold — the database compares
- * the bytes — so the WRITE side must store the folded form too. A row that
- * keeps its accent is invisible to the filter no matter what this module does
- * (the store's slug and content must be folded on write).
+ * ACCENT CONTRACT: a PocketBase `~` is a byte-wise `LIKE` — it folds ASCII
+ * case and NOTHING else, so it can never fold an accent. A word therefore
+ * travels in TWO forms and the filter carries BOTH: the folded ASCII skeleton
+ * ("Begoña" → "begona") reaches a row stored folded, and the raw accented
+ * word ("begoña") reaches a row stored with its accent. A row stored EITHER
+ * WAY is fetched, and every comparison this module owns folds both sides, so
+ * a fetched fact always scores above zero for the word that fetched it. A
+ * word whose accented letter is CAPITAL ("Éloise") also travels in its
+ * original case, because SQLite folds ASCII case only — "éloise" cannot reach
+ * a stored "Éloise".
+ *
+ * The WRITE side should still fold: the store owns what it persists, and a
+ * folded row then matches the folded form of every name. Folding on write
+ * belongs to the store task — reachability here does not depend on it, which
+ * is the point: the row is found whether it is stored folded or accented.
  */
 
 export interface MemoryLike {
@@ -47,33 +56,86 @@ export const MEMORY_STOP_WORDS: ReadonlySet<string> = new Set([
 
 const DEFAULT_MAX_TERMS = 12;
 
+/** Letters Unicode cannot decompose, so NFKD leaves them alone: ø ł đ ð þ æ œ ß.
+ *  Mapped to their ASCII forms so a name survives tokenising whole — without
+ *  the map "Søren" split into the fragment "ren" and "Đorđe" vanished. */
+const UNDECOMPOSABLE_LETTERS: Readonly<Record<string, string>> = {
+  "ø": "o", "ł": "l", "đ": "d", "ð": "d", "þ": "th", "æ": "ae", "œ": "oe", "ß": "ss",
+};
+
+/** A word is a run of letters or digits in ANY script. Splitting on this
+ *  keeps "Begoña" one word (so its accent can be seen) instead of cutting it
+ *  into an ASCII run plus a fragment. */
+const WORD_SPLIT = /[^\p{L}\p{N}]+/u;
+
+/** An ASCII-only token: the shape a folded word must have to be usable as a
+ *  filter term. */
+const ASCII_TOKEN = /^[a-z0-9]+$/;
+
 /** Fold accents so an accented word stays ONE token. NFKD splits "ñ" into
  *  "n" plus a combining mark; dropping the mark leaves "begona" — one word,
  *  not the "bego" plus a two-letter fragment the old split produced. A
- *  fragment like "oz" is a LIKE pattern wide enough to match "frozen". */
+ *  fragment like "oz" is a LIKE pattern wide enough to match "frozen".
+ *  The input arrives lowercased (every caller lowercases first), so the
+ *  letter map below is written in lowercase. */
 function foldAccents(value: string): string {
   return String(value ?? "")
+    .replace(/[øłđðþæœß]/g, (ch) => UNDECOMPOSABLE_LETTERS[ch] ?? ch)
     .normalize("NFKD")
     .replace(/\p{M}+/gu, "");
 }
 
-/** Lowercase, fold accents, split on anything that is not a letter or digit,
- *  drop stop-words and 1-char tokens, dedupe, cap. */
+/** Does the word carry a letter outside ASCII? Such a word needs its RAW form
+ *  in the filter, because a byte-wise LIKE cannot fold it. */
+function hasNonAsciiLetter(word: string): boolean {
+  for (const ch of word) {
+    if ((ch.codePointAt(0) ?? 0) > 127 && /\p{L}/u.test(ch)) return true;
+  }
+  return false;
+}
+
+/** Does the word carry a CAPITAL letter outside ASCII? SQLite folds ASCII case
+ *  only, so the original case is the only form that reaches a stored "Éloise". */
+function hasUpperNonAsciiLetter(word: string): boolean {
+  for (const ch of word) {
+    if ((ch.codePointAt(0) ?? 0) > 127 && /\p{Lu}/u.test(ch)) return true;
+  }
+  return false;
+}
+
+/** The terms one word contributes: the folded skeleton plus the raw word when
+ *  the word carries a non-ASCII letter, so the filter reaches a row stored
+ *  with the accent AND a row stored folded. The raw form is always the WHOLE
+ *  word — never a fragment of it. */
+function wordForms(word: string): { skeleton: string; forms: string[] } {
+  const lower = word.toLowerCase();
+  const skeleton = foldAccents(lower);
+  const forms: string[] = [];
+  if (ASCII_TOKEN.test(skeleton)) forms.push(skeleton);
+  if (hasNonAsciiLetter(word)) {
+    forms.push(lower);
+    if (hasUpperNonAsciiLetter(word)) forms.push(word);
+  }
+  return { skeleton, forms };
+}
+
+/** Split into words, drop stop-words and 1-char tokens, dedupe, cap. */
 export function tokenize(text: string, opts?: { max?: number }): string[] {
   const max = Math.floor(opts?.max ?? DEFAULT_MAX_TERMS);
   if (!Number.isFinite(max) || max <= 0) return [];
-  const raw = foldAccents(String(text ?? "").toLowerCase())
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(" ")
-    .filter(Boolean);
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const token of raw) {
-    if (token.length < 2) continue;
-    if (MEMORY_STOP_WORDS.has(token)) continue;
-    if (seen.has(token)) continue;
-    seen.add(token);
-    out.push(token);
+  for (const word of String(text ?? "").split(WORD_SPLIT)) {
+    if (!word) continue;
+    const { skeleton, forms } = wordForms(word);
+    if (MEMORY_STOP_WORDS.has(skeleton)) continue;
+    for (const form of forms) {
+      if (form.length < 2) continue;
+      if (seen.has(form)) continue;
+      seen.add(form);
+      out.push(form);
+      if (out.length >= max) break;
+    }
     if (out.length >= max) break;
   }
   return out;
@@ -151,12 +213,19 @@ export function scoreMemory(
   const speaker = foldAccents(String(ctx?.speakerName ?? "").toLowerCase());
 
   let score = 0;
+  // A word arrives in two forms (folded + raw). It is ONE word, so it is ONE
+  // hit: without this an accented name would out-score a plain one purely by
+  // travelling twice. Folding maps a substring to a substring, so the folded
+  // comparison already covers the raw form — no second check is needed.
+  const counted = new Set<string>();
   for (const rawTerm of terms) {
-    const term = foldAccents(rawTerm.toLowerCase());
+    const term = foldAccents(String(rawTerm ?? "").toLowerCase());
     // An empty term is a substring of every string, so it would score the
     // whole bank — while `buildMemoryFilter` builds nothing for it. The two
     // entry points must agree: an empty term matches nothing.
     if (!term) continue;
+    if (counted.has(term)) continue;
+    counted.add(term);
     if (content.includes(term)) score += 1;
     if (tagText.some((t) => t.includes(term))) score += 1.2;
     if (person && person.includes(term)) score += 1.2;
@@ -255,9 +324,13 @@ export function searchMessages<T extends { content?: string; role?: string; crea
     .map((row) => {
       const content = foldAccents(String(row.content ?? "").toLowerCase());
       let hits = 0;
+      // A word arrives in two forms (folded + raw): one word, one hit.
+      const counted = new Set<string>();
       for (const term of terms) {
-        const needle = foldAccents(term.toLowerCase());
+        const needle = foldAccents(String(term ?? "").toLowerCase());
         if (!needle) continue;
+        if (counted.has(needle)) continue;
+        counted.add(needle);
         if (content.includes(needle)) hits += 1;
       }
       return { row, hits };

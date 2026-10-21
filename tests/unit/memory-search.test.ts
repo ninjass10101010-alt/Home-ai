@@ -15,6 +15,24 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** SQLite's LIKE, as PocketBase runs it: a substring match whose case fold
+ *  covers ASCII ONLY — every other character compares byte-exact. Proved
+ *  against PocketBase 0.40.5 (`content ~ "begoña"` reaches "Begoña", while
+ *  `content ~ "đorđe"` does NOT reach "Đorđe"), so a unit test can assert
+ *  what a built filter actually REACHES instead of only what it contains. */
+function asciiLower(value: string): string {
+  return value.replace(/[A-Z]/g, (ch) => ch.toLowerCase());
+}
+
+function likeMatch(value: string, pattern: string): boolean {
+  return asciiLower(value).includes(asciiLower(pattern));
+}
+
+/** The `content ~ "…"` patterns of a built filter, in the order they appear. */
+function contentClauses(filter: string): string[] {
+  return [...filter.matchAll(/content ~ "([^"]+)"/g)].map((m) => m[1]);
+}
+
 describe("tokenize", () => {
   it("drops stop-words, punctuation and 1-char tokens, and keeps content words in order", () => {
     expect(tokenize("What should we make for dinner tonight?")).toEqual([
@@ -22,11 +40,17 @@ describe("tokenize", () => {
     ]);
   });
 
+  it("drops 1-char tokens — they are a LIKE pattern too wide to be a signal", () => {
+    // "b" and "c" are not stop-words, so only the length rule can drop them.
+    expect(tokenize("b c sushi")).toEqual(["sushi"]);
+    expect(tokenize("É sushi")).toEqual(["sushi"]);
+  });
+
   it("dedupes and caps the term count at 12", () => {
-    // 13 distinct content words plus a repeat: the cap must cut the tail and
-    // the repeat must not appear twice.
+    // 13 distinct content words plus a repeat that lands INSIDE the cap: the
+    // cap must cut the tail AND the repeat must not appear twice.
     const terms = tokenize(
-      "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november alpha",
+      "alpha bravo alpha charlie delta echo foxtrot golf hotel india juliet kilo lima mike november",
     );
     expect(terms).toEqual([
       "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
@@ -44,18 +68,41 @@ describe("tokenize", () => {
 
   it("keeps an accented word as ONE token instead of splitting it into fragments", () => {
     // "Begoña" used to become "bego" plus a two-letter fragment, and a
-    // fragment like "oz" matched unrelated rows ("frozen"). The folded form
-    // is what every comparison in the module speaks.
-    expect(tokenize("Begoña Muñoz")).toEqual(["begona", "munoz"]);
-    expect(tokenize("Éloise José")).toEqual(["eloise", "jose"]);
+    // fragment like "oz" matched unrelated rows ("frozen"). The word survives
+    // whole — never as a piece of itself.
+    expect(tokenize("Begoña Muñoz")).toEqual(["begona", "begoña", "munoz", "muñoz"]);
+    expect(tokenize("Begoña Muñoz")).not.toContain("bego");
+    expect(tokenize("Begoña Muñoz")).not.toContain("oz");
+    expect(tokenize("Søren")).not.toContain("ren");
   });
 
-  it("filters on the folded form — so the bank must store the folded form too", () => {
-    // PocketBase's LIKE compares bytes and cannot fold, so the filter can
-    // only ever reach a row whose text is already folded. This pins that
-    // half of the contract: the query side folds, the write side must too.
-    expect(buildMemoryFilter(tokenize("Begoña Muñoz"))).toContain('content ~ "begona"');
-    expect(buildMemoryFilter(tokenize("Begoña Muñoz"))).toContain('key ~ "munoz"');
+  it("carries the folded AND the raw form of an accented word — the filter must reach a row stored either way", () => {
+    // A PocketBase LIKE compares bytes: it folds ASCII case and nothing else,
+    // so "begona" cannot reach a stored "Begoña" and "begoña" cannot reach a
+    // stored "Begona". Both forms travel, so the row is reachable either way.
+    expect(tokenize("Begoña")).toEqual(["begona", "begoña"]);
+    const filter = buildMemoryFilter(tokenize("Begoña"));
+    expect(filter).toContain('content ~ "begona"');
+    expect(filter).toContain('content ~ "begoña"');
+  });
+
+  it("keeps the original case of an accented capital — a LIKE folds ASCII case only", () => {
+    // "éloise" cannot reach a stored "Éloise" (SQLite folds ASCII case only),
+    // so the capitalised raw form travels too.
+    expect(tokenize("Éloise")).toEqual(["eloise", "éloise", "Éloise"]);
+    expect(tokenize("José")).toEqual(["jose", "josé"]);
+  });
+
+  it("maps the letters NFKD cannot decompose, so a name survives tokenising", () => {
+    // ø ł đ ð þ æ œ ß have no Unicode decomposition, so NFKD leaves them
+    // and the old splitter cut them into fragments ("Søren" → "ren") or
+    // dropped the name entirely ("Đorđe" → nothing).
+    expect(tokenize("Søren")).toEqual(["soren", "søren"]);
+    expect(tokenize("Đorđe")).toEqual(["dorde", "đorđe", "Đorđe"]);
+    expect(tokenize("Łukasz")).toEqual(["lukasz", "łukasz", "Łukasz"]);
+    expect(tokenize("Straße")).toEqual(["strasse", "straße"]);
+    expect(tokenize("Æthelred")).toEqual(["aethelred", "æthelred", "Æthelred"]);
+    expect(tokenize("Þorir")).toEqual(["thorir", "þorir", "Þorir"]);
   });
 });
 
@@ -97,6 +144,28 @@ describe("buildMemoryFilter", () => {
     expect(filter).toContain('content ~ "say \'hi\'"');
     expect(filter).not.toContain('""');
   });
+
+  it("puts content FIRST for every term — the first content term IS the first term", () => {
+    // The plan's Task 2 fake PocketBase extracts the term with
+    // /content ~ "([^"]+)"/.exec(filter), i.e. it takes the FIRST content
+    // clause. If the fields were reordered the fake would silently match a
+    // different term, so the order is a contract, not a style choice.
+    const filter = buildMemoryFilter(["dinner", "emily"]);
+    expect(filter.startsWith('(content ~ "dinner" || tags ~ "dinner" || key ~ "dinner"')).toBe(true);
+    expect(contentClauses(filter)[0]).toBe("dinner");
+  });
+
+  it("reaches a row stored with the accent AND a row stored folded", () => {
+    const filter = buildMemoryFilter(tokenize("Begoña"));
+    const clauses = contentClauses(filter);
+    const rows = [
+      { key: "raw", content: "Begoña loves sushi" },
+      { key: "folded", content: "Begona loves sushi" },
+      { key: "other", content: "Bailey loves sushi" },
+    ];
+    const reached = rows.filter((row) => clauses.some((c) => likeMatch(row.content, c)));
+    expect(reached.map((r) => r.key)).toEqual(["raw", "folded"]);
+  });
 });
 
 describe("parseTagList", () => {
@@ -123,6 +192,12 @@ describe("scoreMemory", () => {
     const allergy = { ...base, id: "a", category: "allergy", content: "peanuts" };
     const note = { ...base, id: "b", category: "note", content: "peanuts" };
     expect(scoreMemory(allergy, ["peanuts"])).toBeGreaterThan(scoreMemory(note, ["peanuts"]));
+  });
+
+  it("gives a restriction the safety boost — it is a safety class", () => {
+    const restriction = { ...base, id: "r", category: "restriction", content: "no peanuts" };
+    const note = { ...base, id: "n", category: "note", content: "no peanuts" };
+    expect(scoreMemory(restriction, ["peanuts"])).toBeGreaterThan(scoreMemory(note, ["peanuts"]));
   });
 
   it("scores zero when nothing matches", () => {
@@ -186,6 +261,32 @@ describe("scoreMemory", () => {
     expect(scoreMemory(mem, ["begona"])).toBeGreaterThan(0);
   });
 
+  it("scores a fact stored with its accent AND one stored folded — both are found", () => {
+    const terms = tokenize("Begoña");
+    const raw = { id: "raw", category: "preference", content: "Begoña loves sushi", confidence: 0.9 };
+    const folded = { id: "folded", category: "preference", content: "Begona loves sushi", confidence: 0.9 };
+    expect(scoreMemory(raw, terms)).toBeGreaterThan(0);
+    expect(scoreMemory(folded, terms)).toBeGreaterThan(0);
+  });
+
+  it("counts the folded and the raw form of ONE word as one hit, not two", () => {
+    // The filter fetches the word twice, so the scorer must not pay for it
+    // twice: an accented word would otherwise out-score a plain one.
+    const mem = { id: "one", category: "note", content: "Begoña loves sushi", confidence: 0 };
+    const plain = { id: "two", category: "note", content: "Bailey loves sushi", confidence: 0 };
+    const accented = scoreMemory(mem, tokenize("Begoña"));
+    const ascii = scoreMemory(plain, tokenize("Bailey"));
+    expect(accented).toBeCloseTo(ascii, 5);
+  });
+
+  it("matches an UPPER-CASE term and an UPPER-CASE row", () => {
+    const mem = { id: "u1", category: "preference", content: "SUSHI", confidence: 0.9 };
+    expect(scoreMemory(mem, ["sushi"])).toBeGreaterThan(0);
+    expect(scoreMemory(mem, ["SUSHI"])).toBeGreaterThan(0);
+    const lower = { id: "u2", category: "preference", content: "sushi", confidence: 0.9 };
+    expect(scoreMemory(lower, ["SUSHI"])).toBeGreaterThan(0);
+  });
+
   it("never returns NaN or -Infinity for a broken confidence or usage count", () => {
     // NaN > 0 is false, so a NaN score made the caller's `score > 0` filter
     // drop the fact silently, and a NaN comparator left the sort order at
@@ -242,12 +343,58 @@ describe("rankFacts", () => {
     expect(second).toEqual(first);
   });
 
+  it("without a clock the order is confidence + usage — never recency", () => {
+    // No `now` means no recency term at all. If the guard were dropped the
+    // weight would be NaN, the comparator NaN, and the order would be the
+    // caller's input order — the always-injected core would follow whatever
+    // the database happened to return.
+    const mems = [
+      { id: "low", category: "note", content: "l", confidence: 0.5, usageCount: 0, updatedAt: "2026-10-01T00:00:00Z" },
+      { id: "high", category: "note", content: "h", confidence: 0.6, usageCount: 0, updatedAt: "2020-01-01T00:00:00Z" },
+    ];
+    expect(rankFacts(mems).map((m) => m.id)).toEqual(["high", "low"]);
+    // The same rows WITH a clock: recency flips them, so the order above is
+    // genuinely recency-free and not a coincidence of the confidences.
+    const withClock = rankFacts(mems, { now: Date.parse("2026-10-01T00:00:00Z") });
+    expect(withClock.map((m) => m.id)).toEqual(["low", "high"]);
+  });
+
   it("keeps a broken confidence from poisoning the durable order", () => {
     const ranked = rankFacts([
       { id: "broken", category: "note", content: "b", confidence: Number.NaN, usageCount: 0 },
       { id: "good", category: "note", content: "g", confidence: 0.9, usageCount: 0 },
     ]);
     expect(ranked.map((m) => m.id)).toEqual(["good", "broken"]);
+  });
+
+  it("keeps a broken usage count from poisoning the durable order", () => {
+    const ranked = rankFacts([
+      { id: "good", category: "note", content: "g", confidence: 0.5, usageCount: 0 },
+      { id: "broken", category: "note", content: "b", confidence: 0.9, usageCount: Number.NaN },
+    ]);
+    expect(ranked.map((m) => m.id)).toEqual(["broken", "good"]);
+    const junk = rankFacts([
+      { id: "good", category: "note", content: "g", confidence: 0.5, usageCount: 0 },
+      { id: "junk", category: "note", content: "j", confidence: 0.9, usageCount: "abc" as unknown as number },
+    ]);
+    expect(junk.map((m) => m.id)).toEqual(["junk", "good"]);
+    const infinite = rankFacts([
+      { id: "good", category: "note", content: "g", confidence: 0.5, usageCount: 0 },
+      { id: "inf", category: "note", content: "i", confidence: 0.9, usageCount: Number.NEGATIVE_INFINITY },
+    ]);
+    expect(infinite.map((m) => m.id)).toEqual(["inf", "good"]);
+  });
+
+  it("never mutates the array it is given", () => {
+    const mems = [
+      { id: "low", category: "note", content: "l", confidence: 0.1, usageCount: 0 },
+      { id: "high", category: "note", content: "h", confidence: 0.9, usageCount: 5 },
+    ];
+    const before = mems.map((m) => m.id);
+    const ranked = rankFacts(mems);
+    expect(ranked.map((m) => m.id)).toEqual(["high", "low"]);
+    expect(mems.map((m) => m.id)).toEqual(before);
+    expect(ranked).not.toBe(mems);
   });
 });
 
@@ -271,6 +418,14 @@ describe("selectCoreFacts", () => {
     expect(kept.map((f) => f.id)).toEqual(["a"]);
   });
 
+  it("keeps a restriction fact even when the budget is spent — a restriction is a safety fact", () => {
+    const kept = selectCoreFacts(
+      [{ id: "r", category: "restriction", content: "no peanuts", confidence: 0.1 }],
+      { budget: 0 },
+    );
+    expect(kept.map((f) => f.id)).toEqual(["r"]);
+  });
+
   it("never exceeds the character budget for NON-safety facts", () => {
     const kept = selectCoreFacts(
       [
@@ -281,6 +436,14 @@ describe("selectCoreFacts", () => {
     );
     const total = kept.reduce((n, f) => n + (f.content?.length ?? 0), 0);
     expect(total).toBeLessThanOrEqual(60);
+  });
+
+  it("charges a per-fact allowance on top of the fact text", () => {
+    // Each fact is rendered as a line, so it costs its text plus a fixed
+    // allowance: 10 characters of text fit a budget of 18, not of 17.
+    const fact = { id: "x", category: "note", content: "0123456789", confidence: 0.5 };
+    expect(selectCoreFacts([fact], { budget: 18 }).map((f) => f.id)).toEqual(["x"]);
+    expect(selectCoreFacts([fact], { budget: 17 }).map((f) => f.id)).toEqual([]);
   });
 
   it("ranks the durable facts — confidence, usage and recency, not input order", () => {
@@ -323,6 +486,18 @@ describe("searchMessages", () => {
 
   it("returns nothing when no term matches", () => {
     expect(searchMessages(rows, tokenize("zebra"))).toHaveLength(0);
+  });
+
+  it("finds an accented chat turn — chat turns are full of accented names", () => {
+    const accented = [{ content: "Begoña loves sushi", role: "user", createdAt: "2026-10-01T10:00:00Z" }];
+    expect(searchMessages(accented, tokenize("Begoña"))).toHaveLength(1);
+    expect(searchMessages(accented, ["begona"])).toHaveLength(1);
+  });
+
+  it("finds an UPPER-CASE chat turn and an UPPER-CASE term", () => {
+    const shouted = [{ content: "SUSHI FOR DINNER", role: "user", createdAt: "2026-10-01T10:00:00Z" }];
+    expect(searchMessages(shouted, ["sushi"])).toHaveLength(1);
+    expect(searchMessages(shouted, ["SUSHI"])).toHaveLength(1);
   });
 
   it("returns the NEWEST match first when the relevance ties", () => {
