@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncCalendar } from "@/lib/google/calendar";
+import { syncTasks } from "@/lib/google/tasks";
 import { checkQuota } from "@/lib/google/quota-guard";
-import { isGoogleConnected, mapGoogleAuthError } from "@/lib/google/oauth-client";
+import { isGoogleConnected, mapGoogleAuthError } from "@/lib/google/connection-state";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
 import { isCronAuthorized } from "@/lib/cron-auth";
 
@@ -45,16 +46,31 @@ export async function POST(request: NextRequest) {
     if (result && "skipped" in result) {
       return NextResponse.json({ ok: false, reason: "already_in_progress" });
     }
+
+    // Tasks is a best-effort second pass on its own optional Composio
+    // connection: its failure is reported in `result.tasks` and NEVER changes
+    // the calendar response's ok/partial semantics.
+    let tasks;
+    try {
+      tasks = await syncTasks();
+    } catch (error) {
+      tasks = {
+        skipped: true,
+        reason: error instanceof Error && error.message ? error.message : "tasks sync failed",
+      };
+    }
+    const resultWithTasks = { ...result, tasks };
+
     if (result && "perCalendar" in result && Array.isArray(result.perCalendar) && result.perCalendar.some((entry) => entry.ok === false)) {
       return NextResponse.json({
         ok: false,
         partial: true,
         error: "calendar_partial_failure",
-        result,
+        result: resultWithTasks,
         quota,
       }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, result, quota });
+    return NextResponse.json({ ok: true, result: resultWithTasks, quota });
   } catch (error) {
     return authErrorResponse(error);
   }

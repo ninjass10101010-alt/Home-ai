@@ -18,7 +18,6 @@ const LEGACY_INDEX = `CREATE UNIQUE INDEX ${LEGACY_EVENTS_INDEX_NAME} ON consuel
 const FAMILY = "family@gmail.com";
 
 const FIELDS: Record<string, string[]> = {
-  consuela_google_tokens: ["access_token", "refresh_token", "scope", "token_type", "expires_at", "account_email", "granted_at", "revoked_at"],
   consuela_google_calendar_events: ["google_id", "calendar_id", "summary", "description", "location", "start_iso", "end_iso", "all_day", "etag", "html_link", "updated_remote", "source", "raw", "next_sync_token"],
   consuela_google_tasks: ["google_id", "tasklist_id", "title", "notes", "due", "status", "completed", "kind", "etag", "updated_remote", "raw", "source"],
   consuela_google_tasklists: ["google_id", "title", "owned_by_dashboard", "updated_remote"],
@@ -159,6 +158,8 @@ describe("ensureGoogleCollections — events index self-heal", () => {
 
     const eventsCreate = calls.colCreates.find((c) => c.name === "consuela_google_calendar_events");
     expect(eventsCreate.indexes).toEqual([EVENTS_COMPOSITE_INDEX]);
+    // The dead direct-Device-Flow token collection is no longer part of the spec.
+    expect(calls.colCreates.find((c) => c.name === "consuela_google_tokens")).toBeUndefined();
     // No heal attempted on a just-created collection
     expect(calls.colUpdates.find((u) => u.data?.indexes)).toBeUndefined();
   });

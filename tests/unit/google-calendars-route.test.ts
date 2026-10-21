@@ -12,9 +12,10 @@ const mocks = vi.hoisted(() => ({
   withGoogleIntegrationOperation: vi.fn(),
 }));
 
-vi.mock("@/lib/google/oauth-client", () => ({
-  isGoogleConnected: mocks.isGoogleConnected,
-}));
+vi.mock("@/lib/google/connection-state", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/google/connection-state")>();
+  return { ...actual, isGoogleConnected: mocks.isGoogleConnected };
+});
 
 vi.mock("@/lib/google/calendar", () => ({
   listCalendars: mocks.listCalendars,

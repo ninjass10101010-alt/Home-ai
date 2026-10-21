@@ -316,12 +316,17 @@ function getShortWeekday(year: number, month: number, day: number) {
 }
 
 /**
- * Why the school (Google) calendar is missing from this view — the three
- * answers, and ONLY these three.
+ * Why the school (Google) calendar is missing from this view — the honest
+ * answers, and ONLY these.
  *
  * `idle` is the honest good case: the read succeeded. It says nothing even when
  * it returned zero rows, because a day genuinely without school events is a real
  * answer, not an outage.
+ *
+ * `stale` is connected-but-not-fresh: the read reported `stale:true` because
+ * the rows it can offer are saved, not the result of a live sync (the sync
+ * itself failed). The rows already on screen stay and the line says so — they
+ * are never repainted as current.
  *
  * `not_connected` / `unavailable` used to be invisible. `/calendar` is
  * ALL_ROLES but the page's only Google load used `?sync=now`, which
@@ -334,20 +339,33 @@ function getShortWeekday(year: number, month: number, day: number) {
  * Copy rule: neutral, actionable, and never the server's raw error string. A
  * token-store failure message is a developer string, not a family one.
  */
-type GoogleCalendarStatus = "idle" | "not_connected" | "unavailable";
+type GoogleCalendarStatus = "idle" | "not_connected" | "unavailable" | "stale";
 
-const GOOGLE_STATUS_COPY: Record<Exclude<GoogleCalendarStatus, "idle">, string> = {
-  not_connected:
-    "School events aren't on the calendar yet \u2014 a parent can connect Google Calendar in Settings \u2192 Integrations.",
+const GOOGLE_STATUS_COPY: Record<Exclude<GoogleCalendarStatus, "idle" | "not_connected">, string> = {
   unavailable:
     "Couldn't reach the school calendar just now \u2014 family events are still here.",
+  stale:
+    "Showing saved school events \u2014 not refreshing right now.",
 };
 
-function CalendarGoogleStatusLine({ status }: { status: GoogleCalendarStatus }) {
+const GOOGLE_NOT_CONNECTED_COPY = {
+  parent:
+    "School events aren't on the calendar yet \u2014 connect Google Calendar in Settings \u2192 Connections & System.",
+  other:
+    "School events aren't on the calendar yet \u2014 a parent can connect Google Calendar in Settings \u2192 Connections & System.",
+} as const;
+
+function CalendarGoogleStatusLine({ status, isParent }: { status: GoogleCalendarStatus; isParent: boolean }) {
   if (status === "idle") return null;
+  const copy =
+    status === "not_connected"
+      ? isParent
+        ? GOOGLE_NOT_CONNECTED_COPY.parent
+        : GOOGLE_NOT_CONNECTED_COPY.other
+      : GOOGLE_STATUS_COPY[status];
   return (
     <p className="calendar-google-status" role="status" data-testid="calendar-google-status">
-      {GOOGLE_STATUS_COPY[status]}
+      {copy}
     </p>
   );
 }
@@ -732,7 +750,16 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
       if (!data.connected) {
         setCalEvents((prev) => prev.filter((event: CalEvent) => event.member !== "Google"));
         setGoogleStatus("not_connected");
-        if (announce) showToast("Connect Google in Settings → Integrations");
+        if (announce) showToast("Connect Google in Settings → Connections & System");
+        return;
+      }
+      // Connected, but the answer is a saved snapshot rather than a fresh
+      // sync (the sync itself failed): keep the rows already on screen and
+      // say they are not refreshing. Taking the success path here would
+      // replace them with the served list and clear the status line — cached
+      // school events presented as current.
+      if (data.stale === true) {
+        setGoogleStatus("stale");
         return;
       }
       const colorMap = (data.calendar_colors && typeof data.calendar_colors === "object")
@@ -994,7 +1021,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
             connection state, not a headline — inside the card it pushed the
             date block into four wrapped lines and made the hero 350px tall on a
             390px phone. */}
-        <CalendarGoogleStatusLine status={googleStatus} />
+        <CalendarGoogleStatusLine status={googleStatus} isParent={currentUser?.role === "parent"} />
 
         <div className="calendar-member-strip scrollbar-hide">
           <button

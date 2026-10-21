@@ -70,20 +70,11 @@ function fieldFor(f: ColField) {
   return { name: f.name, type: f.type, required: !!f.required };
 }
 
+// NOTE: consuela_google_tokens was removed from this spec after the direct
+// Device Flow deletion. The collection may still exist on a live NAS; it is
+// intentionally NOT dropped (ops decision), it just stops being created or
+// patched by ensureGoogleCollections.
 const COLLECTIONS: ColSpec[] = [
-  {
-    name: "consuela_google_tokens",
-    fields: [
-      { name: "access_token", type: "text" },
-      { name: "refresh_token", type: "text" },
-      { name: "scope", type: "text" },
-      { name: "token_type", type: "text" },
-      { name: "expires_at", type: "date" },
-      { name: "account_email", type: "text" },
-      { name: "granted_at", type: "date" },
-      { name: "revoked_at", type: "date" },
-    ],
-  },
   {
     name: "consuela_google_calendar_events",
     fields: [
@@ -283,7 +274,7 @@ async function migrateCalendarSelection(pb: any): Promise<string> {
 // Index self-heal for consuela_google_calendar_events: swap the legacy
 // UNIQUE(google_id) index for UNIQUE(calendar_id, google_id). Creating the
 // unique index on a table that still holds duplicates fails, so the heal
-// first normalizes empty calendar_id (Composio-populated rows belong to the
+// first normalizes empty calendar_id (pre-multi-calendar rows belong to the
 // primary calendar) and dedupes any (calendar_id, google_id) collisions,
 // then rewrites the collection's index list. Runs only while the composite
 // index is missing — steady-state calls are a cheap metadata check.

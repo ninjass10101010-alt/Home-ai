@@ -1,0 +1,66 @@
+{
+  "note": "Anonymized Composio v3.1 response fixtures pinned 2026-10-05 for mocked tests. No real ids/emails/keys.",
+  "executeListEvents": {
+    "data": {
+      "items": [
+        {
+          "id": "evt_alpha",
+          "status": "confirmed",
+          "summary": "School Drop-off",
+          "location": "Elementary",
+          "start": { "dateTime": "2026-10-06T07:45:00-04:00", "timeZone": "America/Detroit" },
+          "end": { "dateTime": "2026-10-06T08:15:00-04:00", "timeZone": "America/Detroit" },
+          "htmlLink": "https://calendar.google.com/calendar/event?eid=anonymized",
+          "etag": "\"etag-alpha\"",
+          "updated": "2026-10-01T12:00:00.000Z"
+        },
+        {
+          "id": "evt_bravo",
+          "status": "confirmed",
+          "summary": "Early Release",
+          "start": { "date": "2026-10-07" },
+          "end": { "date": "2026-10-08" }
+        }
+      ]
+    },
+    "successful": true,
+    "error": null
+  },
+  "executeListCalendars": {
+    "data": {
+      "items": [
+        { "id": "primary", "summary": "Family", "primary": true, "accessRole": "owner", "colorRgb": "#039be5" },
+        { "id": "school@group.calendar.google.com", "summary": "School", "primary": false, "accessRole": "reader", "colorRgb": "#616161" }
+      ]
+    },
+    "successful": true,
+    "error": null
+  },
+  "executeError": {
+    "data": null,
+    "successful": false,
+    "error": { "message": "tool execution failed", "code": "TOOL_EXECUTION_ERROR" }
+  },
+  "connectedAccountActive": {
+    "id": "ca_anonymized",
+    "status": "ACTIVE",
+    "toolkit": { "slug": "googlecalendar" },
+    "params": { "user_info": { "email": "family@example.com" } }
+  },
+  "connectedAccountInitializing": {
+    "id": "ca_anonymized",
+    "status": "INITIALIZING",
+    "toolkit": { "slug": "googlecalendar" }
+  },
+  "linkSession": {
+    "link_token": "lt_anonymized",
+    "redirect_url": "https://backend.composio.dev/api/v3.1/connected_accounts/link/redirect?token=anonymized",
+    "expires_at": "2026-10-05T12:00:00.000Z",
+    "connected_account_id": "ca_anonymized"
+  },
+  "authConfig": {
+    "id": "ac_anonymized",
+    "toolkit": { "slug": "googlecalendar" },
+    "auth_config": { "type": "use_composio_managed_auth" }
+  }
+}

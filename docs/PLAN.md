@@ -25,6 +25,15 @@
 > each VERIFY item. Do not re-derive those findings; the original detail files were written to
 > `/tmp` and are gone.
 
+### Shipped — Composio calendar/Tasks provider (2026-10-05)
+
+- [x] **Composio becomes the calendar/Tasks broker** — direct Google Device Flow retired, the
+      stale-cache "disconnected but populated" bug fixed, provider policy enforced; cadence stays
+      5-min and Tasks stays best-effort. Spec:
+      `../docs/superpowers/specs/2026-10-05-composio-calendar-provider-design.md`; plan:
+      `../docs/superpowers/plans/2026-10-05-composio-calendar-provider.md`; shipped history:
+      `CHANGELOG.md` (2026-10-05). No open follow-ups from this work.
+
 ### Needs a human decision (cannot be automated)
 
 - [ ] **PWA + Web Push (2026-10-16) — remaining ops + deferred kiosk.** The push pipeline is built and
