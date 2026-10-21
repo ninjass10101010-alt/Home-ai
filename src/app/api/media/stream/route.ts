@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
-import { resolveStream } from "@/lib/media/youtube";
+import { resolveStream, clearStreamCache } from "@/lib/media/youtube";
 
 export const dynamic = "force-dynamic";
 
@@ -53,12 +53,28 @@ export async function GET(request: NextRequest) {
     return new Response("range_too_large", { status: 416 });
   }
 
-  const upstream = await fetch(stream.url, {
-    headers: rangeHeader ? { Range: rangeHeader } : undefined,
-    // The signed URL is already time-limited; never let a stale CDN copy sit in
-    // front of it for another 5 hours.
+  const fetchUpstream = async (url: string) => fetch(url, {
+    headers: {
+      "User-Agent": "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+      ...(rangeHeader ? { Range: rangeHeader } : {}),
+    },
     cache: "no-store",
   });
+
+  let upstream = await fetchUpstream(stream.url);
+  // A 403 from googlevideo usually means the cached signed URL expired or its
+  // signature was rejected. Drop the cache and re-resolve once before giving up.
+  if (upstream.status === 403) {
+    clearStreamCache();
+    try {
+      stream = await resolveStream(id);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message.split("\n")[0] : "resolve failed";
+      console.error("[media/stream] re-resolve failed:", detail);
+      return new Response("stream_unavailable", { status: 502 });
+    }
+    upstream = await fetchUpstream(stream.url);
+  }
 
   if (!upstream.ok && upstream.status !== 206) {
     console.error("[media/stream] upstream returned", upstream.status);

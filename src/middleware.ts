@@ -24,6 +24,15 @@ const API_EXEMPT = [
   // token minted by /api/muse/auth/login (key → expiring token). The settings
   // routes added in Task 11 gate themselves on a session and are NOT covered.
   "/api/muse/",
+  // Family-visible read surfaces: the wall display is signed out, so the
+  // calendar (events + schedules) and meals board must read without a session.
+  // Tasks/points stay gated (PIN-required) — see /api/tasks/* below.
+  "/api/db/events",
+  "/api/db/schedules",
+  "/api/db/meal_plan_entries",
+  // Family-visible photo library: the wall display is signed out, and the
+  // photo bytes/settings routes gate writes at the route level (parent only).
+  "/api/photos",
   // PIN-gated task actions. All routes self-authenticate: the member PIN is
   // the credential (verified server-side against PB, throttled against brute
   // force) — the same trust model as /api/auth/login. Without the exemption a

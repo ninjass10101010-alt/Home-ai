@@ -110,7 +110,7 @@ async function clientSelectTodaysEvents(): Promise<any[]> {
   const today = localTodayISO();
   const members = memberJoinList();
   return rows
-    .filter((e: any) => e.date === today)
+    .filter((e: any) => e.member !== "Google" && e.date === today)
     .sort((a: any, b: any) => (a.time || '').localeCompare(b.time || ''))
     .map((event: any) => {
       const member = findJoinMember(members, event.member);
