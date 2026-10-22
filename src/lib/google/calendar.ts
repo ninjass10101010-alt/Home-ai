@@ -125,10 +125,14 @@ async function executeGoogleAction<T>(
 }
 
 function unwrapComposioData<T>(result: ComposioEnvelope<T>): T {
-  if (!result || result.successful === false || result.data == null) {
+  if (!result || result.successful === false || result.error) {
     throw new Error(result?.error?.message || "Composio tool execution failed");
   }
-  return result.data;
+  if (result.data != null) return result.data;
+  if ((result as { response_data?: unknown }).response_data != null) {
+    return result as unknown as T;
+  }
+  throw new Error("Composio tool execution failed");
 }
 
 // Deletes carry no data payload: `{successful:true, data:null}` is a success.
@@ -605,6 +609,21 @@ function eventDuration(startIso?: string, endIso?: string): { hours: number; min
 // not part of that schema and are dropped; nothing reads the old
 // consuelaDashboard tag.
 function createEventArgs(input: CalendarEventInput): Record<string, unknown> {
+  const startDate = input.start.date;
+  const endDate = input.end.date;
+  const isAllDay = Boolean(startDate && endDate && !input.start.dateTime && !input.end.dateTime);
+  if (isAllDay) {
+    const args: Record<string, unknown> = {
+      calendar_id: PRIMARY,
+      summary: input.summary,
+      start_date: startDate,
+      end_date: endDate,
+    };
+    if (input.description) args.description = input.description;
+    if (input.location) args.location = input.location;
+    return args;
+  }
+
   const startIso = input.start.dateTime || input.start.date;
   const endIso = input.end.dateTime || input.end.date;
   const args: Record<string, unknown> = {
