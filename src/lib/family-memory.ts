@@ -140,6 +140,8 @@ export function isMemoryRefusal(error: unknown): boolean {
  *  trail, not an archive: an unbounded one would grow the row until
  *  PocketBase's row-size ceiling rejected the write. */
 const MAX_HISTORY = 10;
+/** The longest a subject key may be — the same cap the key builder uses. */
+const MAX_KEY = 50;
 
 const COLLECTION = 'consuela_family_memories';
 
@@ -171,9 +173,14 @@ function equalityValue(value: string): string {
     .trim();
 }
 
-/** Fold for the KEY — a machine identity, not the family's words. */
+/**
+ * Fold AND lowercase for the KEY — a machine identity, not the family's
+ * words. The lowercasing matters: PocketBase's `=` filter is case-sensitive
+ * in SQLite, so a key stored as "UPPER_KEY" and one stored as "upper_key"
+ * would be TWO rows under a UNIQUE index that cannot see the difference.
+ */
 function foldKey(value: string): string {
-  return foldAccents(String(value ?? ''));
+  return foldAccents(String(value ?? '').toLowerCase());
 }
 
 /** Compare two names the way the family means them: case- and
@@ -299,6 +306,37 @@ function assertHistoryColumns(existing: any): void {
  * restatement is never a second row. The `UNIQUE(userId, key)` index is the
  * guarantee; this lookup is how the row is found.
  */
+/** Write a brand-new subject row. */
+async function writeNewSubject(
+  pb: any,
+  args: {
+    userId: string; familyId: string; category: MemoryCategory; key: string;
+    content: string; tags: string[]; person: string; scope: string;
+    source: string; confidence: number; now: string;
+  },
+): Promise<FamilyMemory> {
+  const created = await pb.collection(COLLECTION).create({
+    userId: args.userId,
+    familyId: args.familyId,
+    category: args.category,
+    key: args.key,
+    content: args.content,
+    tags: JSON.stringify(args.tags),
+    person: args.person,
+    scope: args.scope,
+    status: 'active',
+    source: args.source,
+    confidence: args.confidence,
+    version: 1,
+    history: JSON.stringify([]),
+    createdAt: args.now,
+    updatedAt: args.now,
+    usageCount: 1,
+    lastUsed: args.now,
+  }, { requestKey: null });
+  return toMemory(created);
+}
+
 export async function storeMemory(input: StoreMemoryInput): Promise<FamilyMemory | null> {
   // The KEY is a machine identity, so it is folded. The CONTENT, the tags
   // and the person are the family's own words and are stored AS WRITTEN.
@@ -332,6 +370,11 @@ export async function storeMemory(input: StoreMemoryInput): Promise<FamilyMemory
     return await withKeyedLock(`memory:${userId}:${key}`, async () => {
       const existing = await readSubject(pb, userId, key);
       if (existing) {
+        // The KEY is the identity: storing under the same key REPLACES the
+        // row (the old wording lands in the history). Choosing a key that is
+        // already claimed by a DIFFERENT fact is the caller's job — see
+        // `disambiguateKey` in memory-subject.ts, which the agent's tool and
+        // the console's route both use.
         assertHistoryColumns(existing);
         const history = [...parseHistory(existing.history), {
           version: versionOf(existing),
@@ -363,26 +406,10 @@ export async function storeMemory(input: StoreMemoryInput): Promise<FamilyMemory
         return toMemory(updated);
       }
 
-      const created = await pb.collection(COLLECTION).create({
-        userId,
-        familyId,
-        category: input.category,
-        key,
-        content,
-        tags: JSON.stringify(tags),
-        person,
-        scope,
-        status: 'active',
-        source,
-        confidence,
-        version: 1,
-        history: JSON.stringify([]),
-        createdAt: now,
-        updatedAt: now,
-        usageCount: 1,
-        lastUsed: now,
-      }, { requestKey: null });
-      return toMemory(created);
+      return await writeNewSubject(pb, {
+        userId, familyId, category: input.category, key,
+        content, tags, person, scope, source, confidence, now,
+      });
     });
   } catch (error) {
     if (error instanceof MemoryStoreError) throw error;
@@ -602,7 +629,32 @@ export async function updateMemory(
     };
 
     // The family's own words — stored as written.
-    if (updates.content !== undefined) updateData.content = String(updates.content);
+    if (updates.content !== undefined) {
+      const next = String(updates.content);
+      if (!next.trim()) {
+        // An empty correction must never erase a fact. The console's edit
+        // box can be emptied by accident, and a blank write would leave the
+        // family with a row that says nothing.
+        console.error('Refusing to blank a memory');
+        return null;
+      }
+      const current = await pb.collection(COLLECTION).getOne(memoryId, { requestKey: null });
+      if (String(current.content ?? '') !== next) {
+        // The console's edit is a CORRECTION, so it goes through the same
+        // history + version path as every other replacement: the old wording
+        // is kept, and the row's version moves on.
+        const history = [...parseHistory(current.history), {
+          version: versionOf(current),
+          content: String(current.content ?? ''),
+          source: String(current.source ?? '') || 'parent',
+          by: 'parent',
+          at: new Date().toISOString(),
+        }].slice(-MAX_HISTORY);
+        updateData.history = JSON.stringify(history);
+        updateData.version = versionOf(current) + 1;
+      }
+      updateData.content = next;
+    }
     if (updates.tags !== undefined) {
       updateData.tags = JSON.stringify(
         Array.isArray(updates.tags) ? updates.tags.map((tag) => String(tag)).filter(Boolean) : [],

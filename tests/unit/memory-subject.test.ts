@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { slugify, subjectKey, containment, findReplacementSubject } from "@/lib/memory-subject";
+import { slugify, subjectKey, containment, findReplacementSubject, topicTokens, sameTopic } from "@/lib/memory-subject";
 
 /**
  * The subject key is the identity of a fact. Task 6 of the plan will verify
@@ -94,5 +94,49 @@ describe("findReplacementSubject", () => {
 
   it("returns null when nothing is close enough", () => {
     expect(findReplacementSubject(existing, "Aurora plays the piano on Tuesdays")).toBeNull();
+  });
+});
+
+/**
+ * The generic-word list is LOAD-BEARING: a day is when something happens,
+ * not what it is about. The plural forms were missing once, which made
+ * "Tuesdays" a topic word and let "has practice on Tuesdays" and "has soccer
+ * on Tuesdays" collapse into one fact.
+ */
+describe("the generic words are not topics", () => {
+  it("drops the day, in the singular and the plural", () => {
+    expect(topicTokens("Caspian has practice on Tuesday", { person: "Caspian" })).not.toContain("tuesday");
+    expect(topicTokens("Caspian has practice on Tuesdays", { person: "Caspian" })).not.toContain("tuesdays");
+  });
+
+  it("keeps what the fact is about", () => {
+    expect(topicTokens("Caspian has practice on Tuesdays", { person: "Caspian" })).toContain("practice");
+  });
+
+  it("two facts that share only a day are DIFFERENT subjects", () => {
+    expect(
+      sameTopic("Caspian has practice on Tuesdays", "Caspian has soccer on Tuesdays", {
+        person: "Caspian",
+        category: "routine",
+      }),
+    ).toBe(false);
+  });
+
+  it("the same fact about the same thing IS the same subject", () => {
+    expect(
+      sameTopic("Bailey is allergic to peanuts", "Bailey cannot eat peanuts", {
+        person: "Bailey",
+        category: "allergy",
+      }),
+    ).toBe(true);
+  });
+
+  it("two DIFFERENT facts are different subjects", () => {
+    expect(
+      sameTopic("Bailey is allergic to peanuts", "Bailey is allergic to shellfish", {
+        person: "Bailey",
+        category: "allergy",
+      }),
+    ).toBe(false);
   });
 });

@@ -32,6 +32,7 @@ vi.mock("@/lib/family-memory", () => ({
 }));
 
 import { GET, POST } from "@/app/api/family-memory/route";
+import { subjectKey } from "@/lib/memory-subject";
 import {
   PATCH,
   DELETE,
@@ -111,9 +112,11 @@ describe("family-memory POST — canonical default + server-side key slug (F5/F6
     expect(mocks.storeMemory.mock.calls[0][0].userId).toBe("consuela");
   });
 
-  it("slugs a client-supplied key with the same [^a-z0-9]+ → _ rule as storeMemory callers", async () => {
+  it("slugs a client-supplied key with the ONE shared key grammar", async () => {
     await POST(postReq("http://localhost/api/family-memory", { key: "Caspian Bedtime!", content: "x" }));
-    expect(mocks.storeMemory.mock.calls[0][0].key).toBe("caspian_bedtime_");
+    // No trailing separator: the shared slugify trims, so a key never ends
+    // in "_" (the old local slug cut at 50 characters and left one behind).
+    expect(mocks.storeMemory.mock.calls[0][0].key).toBe("caspian_bedtime");
   });
 
   it("folds an accented client key instead of cutting the name in half", async () => {
@@ -121,9 +124,12 @@ describe("family-memory POST — canonical default + server-side key slug (F5/F6
     expect(mocks.storeMemory.mock.calls[0][0].key).toBe("person_begona");
   });
 
-  it("derives the key from content when none is supplied", async () => {
+  it("derives the SAME key the agent's tool would when none is supplied", async () => {
     await POST(postReq("http://localhost/api/family-memory", { content: "Rocco hides socks" }));
-    expect(mocks.storeMemory.mock.calls[0][0].key).toBe("rocco_hides_socks");
+    // The topic, not the wording: the console and the agent must land on one
+    // key for one fact, or the same fact becomes two rows.
+    expect(mocks.storeMemory.mock.calls[0][0].key).toBe("note_rocco_socks");
+    expect(subjectKey({ category: "note", person: "", content: "Rocco hides socks" })).toBe("note_rocco_socks");
   });
 });
 

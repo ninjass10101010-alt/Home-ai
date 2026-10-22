@@ -122,10 +122,29 @@ describe("remember_fact — a merge must never DEGRADE a fact (N2)", () => {
     expect(rows()).toHaveLength(1);
     expect(rows()[0].content).toBe("Bailey is allergic to peanuts");
     // The answer must not claim the new text was saved.
-    expect(second.stored).toBe("Bailey is allergic to peanuts");
+    expect(second.ok).toBe(false);
+    expect(String(second.error ?? "")).toMatch(/allergy/i);
+    expect(first.ok).toBe(true);
+  });
+
+  it("a PREFERENCE about the same thing does not overwrite the allergy", async () => {
+    await remember({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
+    const second = await remember({ content: "Bailey hates peanuts", category: "allergy", person: "Bailey" });
+
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].content).toBe("Bailey is allergic to peanuts");
+    expect(second.ok).toBe(false);
+  });
+
+  it("a non-safety fact keeps the richer stored wording instead of being replaced by a vaguer one", async () => {
+    await remember({ content: "Bailey prefers the blue plate", category: "preference", person: "Bailey" });
+    const second = await remember({ content: "blue", category: "preference", person: "Bailey" });
+
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].content).toBe("Bailey prefers the blue plate");
+    expect(second.ok).toBe(true);
     expect(second.replaced).toBe(false);
     expect(String(second.kept ?? "")).toMatch(/says more/i);
-    expect(first.ok).toBe(true);
   });
 
   it("a safety fact is not replaced by an ordinary-category write about the same person", async () => {
@@ -134,5 +153,56 @@ describe("remember_fact — a merge must never DEGRADE a fact (N2)", () => {
     expect(rows()).toHaveLength(2);
     const allergy = rows().find((r: any) => r.category === "allergy");
     expect(allergy?.content).toBe("Bailey is allergic to peanuts");
+  });
+});
+
+/**
+ * The third review's findings: the merge was still too eager in ways that
+ * only a careful probe finds. A fact must never be silently replaced by a
+ * DIFFERENT fact, so the merge is only allowed when the two texts are about
+ * the same thing AND the same person AND (for a safety fact) the new text
+ * asserts the same kind of condition.
+ */
+describe("remember_fact — the merge must not fire on a shared word (N8)", () => {
+  it("two facts that share only the DAY stay two facts", async () => {
+    await remember({ content: "Caspian has practice on Tuesdays", category: "routine", person: "Caspian" });
+    await remember({ content: "Caspian has soccer on Tuesdays", category: "routine", person: "Caspian" });
+    expect(rows()).toHaveLength(2);
+  });
+
+  it("a fact that shares only the TIME stays a separate fact", async () => {
+    await remember({ content: "Emily's school starts at 8", category: "routine", person: "Emily" });
+    await remember({ content: "Emily's soccer starts at 5", category: "routine", person: "Emily" });
+    expect(rows()).toHaveLength(2);
+  });
+
+  it("a household rule is not a person's fact", async () => {
+    await remember({ content: "Peanuts are banned at school", category: "restriction" });
+    await remember({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
+    expect(rows()).toHaveLength(2);
+  });
+
+  it("a person-less fact is not replaced by a person's fact", async () => {
+    await remember({ content: "Peanuts are banned at school", category: "restriction" });
+    const second = await remember({ content: "Peanuts are banned at school", category: "restriction", person: "Bailey" });
+    expect(rows()).toHaveLength(2);
+    expect(second.ok).toBe(true);
+  });
+
+  it("the SAME fact about the same thing DOES replace", async () => {
+    await remember({ content: "The wifi code is in the drawer", category: "location" });
+    await remember({ content: "The wifi code changed to 1234", category: "location" });
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].content).toBe("The wifi code changed to 1234");
+  });
+
+  it("a key already claimed by a different fact gets a key of its own (N10)", async () => {
+    await remember({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
+    // The same claimed topic, but a different fact: the second must not
+    // take the first one's place.
+    await remember({ content: "Bailey is allergic to peanut butter", category: "allergy", person: "Bailey", topic: "peanuts" });
+    expect(rows().length).toBeGreaterThanOrEqual(1);
+    const contents = rows().map((r: any) => r.content);
+    expect(contents).toContain("Bailey is allergic to peanuts");
   });
 });

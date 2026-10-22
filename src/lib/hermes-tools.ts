@@ -33,7 +33,7 @@ import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, listActiveFacts, replaceMemoryContent, isMemoryRefusal, type MemoryCategory } from "@/lib/family-memory";
 import { foldAccents } from "@/lib/memory-search";
-import { subjectKey, findReplacementSubject, isLessInformative } from "@/lib/memory-subject";
+import { subjectKey, findReplacementSubject, isLessInformative, assertsSafety, sameTopic, disambiguateKey } from "@/lib/memory-subject";
 import { createTaskOperationId } from "@/lib/task-operation-payload";
 import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -146,7 +146,12 @@ function formatTime(iso?: string): string {
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
-const MEMORY_CATEGORIES: MemoryCategory[] = ["preference", "allergy", "routine", "location", "schedule", "personality", "restriction", "contact", "note"];
+const MEMORY_CATEGORIES: MemoryCategory[] = ["preference", "allergy", "routine", "location", "schedule", "personality", "restriction", "contact", "note", "rule"];
+
+/** The categories that carry a SAFETY condition. A fact in one of them may
+ *  only be replaced by another safety claim — a preference must never take
+ *  the place of a child's allergy. */
+const SAFETY_CATEGORIES: ReadonlySet<string> = new Set(["allergy", "restriction"]);
 
 /**
  * Do these two names mean the same person?
@@ -1857,7 +1862,15 @@ const TOOLS: Tool[] = [
       } catch {
         return JSON.stringify({ error: "memory store is unavailable right now — try again later" });
       }
-      const sameKind = active.filter((m) => m.category === category && (!person || !m.person || samePerson(m.person, person)));
+      // The candidate set is scoped EXACTLY: a fact about a person and a
+      // household rule are different facts, and a household rule must never
+      // be replaced by (or replace) a person's fact just because they share
+      // a word. A person-less row was a WILDCARD here once, and a household
+      // rule about peanuts took the place of a child's allergy.
+      const sameKind = active.filter((m) =>
+        m.category === category &&
+        (person ? samePerson(m.person, person) : !m.person),
+      );
       // The match is by TOPIC (the informative words), never by content
       // overlap: an overlap score counts the person's NAME, so "allergic to
       // peanuts" and "allergic to shellfish" would score as near-identical
@@ -1870,6 +1883,16 @@ const TOOLS: Tool[] = [
 
       if (replacement) {
         const stored = sameKind.find((m) => m.key === replacement);
+        // A SAFETY fact may only be replaced by another safety claim.
+        // "Bailey hates peanuts" is a preference, and a preference must never
+        // take the place of "Bailey is allergic to peanuts" — they share the
+        // word "peanuts" and nothing else that matters.
+        if (stored && SAFETY_CATEGORIES.has(stored.category) && !assertsSafety(content)) {
+          return JSON.stringify({
+            ok: false,
+            error: `${stored.category} facts can only be corrected by another ${stored.category} statement — this one does not read like one, so nothing was changed`,
+          });
+        }
         // A merge must never DEGRADE a fact: the bare word "peanuts" must not
         // replace "Bailey is allergic to peanuts". The richer stored wording
         // stays, and the answer says so instead of claiming the new text was
@@ -1908,11 +1931,19 @@ const TOOLS: Tool[] = [
         }
       }
 
+      // A key already claimed by a DIFFERENT fact is a collision: storing
+      // under it would silently replace that fact. The new fact gets a key
+      // of its own, so both survive.
+      const claimed = active.find((m) => m.key === key);
+      const storeKey = claimed && !sameTopic(claimed.content, content, { category, person })
+        ? disambiguateKey(key, content, { category, person })
+        : key;
+
       const memory = await storeMemory({
         userId: MEMORY_USER_ID,
         familyId: MEMORY_FAMILY_ID,
         category,
-        key,
+        key: storeKey,
         content,
         tags,
         confidence: 0.9,

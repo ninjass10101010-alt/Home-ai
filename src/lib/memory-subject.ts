@@ -26,9 +26,13 @@
  *   "Bailey loves sushi"                   → topic {sushi}
  *   "Bailey loves pizza"                   → topic {pizza}
  *
- * Two facts are the SAME subject when their topic sets are equal, or when one
- * is a subset of the other ("peanuts" inside "peanuts and tree nuts"). They
- * are never the same subject when the topics are disjoint.
+ * Two facts are the SAME subject when their topics SHARE an informative word
+ * — the object the fact is about. They are never the same subject when the
+ * topics are disjoint.
+ *
+ * The rule is deliberately biased: a subject that cannot be told apart is
+ * treated as a DIFFERENT subject and forks a row, because a row the family
+ * can see is a nuisance while a silently replaced allergy is a harm.
  *
  * The key is a MACHINE identity, so it is ASCII: the shared fold (the
  * retrieval engine's `foldAccents`) runs first, which is why "Begoña"
@@ -79,6 +83,14 @@ const RELATION_WORDS: ReadonlySet<string> = new Set([
   'come', 'comes', 'live', 'lives', 'work', 'works', 'serve', 'serves',
   'let', 'lets', 'please', 'always', 'never', 'when', 'whenever', 'before',
   'after', 'during', 'instead', 'also', 'mean', 'means', 'like', 'get',
+  'start', 'starts', 'started', 'end', 'ends', 'ended', 'ban', 'bans',
+  'banned', 'allow', 'allows', 'allowed', 'require', 'requires', 'required',
+  'change', 'changes', 'changed', 'move', 'moves', 'moved', 'arrive',
+  'arrives', 'begin', 'begins', 'finish', 'finishes', 'attend', 'attends',
+  'sit', 'sits', 'stand', 'stands', 'wear', 'wears', 'read', 'reads', 'write',
+  'hide', 'hides', 'hidden', 'steal', 'steals', 'lose', 'loses', 'find', 'finds',
+  'writes', 'speak', 'speaks', 'sign', 'signs', 'practice', 'practices',
+  'practise', 'practises', 'join', 'joins', 'leave', 'leaves', 'stay', 'stays',
 ]);
 
 /**
@@ -89,14 +101,20 @@ const RELATION_WORDS: ReadonlySet<string> = new Set([
  */
 const GENERIC_WORDS: ReadonlySet<string> = new Set([
   'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+  'mondays', 'tuesdays', 'wednesdays', 'thursdays', 'fridays', 'saturdays',
+  'sundays',
   'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
   'september', 'october', 'november', 'december',
+  'januaries', 'februaries', 'marches', 'aprils', 'junes', 'julys', 'augusts',
+  'septembers', 'octobers', 'novembers', 'decembers',
   'day', 'days', 'week', 'weeks', 'weekend', 'weekends', 'month', 'months',
   'year', 'years', 'morning', 'mornings', 'afternoon', 'afternoons', 'evening',
   'evenings', 'night', 'nights', 'today', 'tomorrow', 'yesterday', 'tonight',
   'time', 'times', 'hour', 'hours', 'minute', 'minutes', 'second', 'seconds',
-  'home', 'house', 'school', 'family', 'thing', 'things', 'stuff', 'one', 'two',
-  'everyone', 'everybody', 'someone', 'people', 'daytime', 'lunchtime',
+  'home', 'house', 'homes', 'houses', 'school', 'schools', 'family',
+  'families', 'thing', 'things', 'stuff', 'one', 'two', 'everyone',
+  'everybody', 'someone', 'people', 'daytime', 'lunchtime', 'dinnertime',
+  'bedtime',
 ]);
 
 /**
@@ -116,11 +134,16 @@ export function slugify(value: string, max = MAX_KEY): string {
 }
 
 /** The person's own words, folded — so the topic can drop them and the key
- *  does not say "Bailey" twice. */
+ *  does not say "Bailey" twice.
+ *
+ *  The FULL name is used, not the key's truncated form: a name longer than
+ *  the key's person budget would otherwise leave its tail in the topic
+ *  ("Fitzwilliam" in "Fitzwilliam The Third"), and the topic would then be
+ *  about a fragment of the name. */
 function personWords(person: string): Set<string> {
   return new Set(
-    slugify(person, MAX_PERSON)
-      .split('_')
+    foldAccents(String(person ?? '').toLowerCase())
+      .split(/[^a-z0-9]+/)
       .filter(Boolean),
   );
 }
@@ -164,21 +187,17 @@ export function topicTokens(
   const categoryWords = new Set(
     slugify(opts?.category ?? '', MAX_CATEGORY).split('_').filter(Boolean),
   );
-  const out: string[] = [];
-  for (const token of contentTokens(text)) {
-    if (person.has(token)) continue;
-    if (categoryWords.has(token)) continue;
-    if (RELATION_WORDS.has(token)) continue;
-    if (GENERIC_WORDS.has(token)) continue;
-    out.push(token);
-  }
-  return out;
-}
-
-/** The category's own words, so a category like "preference" does not become
- *  part of the topic. */
-function categoryWordSet(category: string): Set<string> {
-  return new Set(slugify(category, MAX_CATEGORY).split('_').filter(Boolean));
+  const meaningful = contentTokens(text).filter(
+    (token) => !person.has(token) && !categoryWords.has(token) && !GENERIC_WORDS.has(token),
+  );
+  const topic = meaningful.filter((token) => !RELATION_WORDS.has(token));
+  if (topic.length) return topic;
+  // Nothing survived the relation words — the sentence is built entirely out
+  // of them ("Emily's school starts at 8"). Those relations ARE the fact
+  // here, so the topic falls back to the meaningful words rather than
+  // becoming empty: an empty topic matches nothing, and a fact that can
+  // never be recognised is a fact that forks on every correction.
+  return meaningful;
 }
 
 /**
@@ -214,11 +233,11 @@ export function subjectKey(input: {
 }
 
 /**
- * |A ∩ B| / min(|A|, |B|) over content tokens. 1 = the same words, 0 =
- * unrelated. This is a RATIO, not an identity: two sentences about the same
- * person share that person's name, so a high ratio here says very little
- * about whether they are the same fact. It is kept for callers that want a
- * similarity score; deciding whether two facts are the same subject is
+ * |A ∩ B| / min(|A|, |B|) over content tokens: 1 when the shorter text's
+ * words are all in the longer one, 0 when they share nothing. It is a
+ * SIMILARITY RATIO, not an identity — two sentences about the same person
+ * share that person's name, so a high ratio says very little about whether
+ * they are the same fact. Deciding whether two facts are the same subject is
  * `sameTopic` below, which compares the topics themselves.
  */
 export function containment(a: string, b: string): number {
@@ -298,5 +317,55 @@ export function findReplacementSubject(
   return null;
 }
 
-/** The category's own words, exported for callers that build a topic list. */
-export { categoryWordSet };
+/**
+ * Does this sentence ASSERT a safety condition — an allergy, an intolerance,
+ * a restriction, a "must not"? A safety fact (allergy, restriction) may only
+ * be replaced by another safety claim: "Bailey hates peanuts" is a PREFERENCE
+ * and must never take the place of "Bailey is allergic to peanuts", however
+ * many words they share.
+ */
+export function assertsSafety(content: string): boolean {
+  const words = contentTokens(content);
+  for (const word of words) {
+    if (SAFETY_CLAIM_WORDS.has(word)) return true;
+  }
+  // The multi-word refusals ("must not", "can't have") are not single tokens.
+  const text = foldAccents(String(content ?? '').toLowerCase());
+  return /must not|cannot|can't|can not|no longer|not allowed|never/.test(text);
+}
+
+/** The words that mark a safety claim. */
+const SAFETY_CLAIM_WORDS: ReadonlySet<string> = new Set([
+  'allergic', 'allergy', 'allergies', 'intolerant', 'intolerance', 'avoid',
+  'avoids', 'restricted', 'restriction', 'restrictions', 'tolerates',
+  'sensitive', 'sensitivity', 'reaction', 'reactions', 'rash', 'swelling',
+  'anaphylaxis', 'celiac', 'diabetes', 'epilepsy', 'asthma', 'excluded',
+]);
+
+/**
+ * A key for a fact whose claimed key is ALREADY taken by a different fact.
+ *
+ * Two facts can claim the same subject key — most often when the caller
+ * named a topic that both facts share ("peanuts" for an allergy and for a
+ * pantry staple). The second one must not take the first one's place, so it
+ * gets a key of its own, carrying its own topic. A number is added if that
+ * is taken too.
+ */
+export function disambiguateKey(
+  claimedKey: string,
+  content: string,
+  opts: { category?: string; person?: string; max?: number },
+): string {
+  const max = opts.max ?? 50;
+  const topic = slugify(
+    topicTokens(content, { category: opts.category, person: opts.person }).join(' '),
+    12,
+  );
+  const base = `${claimedKey}_${topic}`.slice(0, max).replace(/_+$/g, '');
+  if (!topic) return `${base}_2`.slice(0, max);
+  for (let attempt = 2; attempt <= 10; attempt += 1) {
+    const candidate = `${base}_${attempt}`.slice(0, max);
+    if (candidate !== claimedKey) return candidate;
+  }
+  return `${base}_10`;
+}

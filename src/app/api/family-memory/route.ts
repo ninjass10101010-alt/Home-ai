@@ -9,14 +9,17 @@ import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from '@/lib/memory-ids';
 import { queryMemories, getFamilyMemories, getMemoryStats, isMemoryRefusal } from '@/lib/family-memory';
 import type { MemoryCategory, MemoryQuery } from '@/lib/family-memory';
 import { foldAccents } from '@/lib/memory-search';
+import { slugify, subjectKey } from '@/lib/memory-subject';
 
-// Same [^a-z0-9]+ → _ rule the storeMemory callers use (hermes-tools
-// subjectKey) — a client-supplied key is slugged server-side so every writer
-// lands in one namespace grammar. The fold runs FIRST: the key is a machine
-// identity and must be ASCII, and without the fold "Begoña" would be cut in
-// half ("bego_a") instead of being the name the family knows.
+// The ONE key grammar. The shared `slugify` lowercases AND folds before
+// slugging — the fold first matters, because the key is a machine identity
+// and must be ASCII: without it "Begoña" was cut in half ("bego_a") instead
+// of being the name the family knows. `subjectKey` builds the key from the
+// category + topic (+ person), so the console and the agent's tool land on
+// the SAME key for the same fact — the console used to slug the wording on
+// its own, which made one fact two rows.
 function slugKey(raw: string): string {
-  return foldAccents(raw).toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 50);
+  return slugify(raw, 50);
 }
 
 export async function GET(request: NextRequest) {
@@ -110,10 +113,10 @@ export async function POST(request: NextRequest) {
       userId: userId || MEMORY_USER_ID,
       familyId: familyId || MEMORY_FAMILY_ID,
       category: category || 'note',
-      // F6.2 — slug client-supplied keys server-side before filtering/storing.
-      // A subject key is already a slug; slugKey is idempotent on it and keeps
-      // one namespace grammar for every writer.
-      key: slugKey(key || content),
+      // The subject key: the client's when it named one, otherwise the one
+      // the shared builder derives from the category, the person and the
+      // topic.
+      key: key ? slugKey(key) : subjectKey({ category: category || 'note', person, content }),
       content,
       tags,
       confidence,

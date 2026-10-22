@@ -472,3 +472,68 @@ describe("a store that is down", () => {
     await expect(getMemoryStats("demo-family")).rejects.toThrow();
   });
 });
+
+/**
+ * The third review's findings on the store itself: the key must be stored
+ * and looked up the SAME way (SQLite's `=` is case-sensitive, so "UPPER_KEY"
+ * and "upper_key" would be two rows under a UNIQUE index that cannot see the
+ * difference), and the console's edit must be a CORRECTION — with the old
+ * wording kept and the version moved on — not a silent overwrite.
+ */
+describe("the subject key is written and read the same way (F2/N5)", () => {
+  it("stores the key lowercased", async () => {
+    const stored = await storeMemory({
+      userId: "consuela",
+      familyId: "demo-family",
+      category: "note",
+      key: "UPPER_KEY",
+      content: "x",
+    });
+    expect(stored?.key).toBe("upper_key");
+  });
+
+  it("finds a row by the key whatever case it is asked in", async () => {
+    await storeMemory({ userId: "consuela", familyId: "demo-family", category: "note", key: "Meal_Emoji", content: "x" });
+    const hits = await queryMemories({ userId: "consuela", familyId: "demo-family", key: "meal_emoji" });
+    expect(hits).toHaveLength(1);
+  });
+
+  it("cannot become two rows under a case difference", async () => {
+    await storeMemory({ userId: "consuela", familyId: "demo-family", category: "note", key: "Same_Key", content: "one" });
+    await storeMemory({ userId: "consuela", familyId: "demo-family", category: "note", key: "same_key", content: "two" });
+    const hits = await queryMemories({ userId: "consuela", familyId: "demo-family", key: "same_key" });
+    expect(hits).toHaveLength(1);
+    expect(hits[0].content).toBe("two");
+  });
+});
+
+describe("the console's edit is a correction, not a silent overwrite (F10/N14)", () => {
+  it("keeps the old wording in the history and moves the version on", async () => {
+    const stored = await storeMemory({
+      userId: "consuela",
+      familyId: "demo-family",
+      category: "preference",
+      key: "meal_emoji",
+      content: "include an emoji",
+    });
+    const updated = await updateMemory(stored!.id, { content: "include a relevant emoji" });
+    expect(updated?.content).toBe("include a relevant emoji");
+    expect(updated?.version).toBe(2);
+    expect(updated?.history).toHaveLength(1);
+    expect(updated?.history[0].content).toBe("include an emoji");
+  });
+
+  it("refuses to blank a fact", async () => {
+    const stored = await storeMemory({
+      userId: "consuela",
+      familyId: "demo-family",
+      category: "preference",
+      key: "meal_emoji",
+      content: "include an emoji",
+    });
+    const blanked = await updateMemory(stored!.id, { content: "   " });
+    expect(blanked).toBeNull();
+    const still = await queryMemories({ userId: "consuela", familyId: "demo-family", key: "meal_emoji" });
+    expect(still[0].content).toBe("include an emoji");
+  });
+});
