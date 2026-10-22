@@ -138,7 +138,7 @@ describe("recall_memories", () => {
     const out = await getTool("recall_memories")!.handler({ person: "Bailey" });
     const body = JSON.parse(out);
     expect(body.memories).toHaveLength(2);
-    expect(mocks.queryMemories).toHaveBeenCalledWith(expect.objectContaining({ familyId: "demo-family", search: "Bailey", limit: 10 }));
+    expect(mocks.queryMemories).toHaveBeenCalledWith(expect.objectContaining({ familyId: "demo-family", person: "Bailey", limit: 10 }));
     expect(mocks.incrementMemoryUsage).toHaveBeenCalledTimes(2);
   });
 

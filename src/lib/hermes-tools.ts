@@ -34,6 +34,8 @@ import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, listActiveFacts, replaceMemoryContent, isMemoryRefusal, type MemoryCategory } from "@/lib/family-memory";
 import { foldAccents } from "@/lib/memory-search";
 import { subjectKey, findReplacementSubject, assertsSafety, sameTopic, disambiguateKey, personMatches, checkMerge, SAFETY_CATEGORIES } from "@/lib/memory-subject";
+import { writePlaybook, patchPlaybook, getPlaybook, listActivePlaybooks, incrementPlaybookUsage } from "@/lib/memory-playbooks";
+import { searchConversations } from "./memory-sessions";
 import { createTaskOperationId } from "@/lib/task-operation-payload";
 import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -2145,6 +2147,26 @@ const TOOLS: Tool[] = [
       if (!playbook) return JSON.stringify({ error: `no playbook named ${slug}` });
       await incrementPlaybookUsage(slug);
       return JSON.stringify({ slug: playbook.slug, title: playbook.title, body: playbook.body, domain: playbook.domain, trigger: playbook.trigger });
+    },
+  },
+  {
+    definition: {
+      name: "search_conversations",
+      description:
+        "Search PAST conversations for something the family discussed (for example 'what did we decide about the pool party?'). Use short keywords. Today is not in here — this is the history.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "A few keywords" } },
+        required: ["query"],
+      },
+    },
+    handler: async (args) => {
+      const query = String(args.query ?? "").trim();
+      if (!query) return JSON.stringify({ error: "query is required" });
+      const turns = await searchConversations(query, 8);
+      return JSON.stringify({
+        turns: turns.map((t) => ({ date: String(t.createdAt).slice(0, 10), role: t.role, content: t.content.slice(0, 400) })),
+      });
     },
   },
   {
