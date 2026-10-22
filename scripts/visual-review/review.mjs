@@ -21,6 +21,7 @@ function parseArgs(argv) {
     else if (key === "--tod") { args.tod = value; i += 1; }
     else if (key === "--out") { args.out = value; i += 1; }
     else if (key === "--settle") { args.settle = Number(value); i += 1; }
+    else if (key === "--click") { args.click = value; i += 1; }
     else if (key === "--help") { args.help = true; }
   }
   return args;
@@ -64,7 +65,7 @@ for (const role of roles) {
   }
 }
 
-const { reports } = await runReviews(targets, { outDir: args.out, settleMs: args.settle });
+const { reports } = await runReviews(targets, { outDir: args.out, settleMs: args.settle, clickSelector: args.click });
 
 let errorCount = 0;
 for (const report of reports) {

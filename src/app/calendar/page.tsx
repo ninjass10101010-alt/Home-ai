@@ -1414,7 +1414,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                           {(ev.googleSyncStatus === "pending" || ev.googleSyncStatus === "failed") && (
                             <button
                               type="button"
-                              className={`ev-sync-chip ${ev.googleSyncStatus === "failed" ? "is-failed" : "is-pending"}`}
+                              className={`ev-sync-chip hit-44 ${ev.googleSyncStatus === "failed" ? "is-failed" : "is-pending"}`}
                               onClick={() => void retryGoogle(ev)}
                             >
                               {ev.googleSyncStatus === "failed" ? "Google failed · Retry" : "Google pending · Retry"}
@@ -1424,6 +1424,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                             <>
                               <button
                                 type="button"
+                                className="hit-44"
                                 aria-label={`Edit ${ev.title}`}
                                 onClick={() => startEditEvent(ev)}
                               >
@@ -1431,6 +1432,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                               </button>
                               <button
                                 type="button"
+                                className="hit-44"
                                 aria-label={`Delete ${ev.title}`}
                                 onClick={() => void deleteEvent(ev)}
                               >
@@ -1525,16 +1527,18 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                       ))}
                     </select>
                   </div>
-                  <label className="ev-allday">
-                    <input
-                      type="checkbox"
-                      checked={eventForm.allDay}
-                      onChange={(e) =>
-                        updateEventForm(e.currentTarget.checked ? { allDay: true, startTime: "", endTime: "" } : { allDay: false, startTime: "09:00", endTime: "" })
-                      }
-                    />
-                    All day
-                  </label>
+                   <label className="ev-allday">
+                     <input
+                       type="checkbox"
+                       className="hit-44"
+                       aria-label="All day"
+                       checked={eventForm.allDay}
+                       onChange={(e) =>
+                         updateEventForm(e.currentTarget.checked ? { allDay: true, startTime: "", endTime: "" } : { allDay: false, startTime: "09:00", endTime: "" })
+                       }
+                     />
+                     All day
+                   </label>
                   {!eventForm.allDay && (
                     <>
                       <div className="ev-field">
@@ -1575,14 +1579,16 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                       maxLength={2000}
                     />
                   </div>
-                  <label className="ev-notify">
-                    <input
-                      type="checkbox"
-                      checked={eventForm.notify}
-                      onChange={(e) => updateEventForm({ notify: e.currentTarget.checked })}
-                    />
-                    Notify the family
-                  </label>
+                   <label className="ev-notify">
+                     <input
+                       type="checkbox"
+                       className="hit-44"
+                       aria-label="Notify the family"
+                       checked={eventForm.notify}
+                       onChange={(e) => updateEventForm({ notify: e.currentTarget.checked })}
+                     />
+                     Notify the family
+                   </label>
                   {formError && <p className="calendar-form-error">{formError}</p>}
                   <div className="calendar-color-swatches">
                     {(["green", "violet", "amber", "cyan", "rose"] as const).map((c) => (
@@ -1590,7 +1596,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                         key={c}
                         type="button"
                         onClick={() => updateEventForm({ color: c })}
-                        className={`calendar-color-swatch ${eventForm.color === c ? "is-selected" : ""}`}
+                        className={`calendar-color-swatch hit-44 ${eventForm.color === c ? "is-selected" : ""}`}
                         style={{ "--swatch-color": eventColorValues[c] } as CSSProperties}
                         aria-label={`Color ${c}`}
                       />
@@ -1600,13 +1606,13 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                     <button
                       type="button"
                       data-testid="calendar-save-event"
-                      className="calendar-primary-btn"
+                      className="calendar-primary-btn hit-44"
                       onClick={() => void saveEvent()}
                       disabled={savingEvent}
                     >
                       {savingEvent ? "Saving…" : "Save event"}
                     </button>
-                    <button onClick={cancelEventEdit} className="calendar-secondary-btn">Cancel</button>
+                    <button onClick={cancelEventEdit} className="calendar-secondary-btn hit-44">Cancel</button>
                     {!isAddingEvent && editingEventId !== null && (
                       <button
                         type="button"
@@ -1755,6 +1761,8 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                     <label className="calendar-input col-span-2 flex min-h-11 items-center gap-3">
                       <input
                         type="checkbox"
+                        className="hit-44"
+                        aria-label="Notify devices when this starts"
                         checked={schedForm.notify === true}
                         onChange={(e) => setSchedForm({ ...schedForm, notify: e.target.checked })}
                       />
@@ -1767,17 +1775,17 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                         key={c}
                         type="button"
                         onClick={() => setSchedForm({ ...schedForm, color: c })}
-                        className={`calendar-color-swatch ${schedForm.color === c ? "is-selected" : ""}`}
+                        className={`calendar-color-swatch hit-44 ${schedForm.color === c ? "is-selected" : ""}`}
                         style={{ "--swatch-color": scheduleColorValues[c] } as CSSProperties}
                         aria-label={`Color ${c}`}
                       />
                     ))}
                   </div>
                   <div className="calendar-form-actions">
-                    <button onClick={saveSched} disabled={!schedForm.title.trim()} className="calendar-primary-btn">
+                    <button onClick={saveSched} disabled={!schedForm.title.trim()} className="calendar-primary-btn hit-44">
                       {isAddingSched ? "Add" : "Save"}
                     </button>
-                    <button onClick={cancelSchedEdit} className="calendar-secondary-btn">Cancel</button>
+                    <button onClick={cancelSchedEdit} className="calendar-secondary-btn hit-44">Cancel</button>
                     {!isAddingSched && (
                       <button onClick={() => deleteSched(schedForm.id)} className="calendar-delete-btn" aria-label="Delete routine">{`\uD83D\uDDD1\uFE0F`}</button>
                     )}

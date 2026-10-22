@@ -48,6 +48,22 @@ export const SANITIZED_MEMBERS = Object.freeze([
   { id: 2, name: "Aurora", role: "child", emoji: "🧒", age: 7, created: "Mar 2024", avatarSize: "md", glow: false },
 ]);
 
+function visualReviewTodayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const CALENDAR_TODAY = visualReviewTodayISO();
+const CALENDAR_FAMILY_EVENTS = [
+  { id: "e_timed", title: "Dentist", date: CALENDAR_TODAY, time: "09:00", endTime: "10:00", allDay: false, member: "Rebecca (Mom)", source: "family", googleEventId: "g_mirror", googleSyncStatus: "synced" },
+  { id: "e_all", title: "No school", date: CALENDAR_TODAY, time: "All day", allDay: true, member: "All", source: "family", googleSyncStatus: "synced" },
+  { id: "e_pending", title: "Soccer pickup", date: CALENDAR_TODAY, time: "15:30", endTime: "16:15", allDay: false, member: "Aurora", source: "family", googleSyncStatus: "pending" },
+  { id: "e_failed", title: "Grandma visit", date: CALENDAR_TODAY, time: "18:00", endTime: "19:00", allDay: false, member: "All", source: "family", googleSyncStatus: "failed" },
+];
+const CALENDAR_GOOGLE_EVENTS = [
+  { google_id: "g_only", calendar_id: "primary", summary: "Library storytime", start_iso: `${CALENDAR_TODAY}T11:00:00`, end_iso: `${CALENDAR_TODAY}T12:00:00`, all_day: false },
+];
+
 export function themeConfig(mode = "dark", contrastBoost = false, accentColor = "violet") {
   const accents = {
     violet: { selected: "#7c6ff7", glow: "rgba(124,111,247,0.28)", button: "#7c6ff7", border: "rgba(124,111,247,0.35)" },
@@ -191,6 +207,12 @@ export async function installSanitizedState(context, opts) {
     const url = new URL(request.url());
     const pathname = url.pathname;
 
+    const methodKey = `${request.method()} ${pathname}`;
+    if (Object.prototype.hasOwnProperty.call(overrides, methodKey)) {
+      const override = overrides[methodKey];
+      if (override === "passthrough") return route.continue();
+      return fulfillJson(route, override.body ?? override, override.status ?? 200);
+    }
     if (Object.prototype.hasOwnProperty.call(overrides, pathname)) {
       const override = overrides[pathname];
       if (override === "passthrough") return route.continue();
@@ -230,6 +252,47 @@ export async function installSanitizedState(context, opts) {
         latest_remote: null,
         update_available: false,
       });
+    }
+
+    if (pathname === "/api/db/events") {
+      return fulfillJson(route, { ok: true, items: CALENDAR_FAMILY_EVENTS });
+    }
+    if (pathname === "/api/google-calendar") {
+      return fulfillJson(route, {
+        ok: true,
+        connected: true,
+        source: "google",
+        provider: "composio",
+        stale: false,
+        events: CALENDAR_GOOGLE_EVENTS,
+        calendar_colors: {},
+      });
+    }
+    if (pathname === "/api/calendar/events" && request.method() === "POST") {
+      return fulfillJson(route, {
+        ok: true,
+        event: { id: "e_created", title: "New event", date: CALENDAR_TODAY, time: "09:00", endTime: "10:00", allDay: false, member: "All", source: "family", googleSyncStatus: "pending" },
+        google: { status: "pending", error: "Google Calendar isn't connected." },
+      }, 201);
+    }
+    if (/^\/api\/calendar\/events\/[^/]+\/retry-google$/.test(pathname) && request.method() === "POST") {
+      return fulfillJson(route, {
+        ok: true,
+        event: { id: "e_pending", title: "Soccer pickup", date: CALENDAR_TODAY, time: "15:30", endTime: "16:15", allDay: false, member: "Aurora", source: "family", googleSyncStatus: "synced" },
+        google: { status: "synced" },
+      });
+    }
+    if (/^\/api\/calendar\/events\/[^/]+$/.test(pathname)) {
+      if (request.method() === "PATCH") {
+        return fulfillJson(route, {
+          ok: true,
+          event: { id: "e_timed", title: "Dentist", date: CALENDAR_TODAY, time: "10:00", endTime: "11:00", allDay: false, member: "Rebecca (Mom)", source: "family", googleSyncStatus: "pending" },
+          google: { status: "pending" },
+        });
+      }
+      if (request.method() === "DELETE") {
+        return fulfillJson(route, { ok: true, deleted: true, google: { status: "synced" } });
+      }
     }
 
     // Record anything not explicitly handled: an unstubbed endpoint usually
@@ -474,7 +537,7 @@ export async function withBrowser(fn) {
 /**
  * One-shot review of a route. Returns a structured report + writes screenshots.
  */
-export async function reviewRoute(browser, { baseUrl, route, role = "parent", viewport = "phone", outDir, themeMode, wallMode = "off", timeOfDay, overrides = {}, settleMs = 1200, fullPage = true }) {
+export async function reviewRoute(browser, { baseUrl, route, role = "parent", viewport = "phone", outDir, themeMode, wallMode = "off", timeOfDay, overrides = {}, settleMs = 1200, fullPage = true, clickSelector }) {
   const vp = typeof viewport === "string" ? VIEWPORTS[viewport] : viewport;
   if (!vp) throw new Error(`Unknown viewport: ${viewport}`);
   mkdirSync(outDir, { recursive: true });
@@ -509,6 +572,15 @@ export async function reviewRoute(browser, { baseUrl, route, role = "parent", vi
     await sleep(settleMs);
   } catch (error) {
     navError = String(error).slice(0, 300);
+  }
+
+  if (!navError && clickSelector) {
+    try {
+      await page.click(clickSelector, { timeout: 5_000 });
+      await sleep(500);
+    } catch (error) {
+      navError = `click failed: ${String(error).slice(0, 240)}`;
+    }
   }
 
   const slug = route === "/" ? "home" : route.replace(/^\//, "").replace(/[/?=&]/g, "-");
