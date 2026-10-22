@@ -6,14 +6,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authorizeAdminRequest } from '@/lib/admin-auth';
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from '@/lib/memory-ids';
-import { queryMemories, getFamilyMemories, getMemoryStats } from '@/lib/family-memory';
+import { queryMemories, getFamilyMemories, getMemoryStats, isMemoryRefusal } from '@/lib/family-memory';
 import type { MemoryCategory, MemoryQuery } from '@/lib/family-memory';
+import { foldAccents } from '@/lib/memory-search';
 
 // Same [^a-z0-9]+ → _ rule the storeMemory callers use (hermes-tools
-// memoryKey) — a client-supplied key is slugged server-side so every writer
-// lands in one namespace grammar.
+// subjectKey) — a client-supplied key is slugged server-side so every writer
+// lands in one namespace grammar. The fold runs FIRST: the key is a machine
+// identity and must be ASCII, and without the fold "Begoña" would be cut in
+// half ("bego_a") instead of being the name the family knows.
 function slugKey(raw: string): string {
-  return raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 50);
+  return foldAccents(raw).toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 50);
 }
 
 export async function GET(request: NextRequest) {
@@ -64,10 +67,14 @@ export async function GET(request: NextRequest) {
       count: memories.length,
     });
   } catch (error: any) {
+    // The house convention for an unreachable store is a 503 with a
+    // MACHINE code — not a 500 with the raw PocketBase message, which says
+    // "we have a bug" when the truth is "the bank is down" and hands the
+    // client the driver's error text.
     console.error('Failed to query memories:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to query memories' },
-      { status: 500 }
+      { ok: false, error: 'memory_store_unreachable' },
+      { status: 503 }
     );
   }
 }
@@ -116,9 +123,11 @@ export async function POST(request: NextRequest) {
     });
 
     if (!memory) {
+      // The store answers null when the write failed — the family is told
+      // the bank is unreachable, NOT that the fact was saved.
       return NextResponse.json(
-        { error: 'Failed to store memory' },
-        { status: 500 }
+        { ok: false, error: 'memory_store_unreachable' },
+        { status: 503 }
       );
     }
 
@@ -128,10 +137,14 @@ export async function POST(request: NextRequest) {
       message: 'Memory stored successfully',
     }, { status: 201 });
   } catch (error: any) {
+    // A REFUSAL carries its own code: "the schema is not live yet" is a
+    // different answer from "the bank is down", and the family must be told
+    // that the correction was NOT saved.
+    const code = isMemoryRefusal(error) ? error.code : 'memory_store_unreachable';
     console.error('Failed to store memory:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to store memory' },
-      { status: 500 }
+      { ok: false, error: code },
+      { status: 503 }
     );
   }
 }

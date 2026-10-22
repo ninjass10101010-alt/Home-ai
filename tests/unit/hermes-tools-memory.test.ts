@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   queryMemories: vi.fn(async (): Promise<any[]> => []),
   deleteMemory: vi.fn(async () => true),
   incrementMemoryUsage: vi.fn(async () => undefined),
+  listActiveFacts: vi.fn(async (): Promise<any[]> => []),
+  replaceMemoryContent: vi.fn(async (): Promise<any> => null),
 }));
 
 vi.mock("@/lib/family-memory", () => ({
@@ -12,6 +14,8 @@ vi.mock("@/lib/family-memory", () => ({
   queryMemories: mocks.queryMemories,
   deleteMemory: mocks.deleteMemory,
   incrementMemoryUsage: mocks.incrementMemoryUsage,
+  listActiveFacts: mocks.listActiveFacts,
+  replaceMemoryContent: mocks.replaceMemoryContent,
 }));
 
 // hermes-tools pulls in the db + HA clients — stub the heavy seams.
@@ -29,6 +33,8 @@ beforeEach(() => {
   mocks.queryMemories.mockResolvedValue([]);
   mocks.deleteMemory.mockResolvedValue(true);
   mocks.incrementMemoryUsage.mockResolvedValue(undefined);
+  mocks.listActiveFacts.mockResolvedValue([]);
+  mocks.replaceMemoryContent.mockResolvedValue(null);
 });
 
 describe("memory tool gating", () => {
@@ -46,14 +52,14 @@ describe("memory tool gating", () => {
 
 describe("remember_fact", () => {
   it("stores against a subject key, not a slug of the content", async () => {
-    mocks.storeMemory.mockResolvedValue({ id: "m1", key: "bailey_allergic_peanuts", content: "Bailey is allergic to peanuts" });
+    mocks.storeMemory.mockResolvedValue({ id: "m1", key: "allergy_is_allergic_to_peanu_bailey", content: "Bailey is allergic to peanuts" });
     const tool = getTool("remember_fact")!;
     const out = await tool.handler({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
     expect(mocks.storeMemory).toHaveBeenCalledWith({
       userId: "consuela",
       familyId: "demo-family",
       category: "allergy",
-      key: "bailey_allergic_peanuts",
+      key: "allergy_is_allergic_to_peanu_bailey",
       content: "Bailey is allergic to peanuts",
       tags: ["Bailey"],
       confidence: 0.9,
@@ -62,6 +68,38 @@ describe("remember_fact", () => {
       source: "agent",
     });
     expect(JSON.parse(out).ok).toBe(true);
+  });
+
+  it("a named topic becomes the subject key", async () => {
+    mocks.storeMemory.mockResolvedValue({ id: "m1", key: "allergy_peanuts_bailey", content: "Bailey is allergic to peanuts" });
+    await getTool("remember_fact")!.handler({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey", topic: "peanuts" });
+    expect(mocks.storeMemory.mock.calls[0][0].key).toBe("allergy_peanuts_bailey");
+  });
+
+  it("a rewording of a stored fact REPLACES that subject instead of forking a row", async () => {
+    mocks.listActiveFacts.mockResolvedValue([
+      { key: "allergy_peanuts_bailey", category: "allergy", person: "Bailey", content: "Bailey is allergic to peanuts" },
+    ]);
+    mocks.replaceMemoryContent.mockResolvedValue({ id: "m1", key: "allergy_peanuts_bailey", content: "Bailey cannot eat peanuts" });
+    const out = JSON.parse(await getTool("remember_fact")!.handler({
+      content: "Bailey cannot eat peanuts", category: "allergy", person: "Bailey",
+    }));
+    expect(mocks.storeMemory).not.toHaveBeenCalled();
+    expect(mocks.replaceMemoryContent).toHaveBeenCalledWith(expect.objectContaining({
+      key: "allergy_peanuts_bailey",
+      content: "Bailey cannot eat peanuts",
+    }));
+    expect(out.replaced).toBe(true);
+  });
+
+  it("a DIFFERENT fact is not treated as a rewording", async () => {
+    mocks.listActiveFacts.mockResolvedValue([
+      { key: "allergy_peanuts_bailey", category: "allergy", person: "Bailey", content: "Bailey is allergic to peanuts" },
+    ]);
+    mocks.storeMemory.mockResolvedValue({ id: "m2", key: "preference_sushi_bailey", content: "Bailey loves sushi" });
+    await getTool("remember_fact")!.handler({ content: "Bailey loves sushi", category: "preference", person: "Bailey" });
+    expect(mocks.replaceMemoryContent).not.toHaveBeenCalled();
+    expect(mocks.storeMemory).toHaveBeenCalled();
   });
 
   it("rejects empty content", async () => {
@@ -77,6 +115,14 @@ describe("remember_fact", () => {
       expect.objectContaining({ category: "note", content: "Practice moved to Tuesdays", tags: [] })
     );
     expect(JSON.parse(out).error).toBeTruthy();
+  });
+
+  it("reports the store being down instead of pretending it saved the fact", async () => {
+    mocks.listActiveFacts.mockRejectedValue(new Error("PB down"));
+    const out = JSON.parse(await getTool("remember_fact")!.handler({ content: "Bailey loves sushi", category: "preference", person: "Bailey" }));
+    expect(out.ok).toBeUndefined();
+    expect(out.error).toBeTruthy();
+    expect(mocks.storeMemory).not.toHaveBeenCalled();
   });
 });
 

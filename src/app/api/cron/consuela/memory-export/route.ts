@@ -6,30 +6,42 @@ import { MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 export const dynamic = "force-dynamic";
 
 /** One-way memory export for the Mac Obsidian agent (scripts/obsidian-agent).
- *  Bearer-gated by CRON_SECRET like every cron route — fail-closed. */
+ *  Bearer-gated by CRON_SECRET like every cron route — fail-closed.
+ *
+ *  A store outage must NOT look like an empty bank: the Mac agent would
+ *  write "the family has no memories" into its own notes. The route fails
+ *  with the house 503 + machine code instead, so the caller can retry. */
 export async function POST(request: NextRequest) {
   if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  // F6.3 — family-scoped (not a whole-collection sweep).
-  const rows = await queryMemories({ familyId: MEMORY_FAMILY_ID, limit: 1000 });
-  const memories = rows.map((m) => {
-    let tags: string[] = [];
-    try {
-      const parsed = typeof m.tags === "string" ? JSON.parse(m.tags) : m.tags;
-      if (Array.isArray(parsed)) tags = parsed.map(String);
-    } catch { /* keep [] */ }
-    return {
-      id: m.id,
-      category: m.category,
-      key: m.key,
-      content: m.content,
-      tags,
-      createdAt: m.createdAt,
-      updatedAt: m.updatedAt,
-      usageCount: m.usageCount ?? 0,
-      lastUsed: m.lastUsed ?? null,
-    };
-  });
-  return NextResponse.json({ exportedAt: new Date().toISOString(), count: memories.length, memories });
+  try {
+    // F6.3 — family-scoped (not a whole-collection sweep).
+    const rows = await queryMemories({ familyId: MEMORY_FAMILY_ID, limit: 1000 });
+    const memories = rows.map((m) => {
+      let tags: string[] = [];
+      try {
+        const parsed = typeof m.tags === "string" ? JSON.parse(m.tags) : m.tags;
+        if (Array.isArray(parsed)) tags = parsed.map(String);
+      } catch { /* keep [] */ }
+      return {
+        id: m.id,
+        category: m.category,
+        key: m.key,
+        content: m.content,
+        tags,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
+        usageCount: m.usageCount ?? 0,
+        lastUsed: m.lastUsed ?? null,
+      };
+    });
+    return NextResponse.json({ exportedAt: new Date().toISOString(), count: memories.length, memories });
+  } catch (error) {
+    console.error("Memory export failed:", error);
+    return NextResponse.json(
+      { ok: false, error: "memory_store_unreachable" },
+      { status: 503 },
+    );
+  }
 }

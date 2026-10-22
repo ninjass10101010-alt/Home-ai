@@ -9,16 +9,24 @@
  * row for the same subject (the live bank held four rows for one emoji
  * rule).
  *
- * FOLD ON WRITE: `content`, `tags`, `person` and `key` are stored folded
- * (NFKD, combining marks stripped, plus the letters Unicode cannot
- * decompose), because a PocketBase `~` is a byte-wise LIKE — it folds ASCII
- * case and NOTHING else — so a row stored with its accent can never be
- * reached by the folded form of the name that fetches it. The fold is the
- * retrieval engine's, shared: a second implementation would drift.
+ * THE FAMILY'S TEXT IS STORED AS IT WAS WRITTEN. Only the subject KEY is
+ * folded (NFKD, combining marks stripped, plus the letters Unicode cannot
+ * decompose), because a key is a MACHINE identity and a PocketBase `~` is a
+ * byte-wise LIKE: it folds ASCII case and nothing else. Reachability does
+ * not depend on the fold — Task 1's `tokenize` emits the folded AND the raw
+ * form of every accented word, and `buildMemoryFilter` carries both, so a
+ * row stored WITH its accent is reached either way (proved against a real
+ * PocketBase: the filter for "Begoña" and the filter for "begona" both find
+ * the row "Begoña loves tacos"). Folding the CONTENT, the tags or the
+ * person would rewrite the family's own words — "Begoña" → "Begona" — in
+ * the console, in the prompt the model reads, in the agent's answer and in
+ * the export, irreversibly (the history held the folded text too, so the
+ * raw spelling was stored NOWHERE).
  */
 
 import { getAuthedPB } from './pb-auth';
 import { buildMemoryFilter, foldAccents, parseTagList, scoreMemory, tokenize } from './memory-search';
+import { withKeyedLock } from './keyed-lock';
 
 export type MemoryCategory =
   | 'preference' // Food preferences, activity preferences
@@ -96,12 +104,60 @@ export interface StoreMemoryInput {
   source?: string;
 }
 
+/**
+ * A refusal the caller MUST be told about, as opposed to an outage.
+ *
+ * `storeMemory` answers `null` when a write fails (the established failure
+ * signal: "try again later"), but a refusal is a different thing — the
+ * correction was NOT saved, and why matters. The route turns the code into
+ * its HTTP answer, so the family is never told "saved" when it was not.
+ */
+export class MemoryStoreError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'MemoryStoreError';
+    this.code = code;
+  }
+}
+
+/**
+ * Is this error the store REFUSING a write, as opposed to an outage?
+ *
+ * The callers (the route, the agent tool) answer a refusal and an outage
+ * differently: "the bank cannot save that yet — nothing was changed" is not
+ * "the bank is down, try again later". The check is by NAME so a caller does
+ * not have to import the class to recognise one — and so a store that is
+ * mocked (or bundled) still answers the same way.
+ */
+export function isMemoryRefusal(error: unknown): boolean {
+  const err = error as any;
+  return err?.name === 'MemoryStoreError' && typeof err?.code === 'string';
+}
+
 /** How many superseded wordings a subject keeps. The history is an audit
  *  trail, not an archive: an unbounded one would grow the row until
  *  PocketBase's row-size ceiling rejected the write. */
 const MAX_HISTORY = 10;
 
 const COLLECTION = 'consuela_family_memories';
+
+/** The most rows ONE read may pull. The chat turn reads the bank on every
+ *  parent message, so an unbounded read is a full-table scan per turn. */
+const MAX_ROWS = 1000;
+/** How many rows one PocketBase page may carry. */
+const FETCH_PAGE = 200;
+/** The candidates a search scores before the limit is applied — the ranking
+ *  needs more than the answer, or the best match can sit outside the limit. */
+const SEARCH_CANDIDATES = 200;
+
+/** The columns a read pulls. A projection bounds the bytes one read costs. */
+const READ_FIELDS = [
+  'id', 'userId', 'familyId', 'category', 'key', 'content', 'tags', 'confidence',
+  'usageCount', 'lastUsed', 'createdAt', 'updatedAt', 'person', 'scope', 'status',
+  'version', 'history', 'source',
+].join(',');
 
 /** A value interpolated into an EQUALITY filter. A quote or a backslash
  *  breaks the filter, and PocketBase REJECTS a broken filter — a lookup that
@@ -115,10 +171,38 @@ function equalityValue(value: string): string {
     .trim();
 }
 
-/** Fold for storage: the same fold the retrieval engine applies when it
- *  compares, so a byte-wise LIKE can reach the row. */
-function foldForStorage(value: string): string {
+/** Fold for the KEY — a machine identity, not the family's words. */
+function foldKey(value: string): string {
   return foldAccents(String(value ?? ''));
+}
+
+/** Compare two names the way the family means them: case- and
+ *  accent-insensitively. The STORED text keeps its accent; the comparison
+ *  folds both sides. */
+function foldName(value: string): string {
+  return foldAccents(String(value ?? '').trim().toLowerCase());
+}
+
+/** Is this row archived? The comparison is case- and space-insensitive:
+ *  "Archived" must not slip past a filter that only knows "archived". */
+function isArchived(row: { status?: string }): boolean {
+  return String(row.status ?? '').trim().toLowerCase() === 'archived';
+}
+
+/** A number PocketBase hands back, or a fallback. An unset field reads back
+ *  as 0 (a number) or "" (a text) — never as null — so `??` does not catch
+ *  it and the fallback has to be an explicit "empty" test. */
+function numberOr(raw: unknown, fallback: number): number {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** The row's version. A row written before the `version` column existed
+ *  reads back as 0 — and 0 is not a version: the first version is 1. */
+function versionOf(row: any): number {
+  const n = Number(row?.version);
+  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 function parseHistory(raw: unknown): MemoryHistoryEntry[] {
@@ -134,20 +218,79 @@ function parseHistory(raw: unknown): MemoryHistoryEntry[] {
 
 /** A PocketBase row is not a FamilyMemory: `tags` and `history` arrive as
  *  JSON strings, and the newer fields are absent on rows written before they
- *  existed. Every reader goes through here, so no caller has to know that. */
+ *  existed. Every reader goes through here, so no caller has to know that.
+ *  An EMPTY field means "never set" — PocketBase returns "" for an unset
+ *  text field and 0 for an unset number, and `??` does not catch either. */
 function toMemory(row: any): FamilyMemory {
   return {
     ...row,
     tags: parseTagList(row.tags),
     history: parseHistory(row.history),
-    person: row.person ?? '',
-    scope: row.scope ?? (row.person ? 'person' : 'family'),
-    status: row.status ?? 'active',
-    version: Number(row.version ?? 1),
-    source: row.source ?? 'agent',
-    confidence: Number(row.confidence ?? 0.8),
-    usageCount: Number(row.usageCount ?? 0),
+    person: String(row.person ?? ''),
+    scope: String(row.scope ?? '') || (row.person ? 'person' : 'family'),
+    status: String(row.status ?? '') || 'active',
+    version: versionOf(row),
+    source: String(row.source ?? '') || 'agent',
+    confidence: numberOr(row.confidence, 0.8),
+    usageCount: numberOr(row.usageCount, 0),
   };
+}
+
+/**
+ * Did the READ fail, or is the row simply missing?
+ *
+ * PocketBase answers a missing record with a 404 (the SDK turns "no items"
+ * into a ClientResponseError with status 404); every other failure — a
+ * timeout, a rejected filter, an expired admin token — is a FAILED READ.
+ * The two must not be confused: treating a failed read as "not found" makes
+ * the store CREATE a second row for a subject that already exists, the
+ * UNIQUE index turns that create into a 400, and the family's correction is
+ * lost on a perfectly healthy store.
+ */
+function isMissingRow(error: unknown): boolean {
+  const err = error as any;
+  if (!err) return false;
+  if (err.status === 404) return true;
+  if (err.response?.status === 404) return true;
+  if (err.response?.code === 404) return true;
+  if (err.response?.data?.code === 404) return true;
+  if (err.code === 404) return true;
+  return false;
+}
+
+/** The row for this subject, or null when it does not exist. A failed read
+ *  is NOT a missing row: it travels to the caller. */
+async function readSubject(pb: any, userId: string, key: string): Promise<any | null> {
+  try {
+    return await pb.collection(COLLECTION).getFirstListItem(
+      `userId = "${userId}" && key = "${key}"`,
+      { requestKey: null },
+    );
+  } catch (error) {
+    if (isMissingRow(error)) return null;
+    throw error;
+  }
+}
+
+/**
+ * Refuse a destructive write while the Task-3 columns are not live.
+ *
+ * A write that carries a field the collection does not declare SUCCEEDS
+ * (200) and PocketBase DROPS the unknown field — so between Task 2 and Task 3
+ * a correction replaced the row and DESTROYED the previous wording: the
+ * history write was dropped with it. The tell is the row itself: a record
+ * read back from a collection without the columns has NO `version` and NO
+ * `history` key at all (a collection that HAS them reads them back as 0 and
+ * null, which is a different thing — that row is safe to correct).
+ */
+function assertHistoryColumns(existing: any): void {
+  const hasVersion = existing?.version !== undefined && existing?.version !== null;
+  const hasHistory = existing?.history !== undefined && existing?.history !== null;
+  if (hasVersion || hasHistory) return;
+  throw new MemoryStoreError(
+    'memory_schema_not_ready',
+    'The memory bank schema is not live yet — refusing to overwrite a fact whose history could not be kept.',
+  );
 }
 
 /**
@@ -157,12 +300,14 @@ function toMemory(row: any): FamilyMemory {
  * guarantee; this lookup is how the row is found.
  */
 export async function storeMemory(input: StoreMemoryInput): Promise<FamilyMemory | null> {
-  const key = equalityValue(foldForStorage(input.key));
+  // The KEY is a machine identity, so it is folded. The CONTENT, the tags
+  // and the person are the family's own words and are stored AS WRITTEN.
+  const key = equalityValue(foldKey(input.key));
   const userId = equalityValue(input.userId);
   const familyId = equalityValue(input.familyId);
-  const content = foldForStorage(input.content);
-  const tags = (input.tags ?? []).map((tag) => foldForStorage(tag)).filter(Boolean);
-  const person = foldForStorage(input.person ?? '');
+  const content = String(input.content ?? '');
+  const tags = Array.isArray(input.tags) ? input.tags.map((tag) => String(tag)).filter(Boolean) : [];
+  const person = String(input.person ?? '');
   const scope = input.scope ?? (person ? 'person' : 'family');
   const source = input.source ?? 'agent';
   const confidence = input.confidence ?? 0.8;
@@ -173,71 +318,82 @@ export async function storeMemory(input: StoreMemoryInput): Promise<FamilyMemory
     console.error('Refusing to store a memory with no subject key');
     return null;
   }
+  if (!content.trim()) {
+    // A fact with no text is not a fact. Accepting it would let a blank
+    // write erase what the family said.
+    console.error('Refusing to store a memory with no content');
+    return null;
+  }
   try {
     const pb = await getAuthedPB();
-    const existing = await pb.collection(COLLECTION)
-      .getFirstListItem(
-        `userId = "${userId}" && key = "${key}"`,
-        { requestKey: null }
-      )
-      .catch(() => null);
+    // The read-modify-write of ONE subject is serialised: two corrections at
+    // once used to both read version 1, both write version 2, and one
+    // superseded wording was LOST.
+    return await withKeyedLock(`memory:${userId}:${key}`, async () => {
+      const existing = await readSubject(pb, userId, key);
+      if (existing) {
+        assertHistoryColumns(existing);
+        const history = [...parseHistory(existing.history), {
+          version: versionOf(existing),
+          content: String(existing.content ?? ''),
+          source: String(existing.source ?? '') || 'agent',
+          // The store has no human author — the source is the honest
+          // attribution until `replaceMemoryContent` carries a name.
+          by: source,
+          at: now,
+        }].slice(-MAX_HISTORY);
+        const updated = await pb.collection(COLLECTION).update(existing.id, {
+          content,
+          // The family's identity is (userId, key): the row belongs to the
+          // family it was last written into.
+          familyId,
+          category: input.category,
+          tags: JSON.stringify(tags),
+          person,
+          scope,
+          status: 'active',
+          source,
+          confidence,
+          version: versionOf(existing) + 1,
+          history: JSON.stringify(history),
+          updatedAt: now,
+          usageCount: (Number(existing.usageCount) || 0) + 1,
+          lastUsed: now,
+        }, { requestKey: null });
+        return toMemory(updated);
+      }
 
-    if (existing) {
-      const history = [...parseHistory(existing.history), {
-        version: Number(existing.version ?? 1),
-        content: foldForStorage(String(existing.content ?? '')),
-        source: String(existing.source ?? 'agent'),
-        // The store has no human author — the source is the honest
-        // attribution until `replaceMemoryContent` carries a name.
-        by: source,
-        at: now,
-      }].slice(-MAX_HISTORY);
-      const updated = await pb.collection(COLLECTION).update(existing.id, {
-        content,
+      const created = await pb.collection(COLLECTION).create({
+        userId,
+        familyId,
         category: input.category,
+        key,
+        content,
         tags: JSON.stringify(tags),
         person,
         scope,
         status: 'active',
         source,
         confidence,
-        version: Number(existing.version ?? 1) + 1,
-        history: JSON.stringify(history),
+        version: 1,
+        history: JSON.stringify([]),
+        createdAt: now,
         updatedAt: now,
-        usageCount: (existing.usageCount || 0) + 1,
+        usageCount: 1,
         lastUsed: now,
       }, { requestKey: null });
-      return toMemory(updated);
-    }
-
-    const created = await pb.collection(COLLECTION).create({
-      userId,
-      familyId,
-      category: input.category,
-      key,
-      content,
-      tags: JSON.stringify(tags),
-      person,
-      scope,
-      status: 'active',
-      source,
-      confidence,
-      version: 1,
-      history: JSON.stringify([]),
-      createdAt: now,
-      updatedAt: now,
-      usageCount: 1,
-      lastUsed: now,
-    }, { requestKey: null });
-    return toMemory(created);
+      return toMemory(created);
+    });
   } catch (error) {
+    if (error instanceof MemoryStoreError) throw error;
     console.error('Failed to store memory:', error);
     return null;
   }
 }
 
 /** Replace the wording of an existing subject, keeping the old one in the
- *  history. Returns null when the subject does not exist. */
+ * history. Returns null when the subject does not exist — or when the new
+ * text is empty, because an empty correction must never erase a fact. */
 export async function replaceMemoryContent(input: {
   userId: string;
   familyId: string;
@@ -249,44 +405,87 @@ export async function replaceMemoryContent(input: {
   source?: string;
   by?: string;
 }): Promise<FamilyMemory | null> {
-  const key = equalityValue(foldForStorage(input.key));
+  const key = equalityValue(foldKey(input.key));
   const userId = equalityValue(input.userId);
-  const content = foldForStorage(input.content);
+  const familyId = equalityValue(input.familyId);
+  const content = String(input.content ?? '');
   const source = input.source ?? 'agent';
   const by = input.by ?? source;
   const now = new Date().toISOString();
+  if (!content.trim()) {
+    console.error('Refusing to replace a fact with empty content');
+    return null;
+  }
   try {
     const pb = await getAuthedPB();
-    const existing = await pb.collection(COLLECTION)
-      .getFirstListItem(
-        `userId = "${userId}" && key = "${key}"`,
-        { requestKey: null }
-      )
-      .catch(() => null);
-    if (!existing) return null;
-    const history = [...parseHistory(existing.history), {
-      version: Number(existing.version ?? 1),
-      content: foldForStorage(String(existing.content ?? '')),
-      source: String(existing.source ?? 'agent'),
-      by,
-      at: now,
-    }].slice(-MAX_HISTORY);
-    const updated = await pb.collection(COLLECTION).update(existing.id, {
-      content,
-      ...(input.category ? { category: input.category } : {}),
-      ...(input.person !== undefined ? { person: foldForStorage(input.person) } : {}),
-      ...(input.scope !== undefined ? { scope: input.scope } : {}),
-      source,
-      version: Number(existing.version ?? 1) + 1,
-      history: JSON.stringify(history),
-      updatedAt: now,
-      lastUsed: now,
-    }, { requestKey: null });
-    return toMemory(updated);
+    return await withKeyedLock(`memory:${userId}:${key}`, async () => {
+      const existing = await readSubject(pb, userId, key);
+      if (!existing) return null;
+      assertHistoryColumns(existing);
+      const history = [...parseHistory(existing.history), {
+        version: versionOf(existing),
+        content: String(existing.content ?? ''),
+        source: String(existing.source ?? '') || 'agent',
+        by,
+        at: now,
+      }].slice(-MAX_HISTORY);
+      const updated = await pb.collection(COLLECTION).update(existing.id, {
+        content,
+        familyId,
+        ...(input.category ? { category: input.category } : {}),
+        ...(input.person !== undefined ? { person: String(input.person) } : {}),
+        ...(input.scope !== undefined ? { scope: input.scope } : {}),
+        source,
+        version: versionOf(existing) + 1,
+        history: JSON.stringify(history),
+        updatedAt: now,
+        lastUsed: now,
+      }, { requestKey: null });
+      return toMemory(updated);
+    });
   } catch (error) {
+    if (error instanceof MemoryStoreError) throw error;
     console.error('Failed to replace memory content:', error);
     return null;
   }
+}
+
+/** How many rows a read may pull. A caller's `limit` is the most it asked
+ *  for; a search needs more candidates than it returns. */
+function readCeiling(limit: number, searching: boolean): number {
+  const wanted = searching ? Math.max(limit, SEARCH_CANDIDATES) : limit;
+  return Math.min(Math.max(wanted, 1), MAX_ROWS);
+}
+
+/**
+ * Read rows, page by page, up to a ceiling.
+ *
+ * `getFullList` walks the WHOLE collection (the SDK paginates until the last
+ * page), and the chat turn reads the bank on every parent message — so a
+ * full-table read per turn. This walks only as far as the caller asked, with
+ * a projection so each row costs only what the store reads.
+ */
+async function fetchRows(
+  pb: any,
+  filter: string,
+  maxRows: number,
+): Promise<any[]> {
+  const out: any[] = [];
+  let page = 1;
+  while (out.length < maxRows) {
+    const perPage = Math.min(FETCH_PAGE, maxRows - out.length);
+    const result = await pb.collection(COLLECTION).getList(page, perPage, {
+      ...(filter ? { filter } : {}),
+      sort: '-confidence,-usageCount',
+      fields: READ_FIELDS,
+      requestKey: null,
+    });
+    const items = result?.items ?? [];
+    out.push(...items);
+    if (items.length < perPage) break;
+    page += 1;
+  }
+  return out;
 }
 
 /**
@@ -303,40 +502,39 @@ export async function queryMemories(query: MemoryQuery): Promise<FamilyMemory[]>
     if (query.userId) filters.push(`userId = "${equalityValue(query.userId)}"`);
     if (query.familyId) filters.push(`familyId = "${equalityValue(query.familyId)}"`);
     if (query.category) filters.push(`category = "${equalityValue(query.category)}"`);
-    if (query.key) filters.push(`key = "${equalityValue(query.key)}"`);
+    // The KEY is folded on write, so the query is folded too — otherwise
+    // "person_begoña" could never find the row stored as "person_begona".
+    if (query.key) filters.push(`key = "${equalityValue(foldKey(query.key))}"`);
 
     const base = filters.join(' && ');
-    const limit = query.limit || 50;
-    const terms = query.search ? tokenize(query.search) : [];
+    const limit = Math.min(Math.max(Number(query.limit) || 50, 1), MAX_ROWS);
+    const searchText = typeof query.search === 'string' ? query.search : '';
+    const searching = searchText.trim() !== '';
+    const terms = searching ? tokenize(searchText) : [];
+    // A search whose every word is a stop word matches NOTHING. Falling
+    // through to "no filter" would answer with the WHOLE bank — the family's
+    // every fact — for a one-word message.
+    if (searching && terms.length === 0) return [];
     const search = terms.length ? buildMemoryFilter(terms) : '';
 
-    let rows: any[] = [];
-    if (search) {
-      rows = await pb.collection(COLLECTION).getFullList({
-        filter: base ? `${base} && ${search}` : search,
-        sort: '-confidence,-usageCount',
-        requestKey: null,
-      }) as any[];
-    } else {
-      rows = await pb.collection(COLLECTION).getFullList({
-        ...(base ? { filter: base } : {}),
-        sort: '-confidence,-usageCount',
-        requestKey: null,
-      }) as any[];
-    }
+    const rows = await fetchRows(
+      pb,
+      [base, search].filter(Boolean).join(' && '),
+      readCeiling(limit, terms.length > 0),
+    );
 
     let memories = rows.map(toMemory)
       // An archived fact never answers a query. The check is HERE as well as
       // in the PocketBase filter because `status` arrives with the schema
       // migration: a filter naming a column the collection does not have yet
       // is a 400, and a 400 the catch swallows is a bank that reads as EMPTY.
-      .filter((m) => m.status !== 'archived');
+      .filter((m) => !isArchived(m));
 
     if (query.person) {
-      const wanted = query.person.toLowerCase();
+      const wanted = foldName(query.person);
       memories = memories.filter((m) => {
-        const who = m.person.toLowerCase();
-        const tagged = m.tags.some((t) => t.toLowerCase().includes(wanted));
+        const who = foldName(m.person);
+        const tagged = m.tags.some((t) => foldName(t).includes(wanted));
         // A fact with NO person is family-wide, not about this person: an
         // empty name is a substring of every name, so an unguarded check
         // would answer "what does Bailey like?" with every household fact.
@@ -346,8 +544,9 @@ export async function queryMemories(query: MemoryQuery): Promise<FamilyMemory[]>
     }
 
     if (query.tags && query.tags.length > 0) {
-      memories = memories.filter((m) => query.tags!.some((tag) =>
-        m.tags.some((t) => t.toLowerCase() === tag.toLowerCase()),
+      const wanted = query.tags.map((tag) => foldName(tag));
+      memories = memories.filter((m) => wanted.some((tag) =>
+        m.tags.some((t) => foldName(t) === tag),
       ));
     }
 
@@ -373,7 +572,10 @@ export async function queryMemories(query: MemoryQuery): Promise<FamilyMemory[]>
 /** Every active fact for the family — the input to the always-injected block. */
 export async function listActiveFacts(familyId: string, limit = 200): Promise<FamilyMemory[]> {
   const rows = await queryMemories({ familyId, limit });
-  return rows.filter((m) => m.status === 'active');
+  // An empty status means the column was never set (a row written before
+  // the schema change), and such a row IS active — dropping it would empty
+  // the always-injected core block.
+  return rows.filter((m) => String(m.status).trim().toLowerCase() === 'active');
 }
 
 /**
@@ -399,10 +601,15 @@ export async function updateMemory(
       updatedAt: new Date().toISOString(),
     };
 
-    if (updates.content !== undefined) updateData.content = foldForStorage(updates.content);
-    if (updates.tags !== undefined) updateData.tags = JSON.stringify(updates.tags.map((tag) => foldForStorage(tag)));
+    // The family's own words — stored as written.
+    if (updates.content !== undefined) updateData.content = String(updates.content);
+    if (updates.tags !== undefined) {
+      updateData.tags = JSON.stringify(
+        Array.isArray(updates.tags) ? updates.tags.map((tag) => String(tag)).filter(Boolean) : [],
+      );
+    }
     if (updates.confidence !== undefined) updateData.confidence = updates.confidence;
-    if (updates.person !== undefined) updateData.person = foldForStorage(updates.person);
+    if (updates.person !== undefined) updateData.person = String(updates.person);
     if (updates.scope !== undefined) updateData.scope = updates.scope;
 
     const memory = await pb.collection(COLLECTION).update(
@@ -476,7 +683,7 @@ export async function incrementMemoryUsage(memoryId: string): Promise<void> {
     await pb.collection(COLLECTION).update(
       memoryId,
       {
-        usageCount: (memory.usageCount || 0) + 1,
+        usageCount: (Number(memory.usageCount) || 0) + 1,
         lastUsed: new Date().toISOString(),
       },
       { requestKey: null }
@@ -520,7 +727,7 @@ export async function getMemoryStats(familyId: string): Promise<{
   } catch (error) {
     // Zero memories is an answer, not a fallback: a caller that renders
     // "0 memories" during an outage is telling the family their bank is
-    // empty. The route turns the throw into a 500.
+    // empty. The route turns the throw into a 503.
     console.error('Failed to get memory stats:', error);
     throw error;
   }

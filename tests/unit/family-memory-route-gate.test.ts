@@ -26,6 +26,9 @@ vi.mock("@/lib/family-memory", () => ({
   updateMemory: mocks.updateMemory,
   deleteMemory: mocks.deleteMemory,
   incrementMemoryUsage: mocks.incrementMemoryUsage,
+  // The store's own refusal check — the route asks it whether an error is a
+  // REFUSAL (the schema is not live yet) or an outage.
+  isMemoryRefusal: (error: any) => error?.name === "MemoryStoreError" && typeof error?.code === "string",
 }));
 
 import { GET, POST } from "@/app/api/family-memory/route";
@@ -113,8 +116,63 @@ describe("family-memory POST — canonical default + server-side key slug (F5/F6
     expect(mocks.storeMemory.mock.calls[0][0].key).toBe("caspian_bedtime_");
   });
 
+  it("folds an accented client key instead of cutting the name in half", async () => {
+    await POST(postReq("http://localhost/api/family-memory", { key: "person_begoña", content: "x" }));
+    expect(mocks.storeMemory.mock.calls[0][0].key).toBe("person_begona");
+  });
+
   it("derives the key from content when none is supplied", async () => {
     await POST(postReq("http://localhost/api/family-memory", { content: "Rocco hides socks" }));
     expect(mocks.storeMemory.mock.calls[0][0].key).toBe("rocco_hides_socks");
+  });
+});
+
+/**
+ * F7 — the store-failure contract at the HTTP layer.
+ *
+ * The house convention for an unreachable store is a 503 with a MACHINE
+ * code (34 call sites under src/app/api do exactly that). The route used to
+ * answer a 500 with the raw PocketBase message, which says "we have a bug"
+ * when the truth is "the bank is down" — and it handed the client the
+ * driver's error text.
+ */
+describe("family-memory routes — the store is down (F7)", () => {
+  it("GET answers 503 with a machine code", async () => {
+    mocks.queryMemories.mockRejectedValue(new Error("Failed to connect to the PocketBase server."));
+    const res = await GET(getReq("http://localhost/api/family-memory"));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("memory_store_unreachable");
+    expect(JSON.stringify(body)).not.toContain("PocketBase");
+  });
+
+  it("GET ?stats=true answers 503 too", async () => {
+    mocks.getMemoryStats.mockRejectedValue(new Error("Failed to connect to the PocketBase server."));
+    const res = await GET(getReq("http://localhost/api/family-memory?stats=true"));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("memory_store_unreachable");
+  });
+
+  it("POST answers 503 when the store could not write the fact", async () => {
+    mocks.storeMemory.mockResolvedValue(null);
+    const res = await POST(postReq("http://localhost/api/family-memory", { content: "x" }));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("memory_store_unreachable");
+  });
+
+  it("POST answers 503 with the refusal's own code when the store refused the write", async () => {
+    const refusal: any = new Error("schema not live");
+    refusal.name = "MemoryStoreError";
+    refusal.code = "memory_schema_not_ready";
+    mocks.storeMemory.mockRejectedValue(refusal);
+    const res = await POST(postReq("http://localhost/api/family-memory", { content: "x" }));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("memory_schema_not_ready");
+  });
+
+  it("POST answers 400 for a missing content — a client error is not an outage", async () => {
+    const res = await POST(postReq("http://localhost/api/family-memory", {}));
+    expect(res.status).toBe(400);
+    expect(mocks.storeMemory).not.toHaveBeenCalled();
   });
 });

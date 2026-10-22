@@ -31,8 +31,9 @@ import { getStoreLabel, groupByStore } from "@/lib/stores";
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
 import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
-import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
-import { foldAccents, tokenize } from "@/lib/memory-search";
+import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, listActiveFacts, replaceMemoryContent, isMemoryRefusal, type MemoryCategory } from "@/lib/family-memory";
+import { foldAccents } from "@/lib/memory-search";
+import { subjectKey, findReplacementSubject } from "@/lib/memory-subject";
 import { createTaskOperationId } from "@/lib/task-operation-payload";
 import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -147,36 +148,17 @@ function formatTime(iso?: string): string {
 
 const MEMORY_CATEGORIES: MemoryCategory[] = ["preference", "allergy", "routine", "location", "schedule", "personality", "restriction", "contact", "note"];
 
-/** An ASCII word: the only shape a subject key can carry. */
-const ASCII_WORD = /^[a-z0-9]+$/;
-
-/** A slug word: folded, ASCII, no leading or trailing separator. */
-function slugWord(value: string): string {
-  return foldAccents(String(value ?? ""))
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
 /**
- * The subject key for a fact: WHO it is about plus the fact's own words.
- * "Bailey is allergic to peanuts" → "bailey_allergic_peanuts" — the same key
- * for a rewording of the same fact, so a correction REPLACES the row instead
- * of forking a second one. `src/lib/memory-subject.ts` owns the final grammar
- * (category + topic + person) and the near-duplicate matching; this keeps one
- * row per subject from today.
+ * Do these two names mean the same person?
+ *
+ * The stored fact keeps the family's spelling ("Begoña"), so the comparison
+ * folds both sides — a name that differs only by its accent or its case is
+ * the same person, and treating it as two people would fork the bank.
  */
-function memoryKey(person: string | undefined, content: string): string {
-  const who = slugWord(person ?? "");
-  const words = tokenize(content, { max: 12 })
-    // The raw accented form of a word is a duplicate of its folded skeleton,
-    // and the person is already the prefix — neither belongs in the key.
-    .filter((word) => ASCII_WORD.test(word) && word !== who)
-    .slice(0, 4)
-    .map(slugWord)
-    .filter(Boolean);
-  const key = [who, ...words].filter(Boolean).join("_");
-  return key.substring(0, 50).replace(/_+$/g, "") || "memory";
+function samePerson(stored: string | undefined, incoming: string | undefined): boolean {
+  const left = foldAccents(String(stored ?? "").trim().toLowerCase());
+  const right = foldAccents(String(incoming ?? "").trim().toLowerCase());
+  return left === right;
 }
 
 // === Admin-backed persistence helpers ===
@@ -1848,6 +1830,7 @@ const TOOLS: Tool[] = [
           content: { type: "string", description: "The fact in one natural sentence" },
           category: { type: "string", description: "One of: preference, allergy, routine, location, schedule, personality, restriction, contact, note", enum: MEMORY_CATEGORIES },
           person: { type: "string", description: "Who this is about (optional)" },
+          topic: { type: "string", description: "The subject of the fact, e.g. 'peanuts' — naming it keeps the SAME subject across a rewording" },
         },
         required: ["content"],
       },
@@ -1857,12 +1840,59 @@ const TOOLS: Tool[] = [
       if (!content) return JSON.stringify({ error: "content is required" });
       const category = (MEMORY_CATEGORIES as string[]).includes(args.category) ? (args.category as MemoryCategory) : "note";
       const person = typeof args.person === "string" && args.person.trim() ? args.person.trim() : undefined;
+      const topic = typeof args.topic === "string" && args.topic.trim() ? args.topic.trim() : undefined;
       const tags = person ? [person] : [];
+
+      // The subject key is the CATEGORY + the TOPIC (+ the person) — never a
+      // slug of the wording: a slug of the wording makes every rewording a
+      // NEW subject, which is how the bank grew a row per restatement.
+      const key = subjectKey({ category, person, topic, content });
+
+      // A restatement of a fact that is ALREADY stored REPLACES it instead
+      // of forking a second row: the same category, a compatible person, and
+      // the new text restating the old one.
+      let active: Awaited<ReturnType<typeof listActiveFacts>> = [];
+      try {
+        active = await listActiveFacts(MEMORY_FAMILY_ID);
+      } catch {
+        return JSON.stringify({ error: "memory store is unavailable right now — try again later" });
+      }
+      const sameKind = active.filter((m) => m.category === category && (!person || !m.person || samePerson(m.person, person)));
+      const replacement = findReplacementSubject(
+        sameKind.map((m) => ({ key: m.key, content: m.content })),
+        content,
+      );
+
+      if (replacement) {
+        try {
+          const updated = await replaceMemoryContent({
+            userId: MEMORY_USER_ID,
+            familyId: MEMORY_FAMILY_ID,
+            key: replacement,
+            content,
+            category,
+            person,
+            source: "agent",
+          });
+          if (!updated) return JSON.stringify({ error: "memory store is unavailable right now — try again later" });
+          return JSON.stringify({ ok: true, id: updated.id, key: updated.key, stored: content, replaced: true });
+        } catch (error) {
+          // The store REFUSED the write (the schema that keeps the history is
+          // not live yet). That is neither a success nor an outage: the old
+          // wording is still there and the family must be told nothing was
+          // saved.
+          if (isMemoryRefusal(error)) {
+            return JSON.stringify({ error: "the memory bank cannot keep the old wording yet — nothing was changed" });
+          }
+          throw error;
+        }
+      }
+
       const memory = await storeMemory({
         userId: MEMORY_USER_ID,
         familyId: MEMORY_FAMILY_ID,
         category,
-        key: memoryKey(person, content),
+        key,
         content,
         tags,
         confidence: 0.9,
