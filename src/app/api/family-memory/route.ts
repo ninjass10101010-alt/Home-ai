@@ -10,8 +10,8 @@ import { queryMemories, getFamilyMemories, getMemoryStats } from '@/lib/family-m
 import type { MemoryCategory, MemoryQuery } from '@/lib/family-memory';
 
 // Same [^a-z0-9]+ → _ rule the storeMemory callers use (hermes-tools
-// memoryKey + parseRememberCommand) — a client-supplied key is slugged
-// server-side so every writer lands in one namespace grammar.
+// memoryKey) — a client-supplied key is slugged server-side so every writer
+// lands in one namespace grammar.
 function slugKey(raw: string): string {
   return raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 50);
 }
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { userId, familyId, category, key, content, tags = [], confidence = 0.8 } = body;
+    const { userId, familyId, category, key, content, tags = [], confidence = 0.8, person = "", scope } = body;
 
     if (!content) {
       return NextResponse.json(
@@ -96,19 +96,24 @@ export async function POST(request: NextRequest) {
     }
 
     const { storeMemory } = await import('@/lib/family-memory');
-    
-    const memory = await storeMemory(
+
+    const memory = await storeMemory({
       // F5 — unqualified adds land in the agent's namespace (the browser's
       // canonical id), not a phantom 'demo-user' row set.
-      userId || MEMORY_USER_ID,
-      familyId || MEMORY_FAMILY_ID,
-      category || 'note',
+      userId: userId || MEMORY_USER_ID,
+      familyId: familyId || MEMORY_FAMILY_ID,
+      category: category || 'note',
       // F6.2 — slug client-supplied keys server-side before filtering/storing.
-      slugKey(key || content),
+      // A subject key is already a slug; slugKey is idempotent on it and keeps
+      // one namespace grammar for every writer.
+      key: slugKey(key || content),
       content,
       tags,
-      confidence
-    );
+      confidence,
+      person: String(person || ""),
+      scope: scope || (person ? 'person' : 'family'),
+      source: 'parent',
+    });
 
     if (!memory) {
       return NextResponse.json(

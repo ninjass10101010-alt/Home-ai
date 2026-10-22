@@ -84,8 +84,13 @@ const ASCII_TOKEN = /^[a-z0-9]+$/;
  *  not the "bego" plus a two-letter fragment the old split produced. A
  *  fragment like "oz" is a LIKE pattern wide enough to match "frozen".
  *  The input arrives lowercased (every caller lowercases first), so the
- *  letter map below is written in lowercase. */
-function foldAccents(value: string): string {
+ *  letter map below is written in lowercase.
+ *
+ *  EXPORTED because the store folds on WRITE: a PocketBase `~` is a
+ *  byte-wise LIKE, so a row stored with its accent can never be reached by
+ *  the folded form of the name that fetches it. One fold, shared by the
+ *  reader and the writer — a second implementation would drift. */
+export function foldAccents(value: string): string {
   return String(value ?? "")
     .replace(/[øłđðþæœß]/g, (ch) => UNDECOMPOSABLE_LETTERS[ch] ?? ch)
     .normalize("NFKD")

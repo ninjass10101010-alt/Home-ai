@@ -17,6 +17,14 @@ interface FamilyMemoryBrowserProps {
   familyId: string;
 }
 
+/** What the browser may send: the subject's status, version, history and
+ *  source are the server's to own, and a fact's person is not a field the
+ *  add form collects yet. */
+type NewMemory = Pick<
+  FamilyMemory,
+  'userId' | 'familyId' | 'category' | 'key' | 'content' | 'tags' | 'confidence'
+>;
+
 export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
   const [memories, setMemories] = useState<FamilyMemory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,7 +101,7 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
     }
   };
 
-  const handleAdd = async (memory: Omit<FamilyMemory, 'id' | 'createdAt' | 'updatedAt' | 'usageCount'>) => {
+  const handleAdd = async (memory: NewMemory) => {
     try {
       const response = await fetch('/api/family-memory', {
         method: 'POST',
@@ -468,7 +476,7 @@ function EditMemoryModal({ memory, onSave, onCancel }: {
 
 function AddMemoryModal({ familyId, onSave, onCancel }: {
   familyId: string;
-  onSave: (memory: Omit<FamilyMemory, 'id' | 'createdAt' | 'updatedAt' | 'usageCount'>) => void;
+  onSave: (memory: NewMemory) => void;
   onCancel: () => void;
 }) {
   const [category, setCategory] = useState<MemoryCategory>('note');

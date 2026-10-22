@@ -105,16 +105,16 @@ describe("family-memory POST — canonical default + server-side key slug (F5/F6
   it("defaults userId to the canonical agent namespace, not 'demo-user'", async () => {
     const res = await POST(postReq("http://localhost/api/family-memory", { content: "Bailey loves the vet" }));
     expect(res.status).toBe(201);
-    expect(mocks.storeMemory.mock.calls[0][0]).toBe("consuela");
+    expect(mocks.storeMemory.mock.calls[0][0].userId).toBe("consuela");
   });
 
   it("slugs a client-supplied key with the same [^a-z0-9]+ → _ rule as storeMemory callers", async () => {
     await POST(postReq("http://localhost/api/family-memory", { key: "Caspian Bedtime!", content: "x" }));
-    expect(mocks.storeMemory.mock.calls[0][3]).toBe("caspian_bedtime_");
+    expect(mocks.storeMemory.mock.calls[0][0].key).toBe("caspian_bedtime_");
   });
 
   it("derives the key from content when none is supplied", async () => {
     await POST(postReq("http://localhost/api/family-memory", { content: "Rocco hides socks" }));
-    expect(mocks.storeMemory.mock.calls[0][3]).toBe("rocco_hides_socks");
+    expect(mocks.storeMemory.mock.calls[0][0].key).toBe("rocco_hides_socks");
   });
 });

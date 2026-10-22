@@ -32,6 +32,7 @@ import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWe
 import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
+import { foldAccents, tokenize } from "@/lib/memory-search";
 import { createTaskOperationId } from "@/lib/task-operation-payload";
 import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -146,9 +147,36 @@ function formatTime(iso?: string): string {
 
 const MEMORY_CATEGORIES: MemoryCategory[] = ["preference", "allergy", "routine", "location", "schedule", "personality", "restriction", "contact", "note"];
 
+/** An ASCII word: the only shape a subject key can carry. */
+const ASCII_WORD = /^[a-z0-9]+$/;
+
+/** A slug word: folded, ASCII, no leading or trailing separator. */
+function slugWord(value: string): string {
+  return foldAccents(String(value ?? ""))
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/**
+ * The subject key for a fact: WHO it is about plus the fact's own words.
+ * "Bailey is allergic to peanuts" → "bailey_allergic_peanuts" — the same key
+ * for a rewording of the same fact, so a correction REPLACES the row instead
+ * of forking a second one. `src/lib/memory-subject.ts` owns the final grammar
+ * (category + topic + person) and the near-duplicate matching; this keeps one
+ * row per subject from today.
+ */
 function memoryKey(person: string | undefined, content: string): string {
-  const raw = `${person?.trim() ?? ""} ${content}`.trim().toLowerCase();
-  return raw.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").substring(0, 50) || "memory";
+  const who = slugWord(person ?? "");
+  const words = tokenize(content, { max: 12 })
+    // The raw accented form of a word is a duplicate of its folded skeleton,
+    // and the person is already the prefix — neither belongs in the key.
+    .filter((word) => ASCII_WORD.test(word) && word !== who)
+    .slice(0, 4)
+    .map(slugWord)
+    .filter(Boolean);
+  const key = [who, ...words].filter(Boolean).join("_");
+  return key.substring(0, 50).replace(/_+$/g, "") || "memory";
 }
 
 // === Admin-backed persistence helpers ===
@@ -1830,7 +1858,18 @@ const TOOLS: Tool[] = [
       const category = (MEMORY_CATEGORIES as string[]).includes(args.category) ? (args.category as MemoryCategory) : "note";
       const person = typeof args.person === "string" && args.person.trim() ? args.person.trim() : undefined;
       const tags = person ? [person] : [];
-      const memory = await storeMemory(MEMORY_USER_ID, MEMORY_FAMILY_ID, category, memoryKey(person, content), content, tags, 0.9);
+      const memory = await storeMemory({
+        userId: MEMORY_USER_ID,
+        familyId: MEMORY_FAMILY_ID,
+        category,
+        key: memoryKey(person, content),
+        content,
+        tags,
+        confidence: 0.9,
+        person,
+        scope: person ? 'person' : 'family',
+        source: 'agent',
+      });
       if (!memory) return JSON.stringify({ error: "memory store is unavailable right now — try again later" });
       return JSON.stringify({ ok: true, id: memory.id, key: memory.key, stored: content });
     },

@@ -21,7 +21,15 @@ vi.mock("@/lib/ha/websocket-client", () => ({ getHAWebSocketClient: vi.fn(async 
 
 import { getTool, buildToolsForOpenAI } from "@/lib/hermes-tools";
 
-beforeEach(() => vi.clearAllMocks());
+// `vi.resetAllMocks()` — not `clearAllMocks` — because a leaked
+// `mockImplementation` survives a clear and wedges every later test in this
+// file (the store-failure case sets one). The defaults are re-armed below.
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.queryMemories.mockResolvedValue([]);
+  mocks.deleteMemory.mockResolvedValue(true);
+  mocks.incrementMemoryUsage.mockResolvedValue(undefined);
+});
 
 describe("memory tool gating", () => {
   it("adult sessions get the three memory tools; child sessions never do", () => {
@@ -37,19 +45,22 @@ describe("memory tool gating", () => {
 });
 
 describe("remember_fact", () => {
-  it("stores with the consuela userId, demo-family familyId, and a derived key", async () => {
-    mocks.storeMemory.mockResolvedValue({ id: "m1", content: "Bailey is allergic to peanuts" });
+  it("stores against a subject key, not a slug of the content", async () => {
+    mocks.storeMemory.mockResolvedValue({ id: "m1", key: "bailey_allergic_peanuts", content: "Bailey is allergic to peanuts" });
     const tool = getTool("remember_fact")!;
     const out = await tool.handler({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
-    expect(mocks.storeMemory).toHaveBeenCalledWith(
-      "consuela",
-      "demo-family",
-      "allergy",
-      "bailey_bailey_is_allergic_to_peanuts",
-      "Bailey is allergic to peanuts",
-      ["Bailey"],
-      0.9
-    );
+    expect(mocks.storeMemory).toHaveBeenCalledWith({
+      userId: "consuela",
+      familyId: "demo-family",
+      category: "allergy",
+      key: "bailey_allergic_peanuts",
+      content: "Bailey is allergic to peanuts",
+      tags: ["Bailey"],
+      confidence: 0.9,
+      person: "Bailey",
+      scope: "person",
+      source: "agent",
+    });
     expect(JSON.parse(out).ok).toBe(true);
   });
 
@@ -63,7 +74,7 @@ describe("remember_fact", () => {
     mocks.storeMemory.mockResolvedValue(null);
     const out = await getTool("remember_fact")!.handler({ content: "Practice moved to Tuesdays" });
     expect(mocks.storeMemory).toHaveBeenCalledWith(
-      "consuela", "demo-family", "note", expect.any(String), "Practice moved to Tuesdays", [], 0.9
+      expect.objectContaining({ category: "note", content: "Practice moved to Tuesdays", tags: [] })
     );
     expect(JSON.parse(out).error).toBeTruthy();
   });
