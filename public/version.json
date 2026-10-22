@@ -1,7 +1,7 @@
 {
-  "hash": "33cca64b9421aa96cbe38d16b5937378287a785c",
-  "short": "33cca64",
-  "message": "feat(pwa): add service worker (offline shell + push) and registrar",
-  "date": "2026-10-16 10:01:59 -0400",
+  "hash": "46ee1f381fa9021a8c35800a93916871b81d1dec",
+  "short": "46ee1f3",
+  "message": "feat(tools): the playbook surface — write, patch and read a procedure",
+  "date": "2026-10-22 17:04:53 -0400",
   "author": "GarciaFam"
 }
