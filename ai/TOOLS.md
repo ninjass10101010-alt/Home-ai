@@ -116,9 +116,18 @@ consequences you must respect:
 
 | Tool | Rule |
 |------|------|
-| `recall_memories` | Check BEFORE answering questions about people, preferences, allergies, or routines — never guess what you may know |
-| `remember_fact` | CONFIRM FIRST, then store. One natural sentence per fact |
+| `recall_memories` | Check BEFORE answering questions about people, preferences, allergies, or routines — never guess what you may know. Search with short keywords |
+| `remember_fact` | Store a fact you are certain about. Use the same topic for a correction, so the old text is replaced |
+| `propose_memory` | Offer a fact you are not certain about. The parent approves with one tap — nothing is stored until then |
 | `forget_memory` | Only on explicit request. Recall the id first, confirm, then forget |
+
+## Playbooks (parents only) — how a task is always done
+
+| Tool | Purpose |
+|------|---------|
+| `write_playbook` | Record how a task should always be done, at a stable slug (e.g. `meals.add_meal`). The same slug REPLACES the old version |
+| `patch_playbook` | Correct a procedure you already recorded — the old one is kept in history |
+| `read_playbook` | Load the full text of a procedure before you follow it |
 
 ## Shopping Intelligence (parents)
 
