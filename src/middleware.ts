@@ -26,13 +26,30 @@ const API_EXEMPT = [
   "/api/muse/",
   // Family-visible read surfaces: the wall display is signed out, so the
   // calendar (events + schedules) and meals board must read without a session.
-  // Tasks/points stay gated (PIN-required) — see /api/tasks/* below.
+  // The family's CHORES are public too — see /api/tasks/family below. The
+  // POINTS, the approvals and the ledger stay gated (PIN-required).
   "/api/db/events",
   "/api/db/schedules",
   "/api/db/meal_plan_entries",
   // Family-visible photo library: the wall display is signed out, and the
   // photo bytes/settings routes gate writes at the route level (parent only).
   "/api/photos",
+  // The family's OPEN CHORES are public (SP1.7). WHY: the wall is a FAMILY
+  // DISPLAY, and the calendar, the schedules, the meals, the photos and the
+  // roster are already public reads — the chores card was the last one gated
+  // behind a live session, so a signed-out wall showed an empty tasks card
+  // while every other card stayed alive.
+  //
+  // WHAT IS EXPOSED: the chore's id, title, assignee and whether it is done.
+  // Nothing else rides out of this route — NO points, NO pending approvals,
+  // NO completions (who finished it, when, for how much), NO ledger and NO
+  // PIN state. It answers the OPEN chores only: a completed row is exactly
+  // where the approval queue lives.
+  //
+  // WHAT STAYS GATED: /api/tasks/sync (the whole snapshot and the family
+  // ledger), /api/tasks/approve, /api/tasks/ledger and every points command
+  // still need a live session or the member/parent PIN.
+  "/api/tasks/family",
   // PIN-gated task actions. All routes self-authenticate: the member PIN is
   // the credential (verified server-side against PB, throttled against brute
   // force) — the same trust model as /api/auth/login. Without the exemption a
