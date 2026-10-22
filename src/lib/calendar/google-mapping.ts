@@ -87,17 +87,22 @@ function isLocalMidnight(d: Date): boolean {
 export function googleEventCoveredDays(row: GoogleDayRow): string[] {
   const startIso = row.start_iso || "";
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(startIso);
-  const start = parseGoogleStart(startIso, dateOnly);
+  const allDay = Boolean(row.all_day) || dateOnly;
+  const start = allDay
+    ? parseGoogleStart(startIso.slice(0, 10), true)
+    : parseGoogleStart(startIso, false);
   if (!start) return [];
-  const first = localMidnight(start);
 
+  const first = localMidnight(start);
   let last: Date;
-  if (dateOnly) {
-    const end =
-      /^\d{4}-\d{2}-\d{2}$/.test(row.end_iso || "")
-        ? parseGoogleStart(row.end_iso as string, true)
-        : null;
-    last = !end || localMidnight(end) <= first ? first : new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1);
+
+  if (allDay) {
+    const endDate = /^\d{4}-\d{2}-\d{2}/.test(row.end_iso || "")
+      ? parseGoogleStart(String(row.end_iso).slice(0, 10), true)
+      : null;
+    last = !endDate || localMidnight(endDate) <= first
+      ? first
+      : new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() - 1);
   } else {
     const end = row.end_iso ? new Date(row.end_iso) : null;
     if (!end || Number.isNaN(end.getTime()) || end <= start) {
@@ -263,10 +268,19 @@ export interface DbEventRow {
   title?: string;
   date?: string;
   time?: string;
+  endTime?: string;
+  allDay?: boolean;
   icon?: string;
   color?: string;
   member?: string;
+  location?: string;
+  notes?: string;
   notify?: boolean;
+  source?: string;
+  googleEventId?: string;
+  googleCalendarId?: string;
+  googleSyncStatus?: string;
+  googleSyncError?: string;
 }
 
 export interface MappedDbEvent {
@@ -279,7 +293,17 @@ export interface MappedDbEvent {
   day: number;
   month: number;
   year: number;
+  date: string;
+  endTime: string;
+  allDay: boolean;
+  location: string;
+  notes: string;
   notify?: boolean;
+  source: string;
+  googleEventId: string;
+  googleCalendarId: string;
+  googleSyncStatus: string;
+  googleSyncError: string;
 }
 
 // Maps a PocketBase `events` row (manually added family events) to the
@@ -293,14 +317,24 @@ export function dbEventToCalEvent(row: DbEventRow | null | undefined): MappedDbE
   return {
     id: row.id,
     title: row.title,
-    time: row.time || "All day",
+    time: row.allDay ? "All day" : row.time || "",
     member: row.member || "All",
     color: row.color || "green",
     emoji: row.icon || "\uD83D\uDCC5",
     day: d,
     month: mo - 1,
     year: y,
+    date: row.date,
+    endTime: row.endTime || "",
+    allDay: row.allDay === true,
+    location: row.location || "",
+    notes: row.notes || "",
     notify: row.notify === true,
+    source: row.source || "family",
+    googleEventId: row.googleEventId || "",
+    googleCalendarId: row.googleCalendarId || "",
+    googleSyncStatus: row.googleSyncStatus || "",
+    googleSyncError: row.googleSyncError || "",
   };
 }
 
