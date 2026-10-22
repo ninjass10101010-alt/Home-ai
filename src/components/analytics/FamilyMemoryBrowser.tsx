@@ -19,11 +19,13 @@ interface FamilyMemoryBrowserProps {
 
 /** What the browser may send: the subject's status, version, history and
  *  source are the server's to own, and a fact's person is not a field the
- *  add form collects yet. */
+ *  add form collects yet. The KEY is optional on purpose — the server
+ *  derives the subject key from the category, the person and the topic, so
+ *  the console and the agent's tool land on the same key for the same fact. */
 type NewMemory = Pick<
   FamilyMemory,
-  'userId' | 'familyId' | 'category' | 'key' | 'content' | 'tags' | 'confidence'
->;
+  'userId' | 'familyId' | 'category' | 'content' | 'tags' | 'confidence'
+> & { key?: string };
 
 export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
   const [memories, setMemories] = useState<FamilyMemory[]>([]);
@@ -504,7 +506,11 @@ function AddMemoryModal({ familyId, onSave, onCancel }: {
       familyId,
       userId: MEMORY_USER_ID,
       category,
-      key: key || content.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 50),
+      // The key is the SUBJECT, and the server derives it from the category,
+      // the person and the topic. The console used to slug the wording on
+      // its own, which made one fact two rows — the console's key and the
+      // agent's key were different grammars.
+      key: key || undefined,
       content,
       tags,
       confidence,

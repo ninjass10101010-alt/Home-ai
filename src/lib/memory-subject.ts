@@ -26,13 +26,22 @@
  *   "Bailey loves sushi"                   → topic {sushi}
  *   "Bailey loves pizza"                   → topic {pizza}
  *
- * Two facts are the SAME subject when their topics SHARE an informative word
- * — the object the fact is about. They are never the same subject when the
- * topics are disjoint.
+ * Two facts are the SAME subject when their topics are the SAME SET of
+ * informative words — the object the fact is about. Anything less than an
+ * exact match is treated as a DIFFERENT subject.
  *
- * The rule is deliberately biased: a subject that cannot be told apart is
- * treated as a DIFFERENT subject and forks a row, because a row the family
- * can see is a nuisance while a silently replaced allergy is a harm.
+ * That is deliberately strict, and the reasoning is worth stating: a
+ * SHARED word is not an identity. "Peanut butter" and "Peanut oil" share
+ * "peanut", and a shared-word rule merged them — one child's second
+ * allergy silently destroying the first. The same is true of "has practice
+ * on Tuesdays" and "has soccer on Tuesdays", which share a day. A row the
+ * family can see is a nuisance; a silently replaced allergy is a harm, so
+ * the merge has to be CERTAIN and the fork is the safe answer.
+ *
+ * The way to be certain is to NAME the subject: the tool's `topic`
+ * argument makes the key exact, and a key that already exists is replaced
+ * without any word matching at all. The word comparison below is only the
+ * fallback for a caller that names no topic.
  *
  * The key is a MACHINE identity, so it is ASCII: the shared fold (the
  * retrieval engine's `foldAccents`) runs first, which is why "Begoña"
@@ -89,8 +98,33 @@ const RELATION_WORDS: ReadonlySet<string> = new Set([
   'arrives', 'begin', 'begins', 'finish', 'finishes', 'attend', 'attends',
   'sit', 'sits', 'stand', 'stands', 'wear', 'wears', 'read', 'reads', 'write',
   'hide', 'hides', 'hidden', 'steal', 'steals', 'lose', 'loses', 'find', 'finds',
+  'react', 'reacts', 'reacted', 'badly', 'fine', 'ok', 'okay', 'sick', 'ill',
   'writes', 'speak', 'speaks', 'sign', 'signs', 'practice', 'practices',
   'practise', 'practises', 'join', 'joins', 'leave', 'leaves', 'stay', 'stays',
+]);
+
+/**
+ * A kinship word makes a name a DIFFERENT person: "Bailey" and "Bailey's
+ * sister" are not the same child, and a short name and a full name are
+ * ("Bailey" and "Bailey Garcia" are).
+ */
+const KINSHIP_WORDS: ReadonlySet<string> = new Set([
+  'sister', 'sisters', 'brother', 'brothers', 'mom', 'moms', 'mum', 'mummy',
+  'dad', 'dads', 'daddy', 'papa', 'nana', 'granny', 'grandma', 'gran',
+  'pops', 'grandpa', 'grandad', 'uncle', 'aunt', 'cousin', 'wife', 'husband',
+  'son', 'daughter', 'kid', 'kids', 'child', 'children', 'friend', 'buddy',
+  'twin', 'twins', 'baby', 'stepmom', 'stepdad', 'auntie', 'uncle',
+]);
+
+/**
+ * Words that MODIFY the thing rather than name it. "an emoji (default 🍽️)"
+ * and "a relevant emoji" are the same fact about an emoji; "default" and
+ * "relevant" describe HOW, not WHAT.
+ */
+const MODIFIER_WORDS: ReadonlySet<string> = new Set([
+  'default', 'defaults', 'relevant', 'appropriate', 'suitable', 'correct',
+  'proper', 'exact', 'preferred', 'nice', 'good', 'better', 'best', 'real',
+  'actual', 'same', 'usual', 'typical', 'standard', 'normal',
 ]);
 
 /**
@@ -176,8 +210,12 @@ export function contentTokens(text: string): string[] {
 
 /**
  * The TOPIC of a sentence: its meaningful words minus the person, minus the
- * relation, minus the category's own words. "Bailey is allergic to peanuts"
- * (allergy, Bailey) → ["peanuts"].
+ * relation, minus the category's own words, minus the modifiers. "Bailey is
+ * allergic to peanuts" (allergy, Bailey) → ["peanuts"].
+ *
+ * When the relation words eat the whole sentence ("Emily's school starts at
+ * 8"), the meaningful words stand in — a fact that could never be recognised
+ * would fork a row on every correction.
  */
 export function topicTokens(
   text: string,
@@ -190,7 +228,9 @@ export function topicTokens(
   const meaningful = contentTokens(text).filter(
     (token) => !person.has(token) && !categoryWords.has(token) && !GENERIC_WORDS.has(token),
   );
-  const topic = meaningful.filter((token) => !RELATION_WORDS.has(token));
+  const topic = meaningful.filter(
+    (token) => !RELATION_WORDS.has(token) && !MODIFIER_WORDS.has(token),
+  );
   if (topic.length) return topic;
   // Nothing survived the relation words — the sentence is built entirely out
   // of them ("Emily's school starts at 8"). Those relations ARE the fact
@@ -203,7 +243,9 @@ export function topicTokens(
 /**
  * `allergy` + topic "peanuts" + person "Emily" → "allergy_peanuts_emily".
  * Without a topic the content's TOPIC stands in — the informative words, so
- * a rewording of the same fact produces the SAME key.
+ * a REWORDING of the same fact produces the same key. A BROADER fact (one
+ * that adds an object: "peanuts and tree nuts") produces a different key,
+ * and the two live side by side rather than one replacing the other.
  */
 export function subjectKey(input: {
   category: string;
@@ -250,21 +292,17 @@ export function containment(a: string, b: string): number {
 }
 
 /**
- * Are these two sentences about the SAME subject? They must SHARE at least
- * one informative word — the topic of the fact, with the person, the relation
- * and the generic words removed.
+ * Are these two sentences about the SAME subject? Their topics must be the
+ * SAME SET of informative words.
  *
- * Sharing is the rule, and it is what separates the two cases that matter:
- *   "allergic to peanuts" vs "allergic to shellfish" → no shared informative
- *     word (peanuts vs shellfish) → DIFFERENT subjects. This is the rule
- *     that stops two allergies from collapsing into one row.
- *   "is allergic to peanuts" vs "cannot eat peanuts" → share "peanuts" →
- *     the SAME subject. This is the rule that makes a rewording replace.
+ * Exact, not "shared": "peanut butter" and "peanut oil" share a word and
+ * are two different allergies, and "has practice on Tuesdays" and "has
+ * soccer on Tuesdays" share a day. A shared word is a coincidence, not an
+ * identity.
  *
- * The relation words and the generic words (a day, a month, "home") are what
- * keep the second rule from being too eager: "Caspian has practice on
- * Tuesdays" and "Caspian has soccer on Tuesdays" share only the day, which
- * is not a topic, so they stay two facts.
+ * It still lets a REWORDING match, because the relation words are what
+ * change: "is allergic to peanuts" and "cannot eat peanuts" have the same
+ * topic {peanuts} once "is allergic to" and "cannot eat" are removed.
  *
  * An EMPTY topic matches nothing: a sentence with no informative words
  * ("Bailey") is not a fact about every topic that person has.
@@ -274,11 +312,32 @@ export function sameTopic(
   b: string,
   opts?: { person?: string; category?: string },
 ): boolean {
-  const left = new Set(topicTokens(a, opts));
-  const right = new Set(topicTokens(b, opts));
+  const left = topicTokens(a, opts);
+  const right = topicTokens(b, opts);
+  if (!left.length || !right.length) return false;
+  if (left.length !== right.length) return false;
+  const set = new Set(right);
+  return left.every((token) => set.has(token));
+}
+
+/**
+ * Do two spellings of a name mean the same person? "Bailey" and
+ * "Bailey Garcia" are the same child; "Bailey" and "Bailey's sister" are
+ * not. One name's words must cover the other's.
+ */
+export function personMatches(a: string, b: string): boolean {
+  const left = personWords(a);
+  const right = personWords(b);
   if (!left.size || !right.size) return false;
-  for (const token of left) if (right.has(token)) return true;
-  return false;
+  // A kinship word on either side means a DIFFERENT person.
+  for (const word of [...left, ...right]) {
+    if (KINSHIP_WORDS.has(word)) return false;
+  }
+  // One name may be a SHORT FORM of the other ("Bailey" / "Bailey Garcia"),
+  // so one side's words must COVER the other's — either way round.
+  const leftCovers = [...left].every((word) => right.has(word));
+  const rightCovers = [...right].every((word) => left.has(word));
+  return leftCovers || rightCovers;
 }
 
 /**
@@ -331,7 +390,7 @@ export function assertsSafety(content: string): boolean {
   }
   // The multi-word refusals ("must not", "can't have") are not single tokens.
   const text = foldAccents(String(content ?? '').toLowerCase());
-  return /must not|cannot|can't|can not|no longer|not allowed|never/.test(text);
+  return /must not|cannot|can't|can not|no longer|not allowed|never|reacts badly|gives me|bad reaction/.test(text);
 }
 
 /** The words that mark a safety claim. */
@@ -340,6 +399,7 @@ const SAFETY_CLAIM_WORDS: ReadonlySet<string> = new Set([
   'avoids', 'restricted', 'restriction', 'restrictions', 'tolerates',
   'sensitive', 'sensitivity', 'reaction', 'reactions', 'rash', 'swelling',
   'anaphylaxis', 'celiac', 'diabetes', 'epilepsy', 'asthma', 'excluded',
+  'react', 'reacts', 'reacted', 'badly', 'reaction', 'swelling', 'hives',
 ]);
 
 /**

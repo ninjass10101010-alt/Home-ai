@@ -8,7 +8,6 @@ import { authorizeAdminRequest } from '@/lib/admin-auth';
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from '@/lib/memory-ids';
 import { queryMemories, getFamilyMemories, getMemoryStats, isMemoryRefusal } from '@/lib/family-memory';
 import type { MemoryCategory, MemoryQuery } from '@/lib/family-memory';
-import { foldAccents } from '@/lib/memory-search';
 import { slugify, subjectKey } from '@/lib/memory-subject';
 
 // The ONE key grammar. The shared `slugify` lowercases AND folds before

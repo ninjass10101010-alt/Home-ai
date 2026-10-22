@@ -14,10 +14,11 @@
  * decompose), because a key is a MACHINE identity and a PocketBase `~` is a
  * byte-wise LIKE: it folds ASCII case and nothing else. Reachability does
  * not depend on the fold — Task 1's `tokenize` emits the folded AND the raw
- * form of every accented word, and `buildMemoryFilter` carries both, so a
- * row stored WITH its accent is reached either way (proved against a real
- * PocketBase: the filter for "Begoña" and the filter for "begona" both find
- * the row "Begoña loves tacos"). Folding the CONTENT, the tags or the
+ * form of every accented word, and `buildMemoryFilter` carries both. The
+ * row is reached by the RAW token through the content, and by the FOLDED
+ * token through the key (a PocketBase `LIKE` compares bytes, so the content
+ * column cannot match the folded form — the key can, because the key IS
+ * folded). Folding the CONTENT, the tags or the
  * person would rewrite the family's own words — "Begoña" → "Begona" — in
  * the console, in the prompt the model reads, in the agent's answer and in
  * the export, irreversibly (the history held the folded text too, so the
@@ -300,12 +301,6 @@ function assertHistoryColumns(existing: any): void {
   );
 }
 
-/**
- * Store a fact under its SUBJECT KEY. If the subject already exists the row
- * is replaced in place — the previous wording lands in `history` — so a
- * restatement is never a second row. The `UNIQUE(userId, key)` index is the
- * guarantee; this lookup is how the row is found.
- */
 /** Write a brand-new subject row. */
 async function writeNewSubject(
   pb: any,
@@ -337,6 +332,17 @@ async function writeNewSubject(
   return toMemory(created);
 }
 
+/**
+ * Store a fact under its SUBJECT KEY. If the subject already exists the row
+ * is replaced in place — the previous wording lands in `history` — so a
+ * restatement of the SAME subject is never a second row. The
+ * `UNIQUE(userId, key)` index is the guarantee; this lookup is how the row
+ * is found.
+ *
+ * Choosing a key that is already claimed by a DIFFERENT fact is the
+ * CALLER's job: `disambiguateKey` in memory-subject.ts is how the agent's
+ * tool gives such a fact a key of its own.
+ */
 export async function storeMemory(input: StoreMemoryInput): Promise<FamilyMemory | null> {
   // The KEY is a machine identity, so it is folded. The CONTENT, the tags
   // and the person are the family's own words and are stored AS WRITTEN.
@@ -373,8 +379,8 @@ export async function storeMemory(input: StoreMemoryInput): Promise<FamilyMemory
         // The KEY is the identity: storing under the same key REPLACES the
         // row (the old wording lands in the history). Choosing a key that is
         // already claimed by a DIFFERENT fact is the caller's job — see
-        // `disambiguateKey` in memory-subject.ts, which the agent's tool and
-        // the console's route both use.
+        // `disambiguateKey` in memory-subject.ts, which the agent's tool
+        // uses.
         assertHistoryColumns(existing);
         const history = [...parseHistory(existing.history), {
           version: versionOf(existing),

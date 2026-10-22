@@ -29,6 +29,15 @@ export async function PATCH(
     const body = await request.json();
     const { content, tags, confidence } = body;
 
+    if (typeof content === 'string' && !content.trim()) {
+      // A blank edit is a bad request, not a server error: the store
+      // refused to erase the fact and the family must be told WHY.
+      return NextResponse.json(
+        { error: 'content_required' },
+        { status: 400 }
+      );
+    }
+
     const memory = await updateMemory(id, {
       content,
       tags,

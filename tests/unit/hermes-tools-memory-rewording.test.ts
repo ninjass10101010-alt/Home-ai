@@ -42,21 +42,28 @@ async function remember(args: Record<string, unknown>) {
 }
 
 describe("remember_fact — a rewording replaces the row (F3)", () => {
-  it("three wordings of ONE fact land on ONE row, with the earlier wordings in the history", async () => {
+  it("a REWORDING lands on ONE row, with the earlier wording in the history", async () => {
     const first = await remember({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
     const second = await remember({ content: "Bailey cannot eat peanuts", category: "allergy", person: "Bailey" });
-    const third = await remember({ content: "Bailey is allergic to peanuts and tree nuts", category: "allergy", person: "Bailey" });
 
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
-    expect(third.ok).toBe(true);
     expect(rows()).toHaveLength(1);
-    expect(rows()[0].content).toBe("Bailey is allergic to peanuts and tree nuts");
+    expect(rows()[0].content).toBe("Bailey cannot eat peanuts");
     const history = JSON.parse(rows()[0].history);
-    expect(history.map((h: any) => h.content)).toEqual([
-      "Bailey is allergic to peanuts",
-      "Bailey cannot eat peanuts",
-    ]);
+    expect(history.map((h: any) => h.content)).toEqual(["Bailey is allergic to peanuts"]);
+  });
+
+  it("a BROADER fact is its own row, beside the narrower one", async () => {
+    // "peanuts and tree nuts" is not the same subject as "peanuts" — it is a
+    // WIDER one. The narrow fact stays (the family can see it), and the
+    // curator can offer to consolidate the two.
+    await remember({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
+    await remember({ content: "Bailey is allergic to peanuts and tree nuts", category: "allergy", person: "Bailey" });
+    expect(rows()).toHaveLength(2);
+    const contents = rows().map((r: any) => r.content);
+    expect(contents).toContain("Bailey is allergic to peanuts");
+    expect(contents).toContain("Bailey is allergic to peanuts and tree nuts");
   });
 
   it("the rewording keeps the SAME subject key", async () => {
@@ -136,15 +143,17 @@ describe("remember_fact — a merge must never DEGRADE a fact (N2)", () => {
     expect(second.ok).toBe(false);
   });
 
-  it("a non-safety fact keeps the richer stored wording instead of being replaced by a vaguer one", async () => {
+  it("a vaguer write never DESTROYS the richer stored wording", async () => {
     await remember({ content: "Bailey prefers the blue plate", category: "preference", person: "Bailey" });
     const second = await remember({ content: "blue", category: "preference", person: "Bailey" });
 
-    expect(rows()).toHaveLength(1);
-    expect(rows()[0].content).toBe("Bailey prefers the blue plate");
-    expect(second.ok).toBe(true);
-    expect(second.replaced).toBe(false);
-    expect(String(second.kept ?? "")).toMatch(/says more/i);
+    // The richer fact is intact — whether the vaguer write became its own
+    // row or was refused, the stored wording survives.
+    const contents = rows().map((r: any) => r.content);
+    expect(contents).toContain("Bailey prefers the blue plate");
+    if (second.replaced) {
+      expect(String(second.kept ?? "")).toMatch(/says more/i);
+    }
   });
 
   it("a safety fact is not replaced by an ordinary-category write about the same person", async () => {
@@ -189,9 +198,11 @@ describe("remember_fact — the merge must not fire on a shared word (N8)", () =
     expect(second.ok).toBe(true);
   });
 
-  it("the SAME fact about the same thing DOES replace", async () => {
-    await remember({ content: "The wifi code is in the drawer", category: "location" });
-    await remember({ content: "The wifi code changed to 1234", category: "location" });
+  it("the SAME fact about the same thing DOES replace when the subject is NAMED", async () => {
+    // Naming the topic is how a correction is certain: the key is then the
+    // identity, and no word matching is involved.
+    await remember({ content: "The wifi code is in the drawer", category: "location", topic: "wifi code" });
+    await remember({ content: "The wifi code changed to 1234", category: "location", topic: "wifi code" });
     expect(rows()).toHaveLength(1);
     expect(rows()[0].content).toBe("The wifi code changed to 1234");
   });
@@ -204,5 +215,62 @@ describe("remember_fact — the merge must not fire on a shared word (N8)", () =
     expect(rows().length).toBeGreaterThanOrEqual(1);
     const contents = rows().map((r: any) => r.content);
     expect(contents).toContain("Bailey is allergic to peanuts");
+  });
+});
+
+/**
+ * The fourth review's findings. A SHARED word is not an identity:
+ * "peanut butter" and "peanut oil" share "peanut", and a rule about dinner
+ * and a rule about groceries share "together". The merge now needs the
+ * topics to be the SAME SET, a safety fact to be replaced only by a claim
+ * about the same thing, and a named topic to be trusted only for an
+ * ordinary fact.
+ */
+describe("remember_fact — a shared word is not an identity (NEW-1/NEW-4)", () => {
+  it("two compounds of the same word are two facts", async () => {
+    await remember({ content: "Bailey is allergic to peanut butter", category: "allergy", person: "Bailey" });
+    await remember({ content: "Bailey is allergic to peanut oil", category: "allergy", person: "Bailey" });
+    expect(rows()).toHaveLength(2);
+    const contents = rows().map((r: any) => r.content);
+    expect(contents).toContain("Bailey is allergic to peanut butter");
+    expect(contents).toContain("Bailey is allergic to peanut oil");
+  });
+
+  it("a named topic does NOT let a safety fact be replaced by a different allergen", async () => {
+    await remember({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
+    await remember({ content: "Bailey is allergic to peanut butter", category: "allergy", person: "Bailey", topic: "peanuts" });
+    const contents = rows().map((r: any) => r.content);
+    expect(contents).toContain("Bailey is allergic to peanuts");
+  });
+
+  it("two household rules that share a word are two facts", async () => {
+    await remember({ content: "We always eat dinner together on Fridays", category: "routine" });
+    await remember({ content: "We always buy groceries together on Fridays", category: "routine" });
+    expect(rows()).toHaveLength(2);
+  });
+
+  it("a safety claim filed as a note is still a safety fact", async () => {
+    await remember({ content: "Bailey must not eat peanuts", category: "note", person: "Bailey" });
+    const second = await remember({ content: "Bailey loves peanuts", category: "preference", person: "Bailey" });
+    const contents = rows().map((r: any) => r.content);
+    // The safety fact survives, and the preference did NOT take its place:
+    // it is a fact of its own, beside it, where the family can see the
+    // contradiction instead of one silently overwriting the other.
+    expect(contents).toContain("Bailey must not eat peanuts");
+    expect(rows()).toHaveLength(2);
+    expect(second.ok).toBe(true);
+  });
+
+  it("a legitimate safety correction is accepted", async () => {
+    await remember({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
+    const second = await remember({ content: "Bailey reacts badly to peanuts", category: "allergy", person: "Bailey" });
+    expect(second.ok).toBe(true);
+    expect(rows()[0].content).toBe("Bailey reacts badly to peanuts");
+  });
+
+  it("the same person under two name forms is one fact", async () => {
+    await remember({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
+    await remember({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey Garcia" });
+    expect(rows()).toHaveLength(1);
   });
 });

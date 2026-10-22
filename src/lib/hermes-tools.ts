@@ -33,7 +33,7 @@ import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, listActiveFacts, replaceMemoryContent, isMemoryRefusal, type MemoryCategory } from "@/lib/family-memory";
 import { foldAccents } from "@/lib/memory-search";
-import { subjectKey, findReplacementSubject, isLessInformative, assertsSafety, sameTopic, disambiguateKey } from "@/lib/memory-subject";
+import { subjectKey, findReplacementSubject, isLessInformative, assertsSafety, sameTopic, disambiguateKey, personMatches } from "@/lib/memory-subject";
 import { createTaskOperationId } from "@/lib/task-operation-payload";
 import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -1835,7 +1835,7 @@ const TOOLS: Tool[] = [
           content: { type: "string", description: "The fact in one natural sentence" },
           category: { type: "string", description: "One of: preference, allergy, routine, location, schedule, personality, restriction, contact, note", enum: MEMORY_CATEGORIES },
           person: { type: "string", description: "Who this is about (optional)" },
-          topic: { type: "string", description: "The subject of the fact, e.g. 'peanuts' — naming it keeps the SAME subject across a rewording" },
+          topic: { type: "string", description: "What the fact is ABOUT, e.g. 'peanuts' or 'meal emoji'. Pass the SAME topic when you are correcting something you stored before, so the new wording REPLACES the old one instead of making a second fact" },
         },
         required: ["content"],
       },
@@ -1854,14 +1854,23 @@ const TOOLS: Tool[] = [
       const key = subjectKey({ category, person, topic, content });
 
       // A restatement of a fact that is ALREADY stored REPLACES it instead
-      // of forking a second row: the same category, a compatible person, and
-      // the new text restating the old one.
+      // of forking a second row.
       let active: Awaited<ReturnType<typeof listActiveFacts>> = [];
       try {
         active = await listActiveFacts(MEMORY_FAMILY_ID);
       } catch {
         return JSON.stringify({ error: "memory store is unavailable right now — try again later" });
       }
+
+      // THE KEY IS THE IDENTITY. A row already under this key is the same
+      // subject: either the caller NAMED the topic (so the key is exact), or
+      // the derived topic of the two texts is the same set (a rewording —
+      // "is allergic to peanuts" and "cannot eat peanuts" both reduce to
+      // {peanuts} once the relation words are removed).
+      const claimed = active.find((m) => m.key === key);
+      const sameClaimed = claimed
+        ? sameTopic(claimed.content, content, { category, person })
+        : false;
       // The candidate set is scoped EXACTLY: a fact about a person and a
       // household rule are different facts, and a household rule must never
       // be replaced by (or replace) a person's fact just because they share
@@ -1869,17 +1878,28 @@ const TOOLS: Tool[] = [
       // rule about peanuts took the place of a child's allergy.
       const sameKind = active.filter((m) =>
         m.category === category &&
-        (person ? samePerson(m.person, person) : !m.person),
+        (person
+          ? personMatches(m.person, person)
+          : !m.person),
       );
       // The match is by TOPIC (the informative words), never by content
       // overlap: an overlap score counts the person's NAME, so "allergic to
       // peanuts" and "allergic to shellfish" would score as near-identical
       // and collapse into ONE row — the peanut allergy destroyed.
-      const replacement = findReplacementSubject(
-        sameKind.map((m) => ({ key: m.key, content: m.content })),
-        content,
-        { category, person },
-      );
+      // A SAFETY fact is replaced only by a claim about the SAME thing: the
+      // model's named topic is trusted for an ordinary fact, but a child's
+      // allergy is not at the mercy of a topic the model picked ("peanuts"
+      // for a peanut-butter allergy would have destroyed the peanut one).
+      const claimedIsSafety = claimed
+        ? (SAFETY_CATEGORIES.has(claimed.category) || assertsSafety(claimed.content))
+        : false;
+      const replacement = claimed
+        ? (sameClaimed || (topic && !claimedIsSafety) ? claimed.key : null)
+        : findReplacementSubject(
+            sameKind.map((m) => ({ key: m.key, content: m.content })),
+            content,
+            { category, person },
+          );
 
       if (replacement) {
         const stored = sameKind.find((m) => m.key === replacement);
@@ -1887,7 +1907,10 @@ const TOOLS: Tool[] = [
         // "Bailey hates peanuts" is a preference, and a preference must never
         // take the place of "Bailey is allergic to peanuts" — they share the
         // word "peanuts" and nothing else that matters.
-        if (stored && SAFETY_CATEGORIES.has(stored.category) && !assertsSafety(content)) {
+        const storedIsSafety = stored
+          ? (SAFETY_CATEGORIES.has(stored.category) || assertsSafety(stored.content))
+          : false;
+        if (stored && storedIsSafety && !assertsSafety(content)) {
           return JSON.stringify({
             ok: false,
             error: `${stored.category} facts can only be corrected by another ${stored.category} statement — this one does not read like one, so nothing was changed`,
@@ -1931,11 +1954,11 @@ const TOOLS: Tool[] = [
         }
       }
 
-      // A key already claimed by a DIFFERENT fact is a collision: storing
-      // under it would silently replace that fact. The new fact gets a key
-      // of its own, so both survive.
-      const claimed = active.find((m) => m.key === key);
-      const storeKey = claimed && !sameTopic(claimed.content, content, { category, person })
+      // A key already claimed by a DIFFERENT fact is a collision, and the new
+      // fact gets a key of its own so both survive. A NAMED topic is the
+      // caller saying "this is the same subject" — trusted for an ordinary
+      // fact, never for a safety fact.
+      const storeKey = claimed && !sameClaimed && (!topic || claimedIsSafety)
         ? disambiguateKey(key, content, { category, person })
         : key;
 

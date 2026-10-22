@@ -89,6 +89,8 @@ describe("findReplacementSubject", () => {
   ];
 
   it("matches a reworded restatement to the existing subject", () => {
+    // "default" and "relevant" MODIFY the emoji; they do not name a
+    // different thing, so both sentences are about the same subject.
     expect(findReplacementSubject(existing, "When adding meals, include a relevant emoji")).toBe("meal_emoji");
   });
 
