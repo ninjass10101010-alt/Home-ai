@@ -8,6 +8,8 @@ import {
 } from "@/lib/google/connection-state";
 import { readCachedEvents, syncCalendar, readCalendarSyncRows } from "@/lib/google/calendar";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
+import { withAdmin } from "@/lib/pb-auth";
+import { filterMirroredFamilyRows } from "@/lib/calendar/google-dedupe";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -124,9 +126,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const events = await readCachedEvents();
+    const cachedEvents = await readCachedEvents();
     const accountEmail = await readAccountEmail();
     const rows = await readSyncRows();
+    const familyRows = (await withAdmin((pb) =>
+      pb.collection("events").getFullList({
+        filter: 'source = "family" && googleEventId != ""',
+        requestKey: null,
+      }),
+    ).catch(() => [])) as { googleEventId?: string }[];
+    const events = filterMirroredFamilyRows(cachedEvents, familyRows);
     if (partialSync) {
       return NextResponse.json({
         ok: false,
