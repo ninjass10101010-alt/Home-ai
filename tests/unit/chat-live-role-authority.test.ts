@@ -166,8 +166,42 @@ describe("C — the parent tool surface follows the LIVE role", () => {
   it("a demoted parent's cookie never receives the house-control prompt addendum", async () => {
     serveLiveRows([DEMOTED]);
     vi.stubGlobal("fetch", vi.fn(async () => bufferedReply("Milk and eggs.")));
-    await post({ message: "turn on the lights", stream: true }, await cookieFor(DEMOTED.id, DEMOTED.name, "parent"));
-    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    const res = await post({ message: "turn on the lights", stream: true }, await cookieFor(DEMOTED.id, DEMOTED.name, "parent"));
+    const bodyText = await res.clone().text();
+    // eslint-disable-next-line no-console
+    console.error("BODY:", bodyText.slice(0, 200));
+    const calls = (globalThis.fetch as any).mock.calls;
+    // The route now calls liveMembers() (which stubs fetch) and buildMemoryContextBlock
+    // (which stubs fetch), so the provider call is not necessarily the last one.
+    // Find the call whose body carries the system prompt.
+    // Find the provider call: it is the fetch whose init body parses as JSON
+    // with a `messages` array. The route now makes several fetches (the
+    // memory store, liveMembers), so it is not necessarily the last one.
+    // The provider call is the fetch whose init body parses as JSON with a
+    // `messages` array. The route now makes several fetches (memory store,
+    // liveMembers), so it is not necessarily the last one.
+    // The provider call is the fetch whose init body parses as JSON with a
+    // `messages` array. The route now makes several fetches (memory store,
+    // liveMembers), so it is not necessarily the last one.
+    let providerBody: string | null = null;
+    for (const c of calls) {
+      try {
+        const init = c[1] || {};
+        const body = init.body || (typeof c[0] === "string" ? null : null);
+        if (!body) continue;
+        const parsed = JSON.parse(body);
+        if (parsed && Array.isArray(parsed.messages)) { providerBody = body; break; }
+      } catch { /* not the provider call */ }
+    }
+    if (!providerBody) {
+      // fallback: the last fetch that has an init object
+      for (let i = calls.length - 1; i >= 0; i--) {
+        const init = calls[i] && calls[i][1];
+        if (init && init.body) { providerBody = init.body; break; }
+      }
+    }
+    if (!providerBody) providerBody = "{}";
+    const sent = JSON.parse(providerBody);
     expect(sent.messages[0].content).not.toContain("House control");
   });
 
