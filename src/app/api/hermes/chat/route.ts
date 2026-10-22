@@ -4,6 +4,11 @@ import { db } from "@/db";
 import { authorizeCurrentMemberRequest, requireLiveSession } from "@/lib/server-auth";
 import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt, HOUSE_CONTROL_PROMPT_ADDENDUM } from "@/lib/consuela-prompts";
 import { buildMemoryContextBlock } from "@/lib/memory-context";
+import { detectCaptures } from "@/lib/memory-capture";
+import { storeMemory, type MemoryCategory } from "@/lib/family-memory";
+import { writePlaybook } from "@/lib/memory-playbooks";
+import { liveMembers } from "@/lib/consuela/live-reads";
+import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 import { resolveChatTargets, resetAiTargetsForTests, type AiTarget } from "@/lib/ai/targets";
 import { recordChatOutcome } from "@/lib/ai/health";
 import { loadContextPack, type PackScope } from "@/lib/consuela/assistant-context";
@@ -222,6 +227,86 @@ const PROPOSAL_TOOLS: Record<string, { expectTool: string; label: string }> = {
   propose_point_adjustment: { expectTool: "adjust_points", label: "Waiting for a parent's PIN to confirm…" },
   propose_reward_redemption: { expectTool: "redeem_reward", label: "Waiting for a PIN to confirm…" },
 };
+/**
+ * Store a captured candidate and return the proposal the chip renders.
+ * A high-confidence fact is stored and announced with an undo affordance; a
+ * low-confidence one is only PROPOSED — it is never stored until the family
+ * taps "Remember". A rule that names a task domain becomes a playbook.
+ */
+async function captureCandidate(candidate: {
+  kind: "fact" | "rule";
+  content: string;
+  category?: string;
+  person?: string;
+  topic?: string;
+  subject?: string;
+  slug?: string;
+  domain?: string;
+  trigger?: string;
+  confidence: "high" | "low";
+  reason: string;
+}): Promise<{ ok: true; proposal: unknown } | null> {
+  if (candidate.kind === "rule" && candidate.slug && candidate.domain) {
+    const playbook = await writePlaybook({
+      slug: candidate.slug,
+      title: candidate.content.slice(0, 80),
+      body: candidate.content,
+      domain: candidate.domain,
+      trigger: candidate.trigger,
+      createdBy: "parent",
+    });
+    if (!playbook) return null;
+    return {
+      ok: true,
+      proposal: {
+        tool: "remember_memory",
+        mode: "stored",
+        id: playbook.id,
+        args: { content: candidate.content, category: "rule", person: "", subject: candidate.slug, kind: "playbook" },
+      },
+    };
+  }
+
+  if (candidate.confidence !== "high") {
+    return {
+      ok: true,
+      proposal: {
+        tool: "remember_memory",
+        mode: "proposed",
+        args: {
+          content: candidate.content,
+          category: candidate.category ?? "note",
+          person: candidate.person ?? "",
+          subject: candidate.subject ?? "",
+        },
+      },
+    };
+  }
+
+  const stored = await storeMemory({
+    userId: MEMORY_USER_ID,
+    familyId: MEMORY_FAMILY_ID,
+    category: (candidate.category ?? "note") as MemoryCategory,
+    key: candidate.subject ?? `note_${Date.now()}`,
+    content: candidate.content,
+    tags: candidate.person ? [candidate.person] : [],
+    person: candidate.person,
+    scope: candidate.person ? "person" : "family",
+    confidence: 0.9,
+    source: "parent",
+  });
+  if (!stored) return null;
+  return {
+    ok: true,
+    proposal: {
+      tool: "remember_memory",
+      mode: "stored",
+      id: stored.id,
+      args: { content: candidate.content, category: candidate.category ?? "note", person: candidate.person ?? "", subject: stored.key, kind: "fact" },
+    },
+  };
+}
+
 function extractProposal(name: string | undefined, result: string): { proposal: unknown; label: string } | null {
   const entry = name ? PROPOSAL_TOOLS[name] : undefined;
   if (!entry) return null;
@@ -589,6 +674,7 @@ async function buildChatContext(
   // curated core + playbook index + relevant hits; a child gets ONLY their
   // own facts; a guest and Clem get nothing. A dead store must never break
   // a chat turn, so the builder swallows its own failures.
+  const captured: unknown[] = [];
   if (!isClem && live) {
     const memCtx = await buildMemoryContextBlock({
       role,
@@ -596,6 +682,21 @@ async function buildChatContext(
       message,
     }).catch(() => "");
     if (memCtx) baseSystem += memCtx;
+    // Capture — a parent's sentence can become a memory BEFORE the answer,
+    // so the answer can already reflect it. Only a parent session captures;
+    // a child, a guest and Clem never do.
+    if (isAdult) {
+      try {
+        const members = (await liveMembers()) ?? [];
+        const roster = members.map((m: any) => String(m.name ?? "")).filter(Boolean);
+        for (const candidate of detectCaptures(message, roster)) {
+          const result = await captureCandidate(candidate);
+          if (result) captured.push(result.proposal);
+        }
+      } catch (error) {
+        console.error("[memory] capture failed:", (error as Error)?.message || error);
+      }
+    }
   }
   let addendum: string | null = null;
   if (typeof system === "string") {
@@ -618,6 +719,7 @@ async function buildChatContext(
     messages,
     role,
     sessionName: live?.name ?? "",
+    captured,
     // The normalized `role` (pet folds into "child", guest has no session and
     // is non-adult) rides every tool call as the actor identity, so a task
     // command re-checks adulthood instead of trusting the allowlist.
@@ -663,8 +765,11 @@ async function handleStreamedChat(
     // Health-recorder context hoisted so the catch path records rounds/brain too.
     const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
     try {
-      const { message, threadTurn, internal, targets, tools, messages, sessionName, toolContext } =
+      const { message, threadTurn, internal, targets, tools, messages, sessionName, toolContext, captured } =
         await buildChatContext(request, body, caller);
+      for (const proposal of captured) {
+        write(sseFrame(JSON.stringify({ label: "Noted — tap to undo", proposal }), "status"));
+      }
       ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
       ctx.targets = targets.length;
       let finalContent = "";
