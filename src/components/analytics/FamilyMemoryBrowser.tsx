@@ -36,10 +36,22 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
   const [editingMemory, setEditingMemory] = useState<FamilyMemory | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [tab, setTab] = useState<'facts' | 'playbooks' | 'learned'>('facts');
+  const [playbooks, setPlaybooks] = useState<any[]>([]);
+  const [runs, setRuns] = useState<any[]>([]);
+  const [running, setRunning] = useState(false);
 
   useEffect(() => {
     loadMemories();
   }, [familyId, selectedCategory, searchQuery]);
+
+  useEffect(() => {
+    if (tab === 'playbooks') {
+      fetch('/api/family-playbooks').then((r) => r.json()).then((d) => setPlaybooks(d.playbooks || [])).catch(() => setPlaybooks([]));
+    } else if (tab === 'learned') {
+      fetch('/api/family-memory/curate').then((r) => r.json()).then((d) => setRuns(d.runs || [])).catch(() => setRuns([]));
+    }
+  }, [tab]);
 
   const loadMemories = async () => {
     setLoading(true);
@@ -147,6 +159,22 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
         </SoftButton>
       </div>
 
+      {/* Tab strip */}
+      <div className="flex gap-2 border-b border-[var(--color-border)]" role="tablist">
+        {(['facts', 'playbooks', 'learned'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={`px-3 py-2 text-sm font-medium capitalize ${tab === t ? 'border-b-2 border-[var(--color-accent-selected)] text-[var(--color-accent-selected)]' : 'text-[var(--color-text-muted)]'}`}
+          >
+            {t === 'facts' ? 'Facts' : t === 'playbooks' ? 'Playbooks' : 'Learned'}
+          </button>
+        ))}
+      </div>
+
       {/* Search and Filters */}
       <div className="flex items-center gap-4">
         <div className="flex-1 relative">
@@ -175,6 +203,8 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
         ))}
       </div>
 
+      {tab === 'facts' && (
+      <>
       {/* Memory List */}
       {loading ? (
         <div className="space-y-3">
@@ -233,6 +263,61 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
               onDelete={() => setDeleteConfirm(memory.id)}
             />
           ))}
+        </div>
+      )}
+
+      </>
+      )}
+
+      {tab === 'playbooks' && (
+        <div className="space-y-3">
+          {playbooks.map((p: any) => (
+            <div key={p.slug} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+              <div className="font-mono text-xs text-[var(--color-text-muted)]">{p.slug}</div>
+              <div className="font-semibold text-[var(--color-text-primary)]">{p.title}</div>
+              <p className="mt-2 text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap">{p.body}</p>
+            </div>
+          ))}
+          {playbooks.length === 0 && <EmptyState title="No playbooks yet" description="Procedures Consuela learns land here." icon="📘" />}
+        </div>
+      )}
+
+      {tab === 'learned' && (
+        <div className="space-y-3">
+          <SoftButton onClick={async () => {
+            setRunning(true);
+            try {
+              await fetch('/api/family-memory/curate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'run' }) });
+              const r = await fetch('/api/family-memory/curate');
+              const d = await r.json();
+              setRuns(d.runs || []);
+            } finally {
+              setRunning(false);
+            }
+          }} disabled={running}>
+            {running ? 'Running…' : 'Run cleanup'}
+          </SoftButton>
+          {runs.map((r: any) => (
+            <div key={r.runId} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+              <div className="font-semibold text-[var(--color-text-primary)]">{r.summary}</div>
+              <ul className="mt-2 text-sm text-[var(--color-text-secondary)]">
+                {(r.changes || []).map((c: any, i: number) => (
+                  <li key={i}>{c.action} {c.kind} {c.key ?? c.id}: {c.note}</li>
+                ))}
+              </ul>
+              {!r.undoneAt && (
+                <SoftButton className="mt-2" onClick={async () => {
+                  await fetch('/api/family-memory/curate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'undo', runId: r.runId }) });
+                  const rr = await fetch('/api/family-memory/curate');
+                  const dd = await rr.json();
+                  setRuns(dd.runs || []);
+                }}>
+                  Undo
+                </SoftButton>
+              )}
+            </div>
+          ))}
+          {runs.length === 0 && <EmptyState title="Nothing learned yet" description="Consuela's cleanups will show up here." icon="🧠" />}
         </div>
       )}
 
