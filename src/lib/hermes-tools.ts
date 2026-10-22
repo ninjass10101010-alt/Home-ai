@@ -1993,7 +1993,8 @@ const TOOLS: Tool[] = [
       try {
         memories = await queryMemories({
           familyId: MEMORY_FAMILY_ID,
-          search: args.person ? String(args.person) : args.search ? String(args.search) : undefined,
+          search: args.search ? String(args.search) : undefined,
+          person: args.person ? String(args.person) : undefined,
           category: (MEMORY_CATEGORIES as string[]).includes(args.category) ? (args.category as MemoryCategory) : undefined,
           limit: 10,
         });
@@ -2007,7 +2008,7 @@ const TOOLS: Tool[] = [
           category: m.category,
           key: m.key,
           content: m.content,
-          person: (() => { try { const t = typeof m.tags === "string" ? JSON.parse(m.tags) : m.tags; return Array.isArray(t) && t.length ? t[0] : null; } catch { return null; } })(),
+          person: m.person || null,
           updated: m.updatedAt,
         })),
       });
@@ -2031,6 +2032,44 @@ const TOOLS: Tool[] = [
       if (!id) return JSON.stringify({ error: "memoryId is required — recall_memories first" });
       const ok = await deleteMemory(id);
       return ok ? JSON.stringify({ ok: true, forgotten: id }) : JSON.stringify({ error: `couldn't forget ${id}` });
+    },
+  },
+  {
+    definition: {
+      name: "propose_memory",
+      description:
+        "Offer a durable family fact to the parent WITHOUT storing it. Use when the fact is real but you are not certain (no person named, first-person preference, unclear scope). The parent approves with one tap. For a fact you are certain about use remember_fact instead.",
+      parameters: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "The fact in one natural sentence" },
+          category: { type: "string", description: "One of the memory categories", enum: MEMORY_CATEGORIES },
+          person: { type: "string", description: "Who this is about (optional)" },
+          topic: { type: "string", description: "What the fact is ABOUT, e.g. 'peanuts' or 'meal emoji'" },
+        },
+        required: ["content"],
+      },
+    },
+    handler: async (args) => {
+      const content = String(args.content ?? "").trim();
+      if (!content) return JSON.stringify({ error: "content is required" });
+      const category = (MEMORY_CATEGORIES as string[]).includes(args.category) ? (args.category as MemoryCategory) : "note";
+      const person = typeof args.person === "string" && args.person.trim() ? args.person.trim() : undefined;
+      const topic = typeof args.topic === "string" && args.topic.trim() ? args.topic.trim() : undefined;
+      return JSON.stringify({
+        ok: true,
+        proposal: {
+          tool: "remember_memory",
+          mode: "proposed",
+          operationId: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          args: {
+            content,
+            category,
+            person: person ?? "",
+            subject: subjectKey({ category, person, topic, content }),
+          },
+        },
+      });
     },
   },
   {
