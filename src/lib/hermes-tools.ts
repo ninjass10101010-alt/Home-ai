@@ -33,7 +33,7 @@ import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, listActiveFacts, replaceMemoryContent, isMemoryRefusal, type MemoryCategory } from "@/lib/family-memory";
 import { foldAccents } from "@/lib/memory-search";
-import { subjectKey, findReplacementSubject, isLessInformative, assertsSafety, sameTopic, disambiguateKey, personMatches } from "@/lib/memory-subject";
+import { subjectKey, findReplacementSubject, assertsSafety, sameTopic, disambiguateKey, personMatches, checkMerge, SAFETY_CATEGORIES } from "@/lib/memory-subject";
 import { createTaskOperationId } from "@/lib/task-operation-payload";
 import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -148,10 +148,8 @@ function formatTime(iso?: string): string {
 
 const MEMORY_CATEGORIES: MemoryCategory[] = ["preference", "allergy", "routine", "location", "schedule", "personality", "restriction", "contact", "note", "rule"];
 
-/** The categories that carry a SAFETY condition. A fact in one of them may
- *  only be replaced by another safety claim — a preference must never take
- *  the place of a child's allergy. */
-const SAFETY_CATEGORIES: ReadonlySet<string> = new Set(["allergy", "restriction"]);
+// The categories that carry a SAFETY condition are the shared ones (the
+// merge rules live with them, so the two can never drift).
 
 /**
  * Do these two names mean the same person?
@@ -1907,28 +1905,26 @@ const TOOLS: Tool[] = [
         // "Bailey hates peanuts" is a preference, and a preference must never
         // take the place of "Bailey is allergic to peanuts" — they share the
         // word "peanuts" and nothing else that matters.
-        const storedIsSafety = stored
-          ? (SAFETY_CATEGORIES.has(stored.category) || assertsSafety(stored.content))
-          : false;
-        if (stored && storedIsSafety && !assertsSafety(content)) {
-          return JSON.stringify({
-            ok: false,
-            error: `${stored.category} facts can only be corrected by another ${stored.category} statement — this one does not read like one, so nothing was changed`,
-          });
-        }
-        // A merge must never DEGRADE a fact: the bare word "peanuts" must not
-        // replace "Bailey is allergic to peanuts". The richer stored wording
-        // stays, and the answer says so instead of claiming the new text was
-        // saved.
-        if (stored && isLessInformative(content, stored.content)) {
-          return JSON.stringify({
-            ok: true,
-            id: stored.id,
-            key: stored.key,
-            stored: stored.content,
-            replaced: false,
-            kept: "the stored version says more — nothing was changed",
-          });
+        // The two merge rules — a safety fact is replaced only by another
+        // safety claim, and a merge may never make a fact say less — live in
+        // ONE place (`checkMerge`), because the console's route applies them
+        // too and a rule two writers implement differently is a rule one of
+        // them will get wrong.
+        if (stored) {
+          const verdict = checkMerge({ content: stored.content, category: stored.category }, { content });
+          if (!verdict.ok && verdict.code === 'memory_would_say_less') {
+            return JSON.stringify({
+              ok: true,
+              id: stored.id,
+              key: stored.key,
+              stored: stored.content,
+              replaced: false,
+              kept: verdict.reason,
+            });
+          }
+          if (!verdict.ok) {
+            return JSON.stringify({ ok: false, error: verdict.reason, code: verdict.code });
+          }
         }
         try {
           const updated = await replaceMemoryContent({

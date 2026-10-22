@@ -24,7 +24,7 @@ interface FamilyMemoryBrowserProps {
  *  the console and the agent's tool land on the same key for the same fact. */
 type NewMemory = Pick<
   FamilyMemory,
-  'userId' | 'familyId' | 'category' | 'content' | 'tags' | 'confidence'
+  'userId' | 'familyId' | 'category' | 'content' | 'tags' | 'confidence' | 'person'
 > & { key?: string };
 
 export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
@@ -484,6 +484,7 @@ function AddMemoryModal({ familyId, onSave, onCancel }: {
   const [category, setCategory] = useState<MemoryCategory>('note');
   const [content, setContent] = useState('');
   const [key, setKey] = useState('');
+  const [person, setPerson] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [confidence, setConfidence] = useState(0.8);
   const [tagInput, setTagInput] = useState('');
@@ -512,6 +513,10 @@ function AddMemoryModal({ familyId, onSave, onCancel }: {
       // agent's key were different grammars.
       key: key || undefined,
       content,
+      // The person is part of the subject, so the console has to know it:
+      // without it the key cannot match the one the agent's tool would use
+      // for the same fact.
+      person: person.trim(),
       tags,
       confidence,
     });
@@ -562,6 +567,17 @@ function AddMemoryModal({ familyId, onSave, onCancel }: {
             placeholder="e.g., Caspian is allergic to peanuts"
             className="w-full px-3 py-2 border border-border rounded-lg bg-background text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)]"
             rows={3}
+          />
+        </FormField>
+
+        <FormField label="Who is this about? (optional)">
+          <input
+            type="text"
+            value={person}
+            onChange={(e) => setPerson(e.target.value)}
+            placeholder="e.g. Bailey"
+            aria-label="Who is this fact about"
+            className="w-full px-3 py-2 border border-border rounded-lg bg-background text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)]"
           />
         </FormField>
 

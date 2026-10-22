@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { slugify, subjectKey, containment, findReplacementSubject, topicTokens, sameTopic } from "@/lib/memory-subject";
+import {
+  slugify,
+  subjectKey,
+  findReplacementSubject,
+  topicTokens,
+  sameTopic,
+  assertsSafety,
+  isLessInformative,
+  personMatches,
+  checkMerge,
+} from "@/lib/memory-subject";
 
 /**
  * The subject key is the identity of a fact. Task 6 of the plan will verify
@@ -57,28 +67,6 @@ describe("subjectKey", () => {
     const key = subjectKey({ category: "allergy", person: "Bailey", content: "Bailey is allergic to peanuts" });
     expect(key.endsWith("_bailey")).toBe(true);
     expect(key.match(/bailey/g)).toHaveLength(1);
-  });
-});
-
-describe("containment", () => {
-  it("is 1 for the same text and 0 for unrelated text", () => {
-    expect(containment("include an emoji", "include an emoji")).toBe(1);
-    expect(containment("include an emoji", "the pool party was great")).toBe(0);
-  });
-
-  it("is high for a reworded restatement", () => {
-    expect(containment("include an emoji", "include a relevant emoji")).toBeGreaterThan(0.5);
-  });
-
-  it("matches an allergy restatement across wordings", () => {
-    // The probe's three wordings of ONE fact: the second must be recognised
-    // as the same subject or the bank forks a row per rewording.
-    expect(containment("Bailey is allergic to peanuts", "Bailey cannot eat peanuts")).toBeGreaterThanOrEqual(0.6);
-    expect(containment("Bailey is allergic to peanuts", "Bailey is allergic to peanuts and tree nuts")).toBeGreaterThanOrEqual(0.6);
-  });
-
-  it("folds both sides, so an accent does not hide a restatement", () => {
-    expect(containment("Begoña loves tacos", "Begona loves tacos")).toBe(1);
   });
 });
 
@@ -140,5 +128,54 @@ describe("the generic words are not topics", () => {
         category: "allergy",
       }),
     ).toBe(false);
+  });
+});
+
+/**
+ * The merge rules are LOAD-BEARING and must be pinned: with the safety
+ * recogniser emptied, "Bailey should not eat peanuts" was overwritten by a
+ * preference; with the kinship list emptied, "Bailey's sister" was merged
+ * into "Bailey"; with the "says less" rule disabled, the richer stored
+ * wording was destroyed.
+ */
+describe("the merge rules are pinned", () => {
+  it("reads an ordinary prohibition as a safety claim", () => {
+    expect(assertsSafety("Bailey should not eat peanuts")).toBe(true);
+    expect(assertsSafety("Bailey must not eat peanuts")).toBe(true);
+    expect(assertsSafety("Bailey cannot eat peanuts")).toBe(true);
+    expect(assertsSafety("Bailey reacts badly to peanuts")).toBe(true);
+    expect(assertsSafety("Peanuts are banned at home")).toBe(true);
+    expect(assertsSafety("Bailey loves peanuts")).toBe(false);
+    expect(assertsSafety("Bailey prefers sushi")).toBe(false);
+  });
+
+  it("a kinship word makes a name a different person", () => {
+    expect(personMatches("Bailey", "Bailey Garcia")).toBe(true);
+    expect(personMatches("Bailey", "Bailey")).toBe(true);
+    expect(personMatches("Bailey", "Bailey's sister")).toBe(false);
+    expect(personMatches("Bailey", "Caspian")).toBe(false);
+  });
+
+  it("a write that says less may not replace the richer wording", () => {
+    expect(isLessInformative("blue", "Bailey prefers the blue plate")).toBe(true);
+    expect(isLessInformative("Bailey prefers the blue plate", "blue")).toBe(false);
+    expect(isLessInformative("Bailey prefers the green plate", "Bailey prefers the blue plate")).toBe(false);
+  });
+
+  it("a safety fact is refused a correction that is not a safety claim", () => {
+    const verdict = checkMerge(
+      { content: "Bailey should not eat peanuts", category: "note" },
+      { content: "Bailey loves peanuts" },
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.code).toBe("memory_safety_fact_protected");
+  });
+
+  it("a safety fact accepts a correction that is a safety claim", () => {
+    const verdict = checkMerge(
+      { content: "Bailey is allergic to peanuts", category: "allergy" },
+      { content: "Bailey reacts badly to peanuts" },
+    );
+    expect(verdict.ok).toBe(true);
   });
 });

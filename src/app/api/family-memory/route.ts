@@ -8,7 +8,7 @@ import { authorizeAdminRequest } from '@/lib/admin-auth';
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from '@/lib/memory-ids';
 import { queryMemories, getFamilyMemories, getMemoryStats, isMemoryRefusal } from '@/lib/family-memory';
 import type { MemoryCategory, MemoryQuery } from '@/lib/family-memory';
-import { slugify, subjectKey } from '@/lib/memory-subject';
+import { slugify, subjectKey, checkMerge } from '@/lib/memory-subject';
 
 // The ONE key grammar. The shared `slugify` lowercases AND folds before
 // slugging — the fold first matters, because the key is a machine identity
@@ -106,6 +106,27 @@ export async function POST(request: NextRequest) {
 
     const { storeMemory } = await import('@/lib/family-memory');
 
+    // The two merge rules, applied by the console's write path too: a
+    // SAFETY fact is replaced only by another safety claim, and a write may
+    // not make a fact say less. A client-supplied key must not be able to
+    // quietly overwrite a child's allergy.
+    const target = key
+      ? slugKey(key)
+      : subjectKey({ category: category || 'note', person, content });
+    const existing = await queryMemories({ userId: userId || MEMORY_USER_ID, familyId: familyId || MEMORY_FAMILY_ID, key: target });
+    if (existing.length) {
+      const verdict = checkMerge(
+        { content: existing[0].content, category: existing[0].category },
+        { content },
+      );
+      if (!verdict.ok) {
+        return NextResponse.json(
+          { ok: false, error: verdict.code, message: verdict.reason },
+          { status: 409 }
+        );
+      }
+    }
+
     const memory = await storeMemory({
       // F5 — unqualified adds land in the agent's namespace (the browser's
       // canonical id), not a phantom 'demo-user' row set.
@@ -115,7 +136,7 @@ export async function POST(request: NextRequest) {
       // The subject key: the client's when it named one, otherwise the one
       // the shared builder derives from the category, the person and the
       // topic.
-      key: key ? slugKey(key) : subjectKey({ category: category || 'note', person, content }),
+      key: target,
       content,
       tags,
       confidence,

@@ -275,23 +275,6 @@ export function subjectKey(input: {
 }
 
 /**
- * |A ∩ B| / min(|A|, |B|) over content tokens: 1 when the shorter text's
- * words are all in the longer one, 0 when they share nothing. It is a
- * SIMILARITY RATIO, not an identity — two sentences about the same person
- * share that person's name, so a high ratio says very little about whether
- * they are the same fact. Deciding whether two facts are the same subject is
- * `sameTopic` below, which compares the topics themselves.
- */
-export function containment(a: string, b: string): number {
-  const left = tokenSet(a);
-  const right = tokenSet(b);
-  if (!left.size || !right.size) return 0;
-  let shared = 0;
-  for (const token of left) if (right.has(token)) shared += 1;
-  return shared / Math.min(left.size, right.size);
-}
-
-/**
  * Are these two sentences about the SAME subject? Their topics must be the
  * SAME SET of informative words.
  *
@@ -390,7 +373,11 @@ export function assertsSafety(content: string): boolean {
   }
   // The multi-word refusals ("must not", "can't have") are not single tokens.
   const text = foldAccents(String(content ?? '').toLowerCase());
-  return /must not|cannot|can't|can not|no longer|not allowed|never|reacts badly|gives me|bad reaction/.test(text);
+  // The prohibitions are PROSE, and a phrase list misses the obvious ones:
+  // "should not eat", "ought not", "mustn't", "doesn't eat", "we don't do
+  // peanuts". A safety statement that the recogniser cannot see is a safety
+  // statement that can be overwritten.
+  return /must not|mustn't|cannot|can't|can not|should not|shouldn't|ought not|won't eat|no longer|not allowed|never|banned|excluded|reacts badly|gives me|bad reaction|doesn't (?:eat|drink|have)|do not (?:eat|drink|have)|don'?t (?:eat|drink|have)/.test(text);
 }
 
 /** The words that mark a safety claim. */
@@ -400,6 +387,8 @@ const SAFETY_CLAIM_WORDS: ReadonlySet<string> = new Set([
   'sensitive', 'sensitivity', 'reaction', 'reactions', 'rash', 'swelling',
   'anaphylaxis', 'celiac', 'diabetes', 'epilepsy', 'asthma', 'excluded',
   'react', 'reacts', 'reacted', 'badly', 'reaction', 'swelling', 'hives',
+  'banned', 'ban', 'bans', 'excluded', 'excluded', 'harmful', 'dangerous',
+  'unsafe', 'prohibited', 'forbidden', 'off', 'steer', 'steers',
 ]);
 
 /**
@@ -428,4 +417,46 @@ export function disambiguateKey(
     if (candidate !== claimedKey) return candidate;
   }
   return `${base}_10`;
+}
+
+/**
+ * The categories that carry a SAFETY condition. A fact in one of them may
+ * only be replaced by another safety claim.
+ */
+export const SAFETY_CATEGORIES: ReadonlySet<string> = new Set(['allergy', 'restriction']);
+
+/**
+ * May this write REPLACE the stored fact? Two rules, and they belong to the
+ * product rather than to the storage layer — so they live here and every
+ * writer that can reach a fact applies them:
+ *
+ *   1. A SAFETY fact is replaced only by another safety claim. A child's
+ *      allergy is not at the mercy of a differently-worded preference, and a
+ *      safety statement the recogniser cannot see must not be one it
+ *      overwrites.
+ *   2. A write may not make a fact say LESS. The richer stored wording
+ *      survives, and the caller is told.
+ */
+export function checkMerge(
+  stored: { content: string; category?: string },
+  next: { content: string; category?: string },
+): { ok: boolean; reason?: string; code?: string } {
+  const storedIsSafety =
+    SAFETY_CATEGORIES.has(String(stored.category ?? '')) ||
+    assertsSafety(String(stored.content ?? ''));
+  if (storedIsSafety && !assertsSafety(next.content)) {
+    return {
+      ok: false,
+      code: 'memory_safety_fact_protected',
+      reason: `A ${stored.category || 'safety'} fact can only be corrected by another safety statement — this one does not read like one, so nothing was changed.`,
+    };
+  }
+  if (isLessInformative(next.content, String(stored.content ?? ''))) {
+    return {
+      ok: false,
+      code: 'memory_would_say_less',
+      reason: 'The stored version says more — nothing was changed.',
+    };
+  }
+  return { ok: true };
 }

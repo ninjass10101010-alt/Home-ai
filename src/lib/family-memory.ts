@@ -141,6 +141,7 @@ export function isMemoryRefusal(error: unknown): boolean {
  *  trail, not an archive: an unbounded one would grow the row until
  *  PocketBase's row-size ceiling rejected the write. */
 const MAX_HISTORY = 10;
+
 /** The longest a subject key may be — the same cap the key builder uses. */
 const MAX_KEY = 50;
 
@@ -381,6 +382,13 @@ export async function storeMemory(input: StoreMemoryInput): Promise<FamilyMemory
         // already claimed by a DIFFERENT fact is the caller's job — see
         // `disambiguateKey` in memory-subject.ts, which the agent's tool
         // uses.
+        //
+        // TWO RULES LIVE HERE, NOT IN THE CALLER, because the store is the
+        // last gate before a fact is destroyed — the console's route and the
+        // capture detector write here too, and neither may be trusted to
+        // remember the rules:
+        //   1. A SAFETY fact is replaced only by another safety claim.
+        //   2. A write may not make a fact say LESS.
         assertHistoryColumns(existing);
         const history = [...parseHistory(existing.history), {
           version: versionOf(existing),

@@ -274,3 +274,24 @@ describe("remember_fact — a shared word is not an identity (NEW-1/NEW-4)", () 
     expect(rows()).toHaveLength(1);
   });
 });
+
+describe("remember_fact — a safety statement the recogniser must see", () => {
+  it("'should not eat' is a safety claim and is not overwritten by a preference", async () => {
+    await remember({ content: "Bailey should not eat peanuts", category: "note", person: "Bailey" });
+    await remember({ content: "Bailey loves peanuts", category: "preference", person: "Bailey" });
+    // The safety statement survives: it is either still the only row, or it
+    // sits beside the preference where the family can see the contradiction.
+    // What must never happen is the preference REPLACING it.
+    const contents = rows().map((r: any) => r.content);
+    expect(contents).toContain("Bailey should not eat peanuts");
+    const safety = rows().find((r: any) => r.content === "Bailey should not eat peanuts");
+    expect(safety?.content).toBe("Bailey should not eat peanuts");
+  });
+
+  it("'peanuts are banned at home' is a safety claim", async () => {
+    await remember({ content: "Peanuts are banned at home", category: "restriction" });
+    await remember({ content: "Peanuts are great", category: "preference" });
+    const contents = rows().map((r: any) => r.content);
+    expect(contents).toContain("Peanuts are banned at home");
+  });
+});
