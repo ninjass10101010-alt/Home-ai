@@ -667,6 +667,16 @@ export const COLLECTIONS = [
       { name: "lastUsed", type: "text" },
       { name: "createdAt", type: "text" },
       { name: "updatedAt", type: "text" },
+      // 2026-10-21 — the subject-key model. `key` is the SUBJECT key and the
+      // UNIQUE(userId, key) index below is the "one row per subject" guarantee:
+      // a correction replaces the row in place and the old text lands in
+      // `history` instead of forking a duplicate.
+      { name: "person", type: "text" },
+      { name: "scope", type: "text" },
+      { name: "status", type: "text" },
+      { name: "version", type: "number" },
+      { name: "history", type: "json" },
+      { name: "source", type: "text" },
     ],
     indexes: [
       "CREATE INDEX idx_family_memories_user ON consuela_family_memories (userId)",
@@ -674,6 +684,50 @@ export const COLLECTIONS = [
       // concurrent writers can never fork a duplicate. `key` is not a SQL
       // keyword (plain like the other (key) indexes — no "order" quoting).
       "CREATE UNIQUE INDEX idx_family_memories_user_key ON consuela_family_memories (userId, key)",
+    ],
+  },
+  // PROCEDURAL memory (2026-10-21) — the Hermes "skills/" idea: a named
+  // procedure for a task domain ("meals.add_emoji"). ONE live row per slug;
+  // a correction replaces the body in place and the old body lands in
+  // `history`. `useCount` is the telemetry that tells the curator which rules
+  // the family actually triggers.
+  {
+    name: "consuela_playbooks",
+    schema: [
+      { name: "slug", type: "text", required: true },
+      { name: "title", type: "text", required: true },
+      { name: "domain", type: "text" },
+      { name: "trigger", type: "text" },
+      { name: "body", type: "text", required: true },
+      { name: "version", type: "number" },
+      { name: "status", type: "text" },
+      { name: "history", type: "json" },
+      { name: "useCount", type: "number" },
+      { name: "lastUsed", type: "text" },
+      { name: "createdBy", type: "text" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_consuela_playbooks_slug ON consuela_playbooks (slug)",
+    ],
+  },
+  // The curator's ledger + undo store (2026-10-21). Every consolidation,
+  // capture and deletion writes a run row with a before-snapshot, so the
+  // family can undo it and the change is auditable.
+  {
+    name: "consuela_memory_runs",
+    schema: [
+      { name: "runId", type: "text", required: true },
+      { name: "trigger", type: "text" },
+      { name: "summary", type: "text" },
+      { name: "changes", type: "json" },
+      { name: "snapshot", type: "json" },
+      { name: "report", type: "text" },
+      { name: "undoneAt", type: "text" },
+      { name: "startedAt", type: "text" },
+      { name: "finishedAt", type: "text" },
+    ],
+    indexes: [
+      "CREATE INDEX idx_consuela_memory_runs_runid ON consuela_memory_runs (runId)",
     ],
   },
   // Dashboard-owned LLM provider registry (2026-09-07) — src/lib/ai/providers.ts.
