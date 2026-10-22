@@ -2074,6 +2074,81 @@ const TOOLS: Tool[] = [
   },
   {
     definition: {
+      name: "write_playbook",
+      description:
+        "Record HOW a task should always be done, so the next time it comes up you do it the same way. Use the SAME slug for a correction of a procedure you already recorded, so the old version is replaced instead of duplicated. Example: slug 'meals.add_meal', title 'Attach a relevant meal emoji'.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "The stable identity of the procedure, e.g. meals.add_meal" },
+          title: { type: "string", description: "One line naming the procedure" },
+          body: { type: "string", description: "The procedure itself" },
+          domain: { type: "string", description: "meals | grocery | tasks | calendar | chat | household" },
+          trigger: { type: "string", description: "When it applies, e.g. add_meal" },
+        },
+        required: ["slug", "title", "body"],
+      },
+    },
+    handler: async (args) => {
+      const slug = String(args.slug ?? "").trim();
+      const title = String(args.title ?? "").trim();
+      const body = String(args.body ?? "").trim();
+      if (!slug || !title || !body) return JSON.stringify({ error: "slug, title and body are required" });
+      const playbook = await writePlaybook({
+        slug,
+        title,
+        body,
+        domain: typeof args.domain === "string" ? args.domain : undefined,
+        trigger: typeof args.trigger === "string" ? args.trigger : undefined,
+        createdBy: "agent",
+      });
+      if (!playbook) return JSON.stringify({ error: "the playbook store is unavailable right now" });
+      return JSON.stringify({ ok: true, id: playbook.id, slug: playbook.slug, version: playbook.version });
+    },
+  },
+  {
+    definition: {
+      name: "patch_playbook",
+      description: "Correct a procedure you already recorded. Replaces the body; the old one is kept in history.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "The slug of the procedure" },
+          body: { type: "string", description: "The corrected procedure" },
+        },
+        required: ["slug", "body"],
+      },
+    },
+    handler: async (args) => {
+      const slug = String(args.slug ?? "").trim();
+      const body = String(args.body ?? "").trim();
+      if (!slug || !body) return JSON.stringify({ error: "slug and body are required" });
+      const patched = await patchPlaybook(slug, body, "agent");
+      if (!patched) return JSON.stringify({ error: `no playbook named ${slug}` });
+      return JSON.stringify({ ok: true, slug: patched.slug, version: patched.version });
+    },
+  },
+  {
+    definition: {
+      name: "read_playbook",
+      description: "Load the full text of a procedure before you follow it. The prompt only shows the index — read it to get the steps.",
+      parameters: {
+        type: "object",
+        properties: { slug: { type: "string", description: "The slug of the procedure" } },
+        required: ["slug"],
+      },
+    },
+    handler: async (args) => {
+      const slug = String(args.slug ?? "").trim();
+      if (!slug) return JSON.stringify({ error: "slug is required" });
+      const playbook = await getPlaybook(slug);
+      if (!playbook) return JSON.stringify({ error: `no playbook named ${slug}` });
+      await incrementPlaybookUsage(slug);
+      return JSON.stringify({ slug: playbook.slug, title: playbook.title, body: playbook.body, domain: playbook.domain, trigger: playbook.trigger });
+    },
+  },
+  {
+    definition: {
       name: "check_for_update",
       description: "Check if a new version of the Consuela Dashboard is available on GitHub. Returns the current version, latest remote version, and whether an update is available.",
       parameters: { type: "object", properties: {} },
