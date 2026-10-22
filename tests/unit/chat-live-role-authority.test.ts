@@ -36,7 +36,11 @@ vi.mock("@/lib/pb-auth", () => ({
 }));
 vi.mock("@/db", () => ({ db: { insertChatMessage: mocks.insertChatMessage } }));
 vi.mock("@/lib/ai/health", () => ({ recordChatOutcome: mocks.recordChatOutcome }));
-vi.mock("@/lib/family-memory", () => ({ buildMemoryContext: mocks.buildMemoryContext }));
+vi.mock("@/lib/family-memory", () => ({ buildMemoryContext: mocks.buildMemoryContext, storeMemory: vi.fn(async () => null) }));
+vi.mock("@/lib/memory-context", () => ({ buildMemoryContextBlock: vi.fn(async () => "") }));
+vi.mock("@/lib/memory-capture", () => ({ detectCaptures: vi.fn(() => []) }));
+vi.mock("@/lib/memory-playbooks", () => ({ writePlaybook: vi.fn(async () => null) }));
+vi.mock("@/lib/consuela/live-reads", () => ({ liveMembers: vi.fn(async () => []) }));
 vi.mock("@/lib/consuela/assistant-context", () => ({
   loadContextPack: mocks.loadContextPack,
   composeContextPrompt: () => "",
