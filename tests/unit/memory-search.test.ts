@@ -46,9 +46,10 @@ describe("tokenize", () => {
     expect(tokenize("É sushi")).toEqual(["sushi"]);
   });
 
-  it("dedupes and caps the term count at 12", () => {
+  it("dedupes and caps the WORD count at 12", () => {
     // 13 distinct content words plus a repeat that lands INSIDE the cap: the
-    // cap must cut the tail AND the repeat must not appear twice.
+    // cap must cut the tail AND the repeat must not appear twice. The cap
+    // counts WORDS — a word that travels in several forms is still one word.
     const terms = tokenize(
       "alpha bravo alpha charlie delta echo foxtrot golf hotel india juliet kilo lima mike november",
     );
@@ -93,6 +94,32 @@ describe("tokenize", () => {
     expect(tokenize("José")).toEqual(["jose", "josé"]);
   });
 
+  it("counts WORDS toward the cap, not forms — 12 accented words are 12 words", () => {
+    // A word travels in up to three forms (folded + raw + original case), so a
+    // cap counted in FORMS was spent after five accented words and the rest
+    // of the message never reached the filter. The cap is a cap on WORDS, and
+    // a word's forms follow it.
+    const words = [
+      "Begoña", "Muñoz", "Søren", "Đorđe", "Éloise", "José",
+      "Ångström", "Straße", "Æthelred", "Łukasz", "Ørsted", "Bégonia", "tacos",
+    ];
+    const terms = tokenize(words.join(" "));
+    // Every word but the 13th contributed its forms.
+    for (const word of words.slice(0, 12)) {
+      for (const form of tokenize(word)) expect(terms).toContain(form);
+    }
+    // The 13th word is the one dropped.
+    expect(terms).not.toContain("tacos");
+    expect(terms).not.toContain("tac");
+  });
+
+  it("spends the word cap on DISTINCT words — a repeated word does not cost a slot", () => {
+    // "sushi sushi sushi …" must not push the last word of the message out
+    // of the filter: a repeat adds no new term, so it costs no word either.
+    expect(tokenize("sushi sushi sushi ramen")).toEqual(["sushi", "ramen"]);
+    expect(tokenize("sushi sushi sushi ramen", { max: 2 })).toEqual(["sushi", "ramen"]);
+  });
+
   it("maps the letters NFKD cannot decompose, so a name survives tokenising", () => {
     // ø ł đ ð þ æ œ ß have no Unicode decomposition, so NFKD leaves them
     // and the old splitter cut them into fragments ("Søren" → "ren") or
@@ -119,6 +146,27 @@ describe("escapeFilterValue", () => {
     expect(escapeFilterValue("50% off")).toBe("50 per cent off");
     expect(escapeFilterValue("a_b")).toBe("a b");
     expect(escapeFilterValue("back\\slash")).toBe("back slash");
+  });
+
+  it("strips the control characters that make PocketBase reject the WHOLE filter", () => {
+    // A NUL byte answers 400 for the entire filter (proved on PocketBase
+    // 0.40.5), so it can never reach the filter string.
+    expect(escapeFilterValue("sushi\u0000ramen")).toBe("sushi ramen");
+    expect(escapeFilterValue("a\u0000")).toBe("a");
+    expect(escapeFilterValue("\u0000")).toBe("");
+    expect(escapeFilterValue("a\u0007b\u001fc")).toBe("a b c");
+    expect(buildMemoryFilter(["sushi\u0000ramen"])).not.toContain("\u0000");
+  });
+
+  it("caps a term so the generated filter can never exceed what PocketBase accepts", () => {
+    // PocketBase 0.40.5 rejects a filter over 3,500 bytes (and over 200
+    // conditions) with a 400 — and a rejected filter means the memory
+    // silently disappears. A pasted blob must still produce a usable filter.
+    const escaped = escapeFilterValue("a".repeat(5000));
+    expect(escaped.length).toBeLessThanOrEqual(64);
+    const filter = buildMemoryFilter(["a".repeat(5000)]);
+    expect(filter.length).toBeLessThanOrEqual(3500);
+    expect(filter).toContain('content ~ "');
   });
 });
 
@@ -165,6 +213,39 @@ describe("buildMemoryFilter", () => {
     ];
     const reached = rows.filter((row) => clauses.some((c) => likeMatch(row.content, c)));
     expect(reached.map((r) => r.key)).toEqual(["raw", "folded"]);
+  });
+
+  it("reaches an ALL-CAPS accented row only when the query carries that case", () => {
+    // The module's guarantee is EXACT, and this test is what makes the
+    // docstring's sentence true: a row is found whether it is stored folded
+    // or accented IN THE CASE THE NAME WAS TYPED IN. A LIKE folds ASCII case
+    // and nothing else, so "BEGOÑA LOVES SUSHI" is reached by "BEGOÑA" and
+    // not by "Begoña" — the write-side fold (the store task) closes that.
+    const rows = [
+      { key: "typed", content: "Begoña loves sushi" },
+      { key: "folded", content: "Begona loves sushi" },
+      { key: "caps", content: "BEGOÑA LOVES SUSHI" },
+    ];
+    const typed = contentClauses(buildMemoryFilter(tokenize("Begoña")));
+    const reached = rows.filter((row) => typed.some((c) => likeMatch(row.content, c)));
+    expect(reached.map((r) => r.key)).toEqual(["typed", "folded"]);
+    const caps = contentClauses(buildMemoryFilter(tokenize("BEGOÑA")));
+    const capsReached = rows.filter((row) => caps.some((c) => likeMatch(row.content, c)));
+    expect(capsReached.map((r) => r.key)).toContain("caps");
+  });
+
+  it("never builds a filter PocketBase would reject — 200 conditions and 3,500 bytes are its limits", () => {
+    // Measured on PocketBase 0.40.5: a filter over 200 conditions or over
+    // 3,500 bytes is rejected with a 400, and a rejected filter is a memory
+    // that silently disappears.
+    const many = Array.from({ length: 500 }, (_, i) => `term${i}`);
+    const filter = buildMemoryFilter(many);
+    const conditions = (filter.match(/~/g) ?? []).length;
+    expect(conditions).toBeLessThanOrEqual(200);
+    expect(filter.length).toBeLessThanOrEqual(3500);
+    // The FIRST terms are the ones that survive — the caller's fake
+    // PocketBase reads the first `content ~` clause.
+    expect(contentClauses(filter)[0]).toBe("term0");
   });
 });
 
@@ -305,6 +386,64 @@ describe("scoreMemory", () => {
     expect(Number.isFinite(scoreMemory(text, ["sushi"]))).toBe(true);
     const infinite = { ...broken, confidence: Number.POSITIVE_INFINITY };
     expect(Number.isFinite(scoreMemory(infinite, ["sushi"]))).toBe(true);
+  });
+
+  it("scores a MATCHED fact above zero even when its confidence is negative", () => {
+    // `confidence` is writable UNVALIDATED (the family-memory route reads it
+    // straight from the request body), so a negative value is reachable in
+    // production. The caller's `score > 0` filter would then drop a fact the
+    // filter had just fetched — the module's own docstring promises this
+    // cannot happen.
+    const mem = { id: "neg", category: "note", content: "sushi", confidence: -5 };
+    expect(scoreMemory(mem, ["sushi"])).toBeGreaterThan(0);
+    expect(scoreMemory({ ...mem, confidence: -1 }, ["sushi"])).toBeGreaterThan(0);
+    expect(scoreMemory({ ...mem, confidence: -1e9 }, ["sushi"])).toBeGreaterThan(0);
+  });
+
+  it("ranks a junk-confidence fact BELOW a healthy one — a negative confidence is neutral, never a penalty", () => {
+    const junk = { id: "j", category: "note", content: "sushi", confidence: -5 };
+    const good = { id: "g", category: "note", content: "sushi", confidence: 0.9 };
+    expect(scoreMemory(junk, ["sushi"])).toBeLessThan(scoreMemory(good, ["sushi"]));
+  });
+
+  it("scores a fact whose KEY carries the term in a different case", () => {
+    // The key is the subject slug the filter ALSO searches, so a key-side
+    // case regression re-creates the "fetched, scored zero, forgotten" shape.
+    const mem = {
+      id: "k2",
+      category: "preference",
+      key: "Preference_Sushi_Bailey",
+      content: "n",
+      confidence: 0.9,
+    };
+    expect(scoreMemory(mem, ["sushi"])).toBeGreaterThan(0);
+  });
+
+  it("scores a fact whose PERSON carries the term in a different case", () => {
+    const mem = { id: "p2", category: "preference", person: "Bailey", content: "n", confidence: 0.9 };
+    expect(scoreMemory(mem, ["bailey"])).toBeGreaterThan(0);
+    expect(scoreMemory(mem, ["BAILEY"])).toBeGreaterThan(0);
+  });
+
+  it("gives the speaker bonus when the person's name is written in another case", () => {
+    const mem = { id: "p3", category: "note", content: "sushi", person: "Emily", confidence: 0 };
+    expect(scoreMemory(mem, ["sushi"], { speakerName: "emily" })).toBe(3);
+  });
+
+  it("gives the speaker bonus only to the SPEAKER's own facts — 'Ann' is not inside 'Joanne'", () => {
+    // A substring test hands one sibling the other's +2: "Joanne" contains
+    // "Ann". The match is on whole words.
+    const joanne = { id: "j", category: "note", content: "sushi", person: "Joanne", confidence: 0 };
+    const ann = { id: "a", category: "note", content: "sushi", person: "Ann", confidence: 0 };
+    expect(scoreMemory(joanne, ["sushi"], { speakerName: "Ann" })).toBe(1);
+    expect(scoreMemory(ann, ["sushi"], { speakerName: "Ann" })).toBe(3);
+  });
+
+  it("gives the speaker bonus to a fact whose person carries the speaker's name as a whole word", () => {
+    // "Ann Marie" IS Ann: the match is a deliberate word-boundary match, not
+    // a substring of the whole name.
+    const mem = { id: "am", category: "note", content: "sushi", person: "Ann Marie", confidence: 0 };
+    expect(scoreMemory(mem, ["sushi"], { speakerName: "Ann" })).toBe(3);
   });
 });
 
@@ -469,6 +608,22 @@ describe("selectCoreFacts", () => {
       { budget: 48 },
     );
     expect(kept.map((f) => f.id)).toEqual(["safe", "note"]);
+  });
+
+  it("treats a junk budget as a hard, small limit — never as 'no limit'", () => {
+    // `Math.max(0, NaN)` is NaN and every comparison against NaN is false,
+    // so a junk budget silently kept EVERY fact: the always-injected core
+    // grew without bound because a caller passed NaN.
+    const facts = [
+      { id: "a", category: "note", content: "a".repeat(20), confidence: 0.9 },
+      { id: "b", category: "note", content: "b".repeat(20), confidence: 0.8 },
+    ];
+    expect(selectCoreFacts(facts, { budget: Number.NaN })).toEqual([]);
+    expect(selectCoreFacts(facts, { budget: undefined as unknown as number })).toEqual([]);
+    expect(selectCoreFacts(facts, { budget: Number.POSITIVE_INFINITY })).toEqual([]);
+    // A safety fact is still kept — the budget rations the discretionary facts.
+    const withSafety = [...facts, { id: "s", category: "allergy", content: "peanuts", confidence: 0.9 }];
+    expect(selectCoreFacts(withSafety, { budget: Number.NaN }).map((f) => f.id)).toEqual(["s"]);
   });
 });
 

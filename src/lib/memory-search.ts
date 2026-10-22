@@ -14,19 +14,26 @@
  *
  * ACCENT CONTRACT: a PocketBase `~` is a byte-wise `LIKE` — it folds ASCII
  * case and NOTHING else, so it can never fold an accent. A word therefore
- * travels in TWO forms and the filter carries BOTH: the folded ASCII skeleton
- * ("Begoña" → "begona") reaches a row stored folded, and the raw accented
- * word ("begoña") reaches a row stored with its accent. A row stored EITHER
- * WAY is fetched, and every comparison this module owns folds both sides, so
- * a fetched fact always scores above zero for the word that fetched it. A
- * word whose accented letter is CAPITAL ("Éloise") also travels in its
- * original case, because SQLite folds ASCII case only — "éloise" cannot reach
- * a stored "Éloise".
+ * travels in TWO forms (THREE when its accented letter is capital) and the
+ * filter carries ALL of them: the folded ASCII skeleton ("Begoña" →
+ * "begona") reaches a row stored folded, and the raw accented word
+ * ("begoña") reaches a row stored with its accent. Every comparison this
+ * module owns folds both sides, and every match weighs at least 1 while
+ * every bonus weighs at least 0, so a fetched fact ALWAYS scores above zero
+ * for the word that fetched it — a junk `confidence` can never subtract from
+ * the evidence that fetched the row.
+ *
+ * THE ONE EXCEPTION, stated exactly: a row stored ALL-CAPS WITH ITS ACCENT
+ * ("BEGOÑA LOVES TACOS") is reached only by a query typed in that case,
+ * because a LIKE folds ASCII case and nothing else. The guarantee is
+ * therefore "the row is found whether it is stored folded or accented IN THE
+ * CASE THE NAME WAS TYPED IN" — and the write-side fold (the store task)
+ * closes the exception for good.
  *
  * The WRITE side should still fold: the store owns what it persists, and a
  * folded row then matches the folded form of every name. Folding on write
- * belongs to the store task — reachability here does not depend on it, which
- * is the point: the row is found whether it is stored folded or accented.
+ * belongs to the store task — reachability here does not depend on it, apart
+ * from the all-caps row named above.
  */
 
 export interface MemoryLike {
@@ -54,7 +61,7 @@ export const MEMORY_STOP_WORDS: ReadonlySet<string> = new Set([
   "where", "which", "who", "why", "will", "with", "would", "you", "your",
 ]);
 
-const DEFAULT_MAX_TERMS = 12;
+const DEFAULT_MAX_WORDS = 12;
 
 /** Letters Unicode cannot decompose, so NFKD leaves them alone: ø ł đ ð þ æ œ ß.
  *  Mapped to their ASCII forms so a name survives tokenising whole — without
@@ -119,40 +126,73 @@ function wordForms(word: string): { skeleton: string; forms: string[] } {
   return { skeleton, forms };
 }
 
-/** Split into words, drop stop-words and 1-char tokens, dedupe, cap. */
+/** Split into words, drop stop-words and 1-char tokens, dedupe, cap.
+ *
+ *  The cap counts WORDS, not terms: an accented word travels in up to three
+ *  forms, so a cap counted in terms was spent after five accented words and
+ *  the rest of the message never reached the filter. A word's forms follow
+ *  the word, and a word that adds no new form (a repeat) costs no slot. */
 export function tokenize(text: string, opts?: { max?: number }): string[] {
-  const max = Math.floor(opts?.max ?? DEFAULT_MAX_TERMS);
+  const max = Math.floor(opts?.max ?? DEFAULT_MAX_WORDS);
   if (!Number.isFinite(max) || max <= 0) return [];
   const seen = new Set<string>();
   const out: string[] = [];
+  let words = 0;
   for (const word of String(text ?? "").split(WORD_SPLIT)) {
     if (!word) continue;
     const { skeleton, forms } = wordForms(word);
     if (MEMORY_STOP_WORDS.has(skeleton)) continue;
+    let added = 0;
     for (const form of forms) {
       if (form.length < 2) continue;
       if (seen.has(form)) continue;
       seen.add(form);
       out.push(form);
-      if (out.length >= max) break;
+      added += 1;
     }
-    if (out.length >= max) break;
+    // A repeat adds no new form, so it costs no word of the cap either.
+    if (added > 0) {
+      words += 1;
+      if (words >= max) break;
+    }
   }
   return out;
 }
+
+/** PocketBase 0.40.5's own filter limits, measured on a real PocketBase with
+ *  the real `consuela_family_memories` schema: a filter may carry at most
+ *  200 conditions and at most 3,500 bytes. One byte more, or one condition
+ *  more, and the filter is REJECTED with a 400 — which the caller swallows,
+ *  so the memory silently disappears. */
+const MAX_FILTER_BYTES = 3500;
+const MAX_FILTER_CONDITIONS = 200;
+
+/** The longest escaped term that reaches a filter. A term is a WORD of the
+ *  user's message, so 64 characters is far more than any real one — but a
+ *  pasted blob (or a CJK run with no spaces) is not, and an uncapped term
+ *  would build a filter PocketBase rejects. */
+const MAX_FILTER_TERM_CHARS = 64;
 
 /**
  * Make a value safe to interpolate into a PocketBase filter string.
  * A raw `"` produces an invalid filter (PB 400 → the catch swallows it →
  * memory silently disappears); `%` and `_` are LIKE wildcards; `\` is PB's
  * escape character.
+ *
+ * A NUL byte (and the other control characters) makes PocketBase reject the
+ * WHOLE filter, so they are stripped here rather than escaped — a control
+ * character carries no meaning in a name, and a filter that cannot run is
+ * worse than a filter that matches a little less.
  */
 export function escapeFilterValue(value: string): string {
   return String(value ?? "")
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, " ")
     .replace(/\\/g, " ")
     .replace(/"/g, "'")
     .replace(/%/g, " per cent")
     .replace(/_/g, " ")
+    .trim()
+    .slice(0, MAX_FILTER_TERM_CHARS)
     .trim();
 }
 
@@ -160,17 +200,27 @@ export function escapeFilterValue(value: string): string {
  * One OR across content, tags and key. A single-token LIKE per term is the
  * only shape PocketBase can express, and it is what makes a multi-word
  * question find a memory at all.
+ *
+ * The filter stays inside PocketBase's measured limits (200 conditions,
+ * 3,500 bytes): the tail is dropped rather than handing PocketBase a filter
+ * it would reject, because a rejected filter is a 400 and a 400 is a memory
+ * that silently disappears. The HEAD survives, and the head is the part that
+ * matters — the first term is the first `content ~` clause a caller reads.
  */
 export function buildMemoryFilter(terms: string[]): string {
-  const parts: string[] = [];
+  let filter = "";
+  let conditions = 0;
   for (const term of terms) {
     const safe = escapeFilterValue(term);
     if (!safe) continue;
-    parts.push(`content ~ "${safe}"`);
-    parts.push(`tags ~ "${safe}"`);
-    parts.push(`key ~ "${safe}"`);
+    const clause = `content ~ "${safe}" || tags ~ "${safe}" || key ~ "${safe}"`;
+    const next = filter ? `${filter} || ${clause}` : clause;
+    if (conditions + 3 > MAX_FILTER_CONDITIONS) break;
+    if (next.length + 2 > MAX_FILTER_BYTES) break;
+    filter = next;
+    conditions += 3;
   }
-  return parts.length ? `(${parts.join(" || ")})` : "";
+  return filter ? `(${filter})` : "";
 }
 
 /** `tags` is a TEXT column, so PocketBase hands back the JSON string the store
@@ -195,6 +245,17 @@ const SAFETY_CATEGORIES = new Set(["allergy", "restriction"]);
 function finiteNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/** Is the fact's person the speaker? The match is on WHOLE WORDS: "Ann" is
+ *  not inside "Joanne", so a fact about a different person never inherits
+ *  the speaker's +2. Both names arrive folded and lowercased. */
+function isSamePerson(person: string, speaker: string): boolean {
+  const who = person.trim();
+  const talking = speaker.trim();
+  if (!who || !talking) return false;
+  if (who === talking) return true;
+  return who.split(/\s+/).includes(talking);
 }
 
 /** Weighted relevance. Person/tag hits beat content hits; safety facts beat
@@ -228,6 +289,11 @@ export function scoreMemory(
     counted.add(term);
     if (content.includes(term)) score += 1;
     if (tagText.some((t) => t.includes(term))) score += 1.2;
+    // The person match stays a SUBSTRING, unlike the speaker bonus below: the
+    // filter's `~` is a substring match too, so a fact the filter fetched
+    // through a person's name must score here as well. Making it a
+    // word-boundary match would re-create the "fetched, scored zero,
+    // forgotten" shape this module exists to prevent.
     if (person && person.includes(term)) score += 1.2;
     // The key is the subject slug the filter ALSO searches, so a fact whose
     // only hit is in the key is fetched by the filter — if it scored zero here
@@ -240,9 +306,15 @@ export function scoreMemory(
   // The speaker bonus belongs to the FACT (its person is the one being asked
   // about), not to the query — it is added once, so the same fact scores the
   // same however many terms happened to match it.
-  if (speaker && person && (person === speaker || person.includes(speaker))) score += 2;
+  if (isSamePerson(person, speaker)) score += 2;
   if (SAFETY_CATEGORIES.has(String(mem.category))) score += 1.5;
-  score += finiteNumber(mem.confidence);
+  // A junk confidence must never subtract from the evidence that fetched the
+  // row: `confidence` is writable UNVALIDATED (the family-memory route reads
+  // it straight from the request body), so a negative value is reachable in
+  // production, and the caller's `score > 0` filter would then drop a fact
+  // the filter had just fetched. Clamped at zero, a junk confidence is
+  // NEUTRAL — never a penalty that cancels the match.
+  score += Math.max(0, finiteNumber(mem.confidence));
   score += Math.log10(1 + Math.max(0, finiteNumber(mem.usageCount))) * 0.25;
   const updated = mem.updatedAt ? Date.parse(mem.updatedAt) : NaN;
   if (!Number.isNaN(updated) && ctx?.now !== undefined) {
@@ -292,12 +364,20 @@ export function rankFacts<T extends MemoryLike>(mems: T[], ctx?: { now?: number 
  * `speakerName` is accepted so call sites can pass it, but it is NOT a
  * privacy control: scoping the set to one speaker is the caller's job (a
  * child must never be handed a sibling's fact).
+ *
+ * The budget is always a finite number. A budget that is not one (NaN,
+ * undefined, Infinity) is treated as ZERO — a hard, small limit — because a
+ * junk budget must never mean "no limit" for the always-injected core.
  */
 export function selectCoreFacts<T extends MemoryLike>(
   mems: T[],
   opts: { budget: number; speakerName?: string; now?: number },
 ): T[] {
-  const budget = Math.max(0, opts.budget);
+  // A budget is always a FINITE number. `Math.max(0, NaN)` is NaN, and every
+  // comparison against NaN is false — so a junk budget silently kept every
+  // fact and the always-injected core grew without bound. A junk budget is a
+  // hard, small limit instead: zero discretionary facts.
+  const budget = Number.isFinite(opts.budget) ? Math.max(0, opts.budget) : 0;
   const safety = mems.filter((m) => SAFETY_CATEGORIES.has(String(m.category)));
   const rest = mems.filter((m) => !SAFETY_CATEGORIES.has(String(m.category)));
   const chosen: T[] = [];
