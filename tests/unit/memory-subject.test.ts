@@ -179,3 +179,53 @@ describe("the merge rules are pinned", () => {
     expect(verdict.ok).toBe(true);
   });
 });
+
+/**
+ * The fifth review's findings: the safety recogniser is a phrase list, and a
+ * phrase list misses the obvious prohibitions — "should not eat", "ought
+ * not", "mustn't", "doesn't eat", "we don't do peanuts", "banned". A safety
+ * statement the recogniser cannot SEE is a safety statement it can overwrite.
+ * The lists themselves are load-bearing: emptying one must fail a test, or a
+ * future edit can silently drop a whole class of prohibition.
+ */
+describe("the merge rules are pinned", () => {
+  it("reads an ordinary prohibition as a safety claim", () => {
+    expect(assertsSafety("Bailey should not eat peanuts")).toBe(true);
+    expect(assertsSafety("Bailey must not eat peanuts")).toBe(true);
+    expect(assertsSafety("Bailey cannot eat peanuts")).toBe(true);
+    expect(assertsSafety("Bailey reacts badly to peanuts")).toBe(true);
+    expect(assertsSafety("Peanuts are banned at home")).toBe(true);
+    expect(assertsSafety("Bailey loves peanuts")).toBe(false);
+    expect(assertsSafety("Bailey prefers sushi")).toBe(false);
+  });
+
+  it("a kinship word makes a name a different person", () => {
+    expect(personMatches("Bailey", "Bailey Garcia")).toBe(true);
+    expect(personMatches("Bailey", "Bailey")).toBe(true);
+    expect(personMatches("Bailey", "Bailey's sister")).toBe(false);
+    expect(personMatches("Bailey", "Caspian")).toBe(false);
+  });
+
+  it("a write that says less may not replace the richer wording", () => {
+    expect(isLessInformative("blue", "Bailey prefers the blue plate")).toBe(true);
+    expect(isLessInformative("Bailey prefers the blue plate", "blue")).toBe(false);
+    expect(isLessInformative("Bailey prefers the green plate", "Bailey prefers the blue plate")).toBe(false);
+  });
+
+  it("a safety fact is refused a correction that is not a safety claim", () => {
+    const verdict = checkMerge(
+      { content: "Bailey should not eat peanuts", category: "note" },
+      { content: "Bailey loves peanuts" },
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.code).toBe("memory_safety_fact_protected");
+  });
+
+  it("a safety fact accepts a correction that is a safety claim", () => {
+    const verdict = checkMerge(
+      { content: "Bailey is allergic to peanuts", category: "allergy" },
+      { content: "Bailey reacts badly to peanuts" },
+    );
+    expect(verdict.ok).toBe(true);
+  });
+});

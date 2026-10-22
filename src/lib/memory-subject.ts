@@ -27,16 +27,13 @@
  *   "Bailey loves pizza"                   → topic {pizza}
  *
  * Two facts are the SAME subject when their topics are the SAME SET of
- * informative words — the object the fact is about. Anything less than an
- * exact match is treated as a DIFFERENT subject.
- *
- * That is deliberately strict, and the reasoning is worth stating: a
- * SHARED word is not an identity. "Peanut butter" and "Peanut oil" share
- * "peanut", and a shared-word rule merged them — one child's second
- * allergy silently destroying the first. The same is true of "has practice
- * on Tuesdays" and "has soccer on Tuesdays", which share a day. A row the
- * family can see is a nuisance; a silently replaced allergy is a harm, so
- * the merge has to be CERTAIN and the fork is the safe answer.
+ * informative words — the object the fact is about. A shared word is not
+ * enough: "peanut butter" and "peanut oil" share "peanut", and a
+ * shared-word rule merged them — one child's second allergy silently
+ * destroying the first. The same is true of "has practice on Tuesdays" and
+ * "has soccer on Tuesdays", which share a day. A row the family can see is
+ * a nuisance; a silently replaced allergy is a harm, so the merge has to be
+ * CERTAIN and the fork is the safe answer.
  *
  * The way to be certain is to NAME the subject: the tool's `topic`
  * argument makes the key exact, and a key that already exists is replaced
