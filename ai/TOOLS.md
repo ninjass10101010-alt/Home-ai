@@ -120,6 +120,7 @@ consequences you must respect:
 | `remember_fact` | Store a fact you are certain about. Use the same topic for a correction, so the old text is replaced |
 | `propose_memory` | Offer a fact you are not certain about. The parent approves with one tap — nothing is stored until then |
 | `forget_memory` | Only on explicit request. Recall the id first, confirm, then forget |
+| `search_conversations` | "Did we discuss X last week?" — search PAST conversations by keyword |
 
 ## Playbooks (parents only) — how a task is always done
 
