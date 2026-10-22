@@ -26,6 +26,17 @@ describe("slugify", () => {
     expect(slugify("a".repeat(80)).length).toBe(50);
   });
 
+  it("folds accents before slugging (Begoña → begona, never bego_a)", () => {
+    expect(slugify("Begoña")).toBe("begona");
+  });
+  it("lowercases, replaces non-alphanumerics with underscores and trims", () => {
+    expect(slugify("Peanut Butter!")).toBe("peanut_butter");
+  });
+
+  it("caps the length", () => {
+    expect(slugify("a".repeat(80)).length).toBe(50);
+  });
+
   it("folds an accented name instead of cutting it in half", () => {
     // The key is a machine identity, so it must be ASCII — but "bego_a" is
     // not the family's name, and the store folds the key with the SAME
@@ -39,7 +50,7 @@ describe("subjectKey", () => {
     expect(subjectKey({ category: "allergy", topic: "peanuts", person: "Emily" })).toBe("allergy_peanuts_emily");
   });
 
-  it("falls back to the TOPIC of the content, not a slug of its wording", () => {
+  it("falls back to the TOPIC of the content when no topic is named", () => {
     // The key is the topic ("wifi code drawer"), not the sentence's words
     // ("the_wifi_code_is_in_the"): a slug of the wording would be a NEW
     // subject for every rewording, which is the fork this module exists to
