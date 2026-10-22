@@ -29,8 +29,24 @@ describe("subjectKey", () => {
     expect(subjectKey({ category: "allergy", topic: "peanuts", person: "Emily" })).toBe("allergy_peanuts_emily");
   });
 
-  it("falls back to the content when there is no topic", () => {
-    expect(subjectKey({ category: "note", content: "The wifi code is in the drawer" })).toBe("note_the_wifi_code_is_in_the");
+  it("falls back to the TOPIC of the content, not a slug of its wording", () => {
+    // The key is the topic ("wifi code drawer"), not the sentence's words
+    // ("the_wifi_code_is_in_the"): a slug of the wording would be a NEW
+    // subject for every rewording, which is the fork this module exists to
+    // end.
+    expect(subjectKey({ category: "note", content: "The wifi code is in the drawer" })).toBe("note_wifi_code_drawer");
+  });
+
+  it("a rewording of the same fact gets the SAME key", () => {
+    const a = subjectKey({ category: "allergy", person: "Bailey", content: "Bailey is allergic to peanuts" });
+    const b = subjectKey({ category: "allergy", person: "Bailey", content: "Bailey cannot eat peanuts" });
+    expect(a).toBe(b);
+  });
+
+  it("two DIFFERENT facts get different keys", () => {
+    const peanuts = subjectKey({ category: "allergy", person: "Bailey", content: "Bailey is allergic to peanuts" });
+    const shellfish = subjectKey({ category: "allergy", person: "Bailey", content: "Bailey is allergic to shellfish" });
+    expect(peanuts).not.toBe(shellfish);
   });
 
   it("never exceeds 50 characters", () => {

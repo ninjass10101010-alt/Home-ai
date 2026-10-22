@@ -52,14 +52,17 @@ describe("memory tool gating", () => {
 
 describe("remember_fact", () => {
   it("stores against a subject key, not a slug of the content", async () => {
-    mocks.storeMemory.mockResolvedValue({ id: "m1", key: "allergy_is_allergic_to_peanu_bailey", content: "Bailey is allergic to peanuts" });
+    mocks.storeMemory.mockResolvedValue({ id: "m1", key: "allergy_peanuts_bailey", content: "Bailey is allergic to peanuts" });
     const tool = getTool("remember_fact")!;
     const out = await tool.handler({ content: "Bailey is allergic to peanuts", category: "allergy", person: "Bailey" });
     expect(mocks.storeMemory).toHaveBeenCalledWith({
       userId: "consuela",
       familyId: "demo-family",
       category: "allergy",
-      key: "allergy_is_allergic_to_peanu_bailey",
+      // The TOPIC, not the wording: "allergy_peanuts_bailey". A key built
+      // from the sentence's own words would be a new subject for every
+      // rewording, and a rewording must REPLACE the row, not fork it.
+      key: "allergy_peanuts_bailey",
       content: "Bailey is allergic to peanuts",
       tags: ["Bailey"],
       confidence: 0.9,

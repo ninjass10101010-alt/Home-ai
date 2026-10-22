@@ -33,7 +33,7 @@ import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, listActiveFacts, replaceMemoryContent, isMemoryRefusal, type MemoryCategory } from "@/lib/family-memory";
 import { foldAccents } from "@/lib/memory-search";
-import { subjectKey, findReplacementSubject } from "@/lib/memory-subject";
+import { subjectKey, findReplacementSubject, isLessInformative } from "@/lib/memory-subject";
 import { createTaskOperationId } from "@/lib/task-operation-payload";
 import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -1858,12 +1858,32 @@ const TOOLS: Tool[] = [
         return JSON.stringify({ error: "memory store is unavailable right now — try again later" });
       }
       const sameKind = active.filter((m) => m.category === category && (!person || !m.person || samePerson(m.person, person)));
+      // The match is by TOPIC (the informative words), never by content
+      // overlap: an overlap score counts the person's NAME, so "allergic to
+      // peanuts" and "allergic to shellfish" would score as near-identical
+      // and collapse into ONE row — the peanut allergy destroyed.
       const replacement = findReplacementSubject(
         sameKind.map((m) => ({ key: m.key, content: m.content })),
         content,
+        { category, person },
       );
 
       if (replacement) {
+        const stored = sameKind.find((m) => m.key === replacement);
+        // A merge must never DEGRADE a fact: the bare word "peanuts" must not
+        // replace "Bailey is allergic to peanuts". The richer stored wording
+        // stays, and the answer says so instead of claiming the new text was
+        // saved.
+        if (stored && isLessInformative(content, stored.content)) {
+          return JSON.stringify({
+            ok: true,
+            id: stored.id,
+            key: stored.key,
+            stored: stored.content,
+            replaced: false,
+            kept: "the stored version says more — nothing was changed",
+          });
+        }
         try {
           const updated = await replaceMemoryContent({
             userId: MEMORY_USER_ID,
