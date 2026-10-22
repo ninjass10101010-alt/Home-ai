@@ -129,10 +129,19 @@ export const COLLECTIONS = [
       { name: "importanceScore", type: "number", required: false, options: { min: 0, max: 100 } },
       { name: "importanceReason", type: "text", required: false },
       { name: "importanceUpdatedAt", type: "date", required: false },
+      { name: "allDay", type: "bool" },
+      { name: "endTime", type: "text" },
+      { name: "location", type: "text" },
+      { name: "notes", type: "text" },
+      { name: "googleEventId", type: "text" },
+      { name: "googleCalendarId", type: "text" },
+      { name: "googleSyncStatus", type: "text" },
+      { name: "googleSyncError", type: "text" },
+      { name: "googleSyncedAt", type: "date" },
     ],
-  },
-  {
-    name: "emergency_contacts",
+   },
+   {
+     name: "emergency_contacts",
     schema: [
       { name: "name", type: "text", required: true },
       { name: "phone", type: "text" },
