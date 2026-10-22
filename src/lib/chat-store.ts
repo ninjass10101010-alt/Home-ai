@@ -24,10 +24,14 @@ import {
   isRewardRedemptionProposal,
   type RewardRedemptionProposal,
 } from "@/components/chat/RedeemRewardChip";
+import {
+  isMemoryProposal,
+  type MemoryProposal,
+} from "@/components/chat/RememberedChip";
 
 /** Inert chat proposals. Neither becomes real in chat: points move and rewards
  *  are spent ONLY through the PIN flow on the chip the page renders. */
-export type ChatProposal = PointAdjustmentProposal | RewardRedemptionProposal;
+export type ChatProposal = PointAdjustmentProposal | RewardRedemptionProposal | MemoryProposal;
 
 export interface Message {
   id: number;
@@ -109,9 +113,9 @@ function freshState(): ChatStoreState {
 /** The dedupe key is per-tool: an adjustment and a redemption can share a member
  *  and a reason while being two separate things to confirm. */
 function proposalKey(p: ChatProposal): string {
-  return p.tool === "redeem_reward"
-    ? `redeem|${p.args.member}|${p.args.rewardId}|${p.args.reason}`
-    : `adjust|${p.args.member}|${p.args.delta}|${p.args.reason}`;
+  if (p.tool === "redeem_reward") return `redeem|${(p as any).args.member}|${(p as any).args.rewardId}|${(p as any).args.reason}`;
+  if (p.tool === "remember_memory") return `memory|${(p as any).args.subject ?? (p as any).args.content}|${(p as any).operationId ?? (p as any).id ?? ""}`;
+  return `adjust|${(p as any).args.member}|${(p as any).args.delta}|${(p as any).args.reason}`;
 }
 
 let state: ChatStoreState = freshState();
@@ -432,7 +436,9 @@ export async function send(text: string, speaker: ChatSpeaker): Promise<void> {
       ? value
       : isRewardRedemptionProposal(value)
         ? value
-        : null;
+        : isMemoryProposal(value)
+          ? value
+          : null;
     if (!proposal) return;
     const dupe = turnProposals.some((p) => proposalKey(p) === proposalKey(proposal));
     if (dupe) return;

@@ -17,6 +17,7 @@ import PageShell from "@/components/ui/PageShell";
 import Modal from "@/components/ui/Modal";
 import { UnifiedInput } from "@/components/chat/UnifiedInput";
 import AdjustPointsChip from "@/components/chat/AdjustPointsChip";
+import RememberedChip, { isMemoryProposal } from "@/components/chat/RememberedChip";
 import RedeemRewardChip from "@/components/chat/RedeemRewardChip";
 import ThinkingDisclosure from "@/components/chat/ThinkingDisclosure";
 import ToolActivityChips from "@/components/chat/ToolActivityChips";
@@ -206,7 +207,11 @@ const MessageRow = memo(function MessageRow({
         {msg.role === "assistant" && msg.proposals && msg.proposals.length > 0 && (
           <div className="flex flex-wrap gap-2 self-start" data-testid="point-proposals">
             {msg.proposals.map((p, i) =>
-              p.tool === "redeem_reward" ? (
+              isMemoryProposal(p) ? (
+                <div key={`memory|${p.args.subject}|${p.operationId ?? p.id}|${i}`} data-testid="memory-proposals">
+                  <RememberedChip proposal={p} />
+                </div>
+              ) : p.tool === "redeem_reward" ? (
                 <div key={`redeem|${p.args.member}|${p.args.rewardId}|${p.args.reason}|${p.operationId}|${i}`} data-testid="redeem-proposals">
                   <RedeemRewardChip proposal={p} actorName={currentUserName ?? null} />
                 </div>

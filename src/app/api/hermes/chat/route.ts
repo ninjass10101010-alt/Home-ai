@@ -226,6 +226,7 @@ function toolStatusLabel(name?: string): string {
 const PROPOSAL_TOOLS: Record<string, { expectTool: string; label: string }> = {
   propose_point_adjustment: { expectTool: "adjust_points", label: "Waiting for a parent's PIN to confirm…" },
   propose_reward_redemption: { expectTool: "redeem_reward", label: "Waiting for a PIN to confirm…" },
+  propose_memory: { expectTool: "remember_memory", label: "Want me to remember that?" },
 };
 /**
  * Store a captured candidate and return the proposal the chip renders.
