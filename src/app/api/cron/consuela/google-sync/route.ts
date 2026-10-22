@@ -5,6 +5,7 @@ import { checkQuota } from "@/lib/google/quota-guard";
 import { isGoogleConnected, mapGoogleAuthError } from "@/lib/google/connection-state";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
 import { isCronAuthorized } from "@/lib/cron-auth";
+import { retryPendingCalendarMirrors } from "@/lib/calendar/event-service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -61,16 +62,25 @@ export async function POST(request: NextRequest) {
     }
     const resultWithTasks = { ...result, tasks };
 
+    let mirrors = { checked: 0, synced: 0, failed: 0 };
+    try {
+      mirrors = await retryPendingCalendarMirrors(20);
+    } catch {
+      // Mirror retry is best effort; it must never turn a successful calendar sync
+      // into a cron failure. The rows stay pending/failed for the next pass.
+    }
+
     if (result && "perCalendar" in result && Array.isArray(result.perCalendar) && result.perCalendar.some((entry) => entry.ok === false)) {
       return NextResponse.json({
         ok: false,
         partial: true,
         error: "calendar_partial_failure",
         result: resultWithTasks,
+        mirrors,
         quota,
       }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, result: resultWithTasks, quota });
+    return NextResponse.json({ ok: true, result: resultWithTasks, mirrors, quota });
   } catch (error) {
     return authErrorResponse(error);
   }
