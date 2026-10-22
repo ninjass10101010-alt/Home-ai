@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   resolveChatTargets: vi.fn(async () => [testTarget()]),
   resetAiTargetsForTests: vi.fn(),
   buildMemoryContext: vi.fn(async () => ""),
+  buildMemoryContextBlock: vi.fn(async () => ""),
   withAdmin: vi.fn(),
 }));
 
@@ -43,6 +44,9 @@ vi.mock("@/lib/hermes-tools", () => ({
 // real module would reach for PocketBase, so pin it to the hoisted stub.
 vi.mock("@/lib/family-memory", () => ({
   buildMemoryContext: mocks.buildMemoryContext,
+}));
+vi.mock("@/lib/memory-context", () => ({
+  buildMemoryContextBlock: mocks.buildMemoryContextBlock,
 }));
 
 vi.mock("@/lib/ai/targets", () => ({
@@ -243,22 +247,28 @@ describe("hermes chat — pet sessions get the kid surface (F3)", () => {
   });
 });
 
-describe("hermes chat — adult prompts auto-carry the memory bank (F4)", () => {
-  it("parent session appends the Family Context block to the system prompt", async () => {
-    mocks.buildMemoryContext.mockResolvedValue("\nFamily Context:\n- test memory");
+describe("hermes chat — role-scoped memory context (2026-10-21)", () => {
+  it("a parent turn carries the memory block", async () => {
+    mocks.buildMemoryContextBlock.mockResolvedValue("\n## Family facts (curated — always current)\n- test memory");
     const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
     await post({ message: "what's for dinner", stream: true }, `${SESSION_COOKIE}=${token}`);
-    expect(mocks.buildMemoryContext).toHaveBeenCalledWith("consuela", "demo-family", "what's for dinner");
+    expect(mocks.buildMemoryContextBlock).toHaveBeenCalledWith({
+      role: "parent",
+      speakerName: "Rebecca",
+      message: "what's for dinner",
+    });
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
-    expect(sent.messages[0].content).toContain("Family Context:");
+    expect(sent.messages[0].content).toContain("Family facts");
   });
 
-  it("child session NEVER gets the Family Context block", async () => {
-    mocks.buildMemoryContext.mockResolvedValue("\nFamily Context:\n- test memory");
+  it("a child turn is scoped to the child", async () => {
+    mocks.buildMemoryContextBlock.mockResolvedValue("\n## Family facts (curated — always current)\n- test memory");
     const token = await signSession({ memberId: "m2", name: "Caspian", role: "child" });
     await post({ message: "hi", stream: true }, `${SESSION_COOKIE}=${token}`);
-    expect(mocks.buildMemoryContext).not.toHaveBeenCalled();
-    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
-    expect(sent.messages[0].content).not.toContain("Family Context:");
+    expect(mocks.buildMemoryContextBlock).toHaveBeenCalledWith({
+      role: "child",
+      speakerName: "Caspian",
+      message: "hi",
+    });
   });
 });

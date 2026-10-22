@@ -3,8 +3,7 @@ import { buildToolsForOpenAI, getTool, type ToolHandlerContext } from "@/lib/her
 import { db } from "@/db";
 import { authorizeCurrentMemberRequest, requireLiveSession } from "@/lib/server-auth";
 import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt, HOUSE_CONTROL_PROMPT_ADDENDUM } from "@/lib/consuela-prompts";
-import { buildMemoryContext } from "@/lib/family-memory";
-import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
+import { buildMemoryContextBlock } from "@/lib/memory-context";
 import { resolveChatTargets, resetAiTargetsForTests, type AiTarget } from "@/lib/ai/targets";
 import { recordChatOutcome } from "@/lib/ai/health";
 import { loadContextPack, type PackScope } from "@/lib/consuela/assistant-context";
@@ -18,8 +17,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
+import { localTodayISO } from "@/lib/local-date";
+
 function todayISO(): string {
-  return new Date().toISOString().split("T")[0];
+  return localTodayISO();
 }
 
 async function persistChatPair(request: NextRequest, userMessage: string, assistantReply: string, userId: string) {
@@ -570,7 +571,7 @@ async function buildChatContext(
       ? buildToolsForOpenAI({ houseControl: false, role }).filter((t) => CLEM_TOOLS.includes(t.function.name))
       : buildToolsForOpenAI({ houseControl, role });
   const recentHistory = (history || [])
-    .slice(-6)
+    .slice(-12)
     .filter((h: any) => h && typeof h.content === "string" && h.content.trim())
     .map((h: any) => ({
       role: h.role === "assistant" ? "assistant" : "user",
@@ -584,11 +585,16 @@ async function buildChatContext(
     : role === "child"
       ? buildKidSystemPrompt(undefined, live?.name)
       : buildConsuelaSystemPrompt() + (houseControl ? HOUSE_CONTROL_PROMPT_ADDENDUM : "");
-  // F4 — adult continuity: the memory bank rides along in every parent prompt
-  // (self-formats as "Family Context: …"). Never for child/pet/guest/Clem,
-  // and a dead memory store must never break chat — degrade to no context.
-  if (isAdult && !isClem) {
-    const memCtx = await buildMemoryContext(MEMORY_USER_ID, MEMORY_FAMILY_ID, message).catch(() => "");
+  // F4 (2026-10-21) — the memory block is ROLE-SCOPED: a parent gets the
+  // curated core + playbook index + relevant hits; a child gets ONLY their
+  // own facts; a guest and Clem get nothing. A dead store must never break
+  // a chat turn, so the builder swallows its own failures.
+  if (!isClem && live) {
+    const memCtx = await buildMemoryContextBlock({
+      role,
+      speakerName: live?.name ?? "",
+      message,
+    }).catch(() => "");
     if (memCtx) baseSystem += memCtx;
   }
   let addendum: string | null = null;
