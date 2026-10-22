@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore, type CSSProperties } from "react";
+import { flushSync } from "react-dom";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import WidgetCard from "@/components/patterns/WidgetCard";
@@ -12,6 +13,7 @@ import Avatar from "@/components/ui/Avatar";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { readReducedMotionPreference } from "@/hooks/useReducedMotionPreference";
 import { expandGoogleEvent, eventInMonth, dbEventToCalEvent, dbScheduleToScheduleItem } from "@/lib/calendar/google-mapping";
+import { rowToEventInput, parseClockToHHMM, eventSortMinutes } from "@/lib/calendar/event-input";
 import { db } from "@/db";
 import { gatewayList } from "@/db/gateway-client";
 import { saveOrQueue, type PendingWrite } from "@/lib/pending-writes";
@@ -81,13 +83,91 @@ interface CalEvent {
   day: number;
   month?: number;
   year?: number;
-  // Google-synced rows only (multi-calendar Fix-C): the raw ids ride along
-  // so startEditEvent never parses the composite id, and colorHex carries the
-  // owning calendar's Google color for the event frosting.
+  date?: string;
+  endTime?: string;
+  allDay?: boolean;
+  location?: string;
+  notes?: string;
+  notify?: boolean;
+  source?: string;
   googleId?: string;
   calendarId?: string;
   colorHex?: string;
-  notify?: boolean;
+  googleEventId?: string;
+  googleCalendarId?: string;
+  googleSyncStatus?: string;
+  googleSyncError?: string;
+}
+
+type EventForm = {
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  allDay: boolean;
+  member: string;
+  location: string;
+  notes: string;
+  notify: boolean;
+  icon: string;
+  color: CalEvent["color"];
+};
+
+function displayClock(hhmm: string): string {
+  const parsed = parseClockToHHMM(hhmm);
+  if (!parsed) return "";
+  const [h24, minute] = parsed.split(":").map(Number);
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 % 12 || 12;
+  return `${h12}:${String(minute).padStart(2, "0")} ${period}`;
+}
+
+function eventFormToCalEvent(form: EventForm, id: number | string): CalEvent {
+  const [year, month, day] = form.date.split("-").map(Number);
+  return {
+    id,
+    title: form.title,
+    time: form.allDay ? "All day" : displayClock(form.startTime),
+    member: form.member,
+    color: form.color,
+    emoji: form.icon,
+    day,
+    month: month - 1,
+    year,
+    date: form.date,
+    endTime: form.allDay ? "" : form.endTime,
+    allDay: form.allDay,
+    location: form.location,
+    notes: form.notes,
+    notify: form.notify,
+    source: "family",
+    googleSyncStatus: "pending",
+  };
+}
+
+function selectedDateISO(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function blankEventForm(date: string): EventForm {
+  return {
+    title: "",
+    date,
+    startTime: "09:00",
+    endTime: "",
+    allDay: false,
+    member: "All",
+    location: "",
+    notes: "",
+    notify: false,
+    icon: "📅",
+    color: "green",
+  };
+}
+
+function googleEventUrl(eventId: string, calendarId: string): string {
+  const eid = btoa(`${eventId} ${calendarId || "primary"}`);
+  return `https://calendar.google.com/calendar/event?eid=${encodeURIComponent(eid)}`;
 }
 
 type ScheduleColor =
@@ -400,6 +480,7 @@ export default function CalendarPage() {
   // decides WHETHER to render a control, and a null user (pre-hydration) simply
   // shows none.
   const canPullFreshFromGoogle = currentUser?.role === "parent";
+const isParent = currentUser?.role === "parent";
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = (msg: string) => {
@@ -412,10 +493,12 @@ export default function CalendarPage() {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
   }, []);
 
-  const [calEvents, setCalEvents] = useState<CalEvent[]>(() => loadFromStorage(EVENTS_STORAGE_KEY, events));
-  const [editingEventId, setEditingEventId] = useState<number | string | null>(null);
-  const [eventForm, setEventForm] = useState<CalEvent>({ id: 0, title: "", time: "", member: "All", color: "green", emoji: "📅", day: selectedDay });
-  const [isAddingEvent, setIsAddingEvent] = useState(false);
+const [calEvents, setCalEvents] = useState<CalEvent[]>(() => loadFromStorage(EVENTS_STORAGE_KEY, events));
+const [editingEventId, setEditingEventId] = useState<number | string | null>(null);
+const [eventForm, setEventForm] = useState<EventForm>(() => blankEventForm(selectedDateISO(today.getFullYear(), today.getMonth(), today.getDate())));
+const [isAddingEvent, setIsAddingEvent] = useState(false);
+const [savingEvent, setSavingEvent] = useState(false);
+const [formError, setFormError] = useState<string | null>(null);
 
   const [schedules, setSchedules] = useState<ScheduleItem[]>(() => {
     if (typeof window !== "undefined") {
@@ -605,64 +688,168 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
     setSelectedDay(today.getDate());
   };
 
-  const startAddEvent = () => {
-    setEventForm({ id: 0, title: "", time: "12:00 PM", member: "All", color: "green", emoji: "📅", day: selectedDay });
-    setIsAddingEvent(true);
-    setEditingEventId(null);
+  const selectedDate = selectedDateISO(year, month, selectedDay);
+
+  const updateEventForm = (patch: Partial<EventForm>) => {
+    setEventForm((prev) => ({ ...prev, ...patch }));
   };
-  const startEditEvent = (ev: CalEvent) => {
-    if (ev.member === "Google") {
-      // The mapped row carries the raw Google id; the split("_")[1] parse is
-      // only the fallback for legacy localStorage rows written before the
-      // googleId field existed (multi-calendar ids embed a calendar token).
-      const googleId =
-        ev.googleId ||
-        (ev.id && typeof ev.id === "string" && ev.id.startsWith("g_") ? ev.id.split("_")[1] : "");
+
+  const startAddEvent = () => {
+    flushSync(() => {
+      setEventForm(blankEventForm(selectedDate));
+      setIsAddingEvent(true);
+      setEditingEventId(null);
+      setFormError(null);
+    });
+  };
+  const startEditEvent = (event: CalEvent) => {
+    if (event.member === "Google" || event.source === "google") {
+      const googleId = event.googleId || event.googleEventId || "";
+      const calendarId = event.calendarId || event.googleCalendarId || "primary";
       if (googleId) {
-        window.open(`https://calendar.google.com/calendar/event?eid=${googleId}`, "_blank", "noopener,noreferrer");
+        window.open(googleEventUrl(googleId, calendarId), "_blank", "noopener,noreferrer");
       }
       return;
     }
-    setEventForm({ ...ev });
-    setEditingEventId(ev.id);
-    setIsAddingEvent(false);
+    const input = rowToEventInput(event as any);
+    flushSync(() => {
+      setEventForm({
+        title: input.title,
+        date: input.date || selectedDate,
+        startTime: input.startTime || "09:00",
+        endTime: input.endTime || "",
+        allDay: Boolean(input.allDay),
+        member: input.member || "All",
+        location: input.location || "",
+        notes: input.notes || "",
+        notify: Boolean(input.notify),
+        icon: event.emoji || "📅",
+        color: event.color,
+      });
+      setIsAddingEvent(false);
+      setEditingEventId(event.id);
+      setFormError(null);
+    });
   };
   const cancelEventEdit = () => { setEditingEventId(null); setIsAddingEvent(false); };
-  const saveEvent = async () => {
-    if (!eventForm.title.trim()) return;
-    if (isAddingEvent) {
-      const newEvent = { ...eventForm, id: Date.now() };
-      setCalEvents((prev) => [...prev, newEvent]);
-      const landed = await saveOrQueue(
-        eventCreateWrite(newEvent, year, month),
-        async () => {
-          const saved = await db.insertEvent(eventCreateWrite(newEvent, year, month).payload);
-          if (saved?.id) {
-            setCalEvents((prev) => prev.map((e) => (e.id === newEvent.id ? { ...e, id: saved.id } : e)));
-          }
-          return saved;
-        }
-      );
-      showToast(landed ? "✅ Event added" : "⚠️ Event saved on this device — will sync automatically");
-    } else {
-      setCalEvents((prev) => prev.map((e) => (e.id === editingEventId ? { ...eventForm } : e)));
-      if (typeof editingEventId === "string") {
-        const landed = await saveOrQueue(
-          eventUpdateWrite(editingEventId, eventForm),
-          () => db.updateEvent(editingEventId, eventUpdateWrite(editingEventId, eventForm).payload)
-        );
-        showToast(landed ? "✅ Event updated" : "⚠️ Update saved on this device — will sync automatically");
-      }
+  const retryGoogle = async (event: CalEvent) => {
+    try {
+      const res = await fetch(`/api/calendar/events/${encodeURIComponent(String(event.id))}/retry-google`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data.event) throw new Error("retry_failed");
+      const saved = dbEventToCalEvent(data.event) as CalEvent | null;
+      if (saved) setCalEvents((prev) => prev.map((e) => (String(e.id) === String(event.id) ? saved : e)));
+      showToast(data.google?.status === "synced" ? "Google Calendar updated." : "Google Calendar still isn't updated.");
+    } catch {
+      showToast("Google Calendar couldn't save this event.");
     }
-    cancelEventEdit();
   };
-  const deleteEvent = async (id: number | string) => {
-    setCalEvents((prev) => prev.filter((e) => e.id !== id));
-    if (typeof id === "string") {
-      const landed = await saveOrQueue(eventDeleteWrite(id), () => db.deleteEvent(id));
-      if (!landed) showToast("⚠️ Delete saved on this device — will sync automatically");
+  const deleteEvent = async (event: CalEvent) => {
+    try {
+      const res = await fetch(`/api/calendar/events/${encodeURIComponent(String(event.id))}`, { method: "DELETE" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error("delete_failed");
+      setCalEvents((prev) => prev.filter((e) => String(e.id) !== String(event.id)));
+      showToast(
+        data.google?.status === "failed"
+          ? "Deleted here — remove it in Google Calendar"
+          : "Event deleted.",
+      );
+    } catch {
+      showToast("Couldn't delete event.");
     }
-    cancelEventEdit();
+  };
+  const readFormFromDom = (fallback: EventForm): EventForm => {
+    const next: EventForm = { ...fallback };
+    const titleEl = document.querySelector("#ev-title") as HTMLInputElement | null;
+    if (titleEl) next.title = titleEl.value;
+    const dateEl = document.querySelector("#ev-date") as HTMLInputElement | null;
+    if (dateEl) next.date = dateEl.value;
+    const memberEl = document.querySelector("#ev-member") as HTMLSelectElement | null;
+    if (memberEl) next.member = memberEl.value;
+    const allDayEl = document.querySelector(".ev-allday input") as HTMLInputElement | null;
+    if (allDayEl) next.allDay = allDayEl.checked;
+    if (next.allDay) {
+      next.startTime = "";
+      next.endTime = "";
+    } else {
+      const startEl = document.querySelector("#ev-start") as HTMLInputElement | null;
+      if (startEl) next.startTime = startEl.value;
+      const endEl = document.querySelector("#ev-end") as HTMLInputElement | null;
+      if (endEl) next.endTime = endEl.value;
+    }
+    const locEl = document.querySelector("#ev-location") as HTMLInputElement | null;
+    if (locEl) next.location = locEl.value;
+    const notesEl = document.querySelector("#ev-notes") as HTMLTextAreaElement | null;
+    if (notesEl) next.notes = notesEl.value;
+    const notifyEl = document.querySelector(".ev-notify input") as HTMLInputElement | null;
+    if (notifyEl) next.notify = notifyEl.checked;
+    return next;
+  };
+
+  const saveEvent = async () => {
+    const currentForm = readFormFromDom(eventForm);
+    setEventForm(currentForm);
+    setFormError(null);
+    setSavingEvent(true);
+    const previous = editingEventId == null
+      ? null
+      : calEvents.find((e) => String(e.id) === String(editingEventId)) ?? null;
+    const optimisticId = `temp-${Date.now()}`;
+    const optimistic = eventFormToCalEvent(currentForm, optimisticId);
+    setCalEvents((prev) =>
+      previous
+        ? prev.map((e) => (String(e.id) === String(previous.id) ? optimistic : e))
+        : [...prev, optimistic],
+    );
+
+    try {
+      const res = await fetch(
+        previous ? `/api/calendar/events/${encodeURIComponent(String(previous.id))}` : "/api/calendar/events",
+        {
+          method: previous ? "PATCH" : "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(currentForm),
+        },
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data.event) {
+        setCalEvents((prev) =>
+          previous
+            ? prev.map((e) => (String(e.id) === String(optimisticId) ? previous : e))
+            : prev.filter((e) => String(e.id) !== String(optimisticId)),
+        );
+        setFormError(data?.message || "Event wasn't saved. Try again.");
+        return;
+      }
+      const saved = dbEventToCalEvent(data.event) as CalEvent | null;
+      if (!saved) throw new Error("bad_response");
+      setCalEvents((prev) => prev.map((e) => (String(e.id) === String(optimisticId) ? saved : e)));
+      if (saved.date) {
+        const [savedYear, savedMonth, savedDay] = saved.date.split("-").map(Number);
+        setYear(savedYear);
+        setMonth(savedMonth - 1);
+        setSelectedDay(savedDay);
+      }
+      setIsAddingEvent(false);
+      setEditingEventId(null);
+      showToast(
+        data.google?.status === "synced"
+          ? previous ? "Updated · Google updated" : "Added · Google updated"
+          : data.google?.unmirrored
+            ? previous ? "Event updated." : "Event added."
+            : previous ? "Updated here · Google not updated — Retry" : "Added here · Google not updated — Retry",
+      );
+    } catch {
+      setCalEvents((prev) =>
+        previous
+          ? prev.map((e) => (String(e.id) === String(optimisticId) ? previous : e))
+          : prev.filter((e) => String(e.id) !== String(optimisticId)),
+      );
+      setFormError("Event wasn't saved. Try again.");
+    } finally {
+      setSavingEvent(false);
+    }
   };
 
   const startAddSched = () => {
@@ -832,30 +1019,10 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
       .then((rows) => {
         if (cancelled || requestGeneration !== calendarDataGenerationRef.current || !Array.isArray(rows)) return;
         const mapped = rows.map(dbEventToCalEvent).filter(Boolean) as CalEvent[];
-        if (!mapped.length) return;
         setCalEvents((prev) => {
-          const out = [...prev];
-          for (const me of mapped) {
-            const dupe = out.find(
-              (e) =>
-                String(e.id) === String(me.id) ||
-                (e.title === me.title &&
-                  e.day === me.day &&
-                  e.month === me.month &&
-                  e.year === me.year &&
-                  e.time === me.time)
-            );
-            if (dupe) {
-              // Adopt the server id so later edits/deletes target the PB row.
-              if (typeof dupe.id === "number" && typeof me.id === "string") {
-                const idx = out.indexOf(dupe);
-                out[idx] = { ...dupe, id: me.id };
-              }
-            } else {
-              out.push(me);
-            }
-          }
-          return out;
+          const googleRows = prev.filter((e) => e.member === "Google" || e.source === "google");
+          const tempRows = prev.filter((e) => typeof e.id === "string" && String(e.id).startsWith("temp-"));
+          return [...googleRows, ...mapped, ...tempRows];
         });
       })
       .catch(() => {});
@@ -960,15 +1127,32 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
         title="Calendar"
         subtitle="Garcia Family"
         right={
-          <button
-            onClick={activeTab === "calendar" ? startAddEvent : startAddSched}
-            className="calendar-icon-btn hit-44"
-            aria-label={activeTab === "calendar" ? "Add event" : "Add routine"}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-            </svg>
-          </button>
+          activeTab === "calendar" ? (
+            isParent ? (
+              <button
+                type="button"
+                data-testid="calendar-add-button"
+                onClick={startAddEvent}
+                className="calendar-icon-btn hit-44"
+                aria-label="Add event"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                  <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                </svg>
+              </button>
+            ) : null
+          ) : (
+            <button
+              type="button"
+              onClick={startAddSched}
+              className="calendar-icon-btn hit-44"
+              aria-label="Add routine"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+              </svg>
+            </button>
+          )
         }
       />
 
@@ -1098,7 +1282,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                       <button
                         key={day}
                         type="button"
-                        onClick={() => setSelectedDay(day)}
+                        onClick={() => { if (isAddingEvent || editingEventId !== null) cancelEventEdit(); setSelectedDay(day); }}
                         aria-label={`${DAYS[weekday]} ${MONTHS[month]} ${day}`}
                         aria-pressed={sel}
                         className={`calendar-strip-day${sel ? " is-selected" : ""}${isT ? " is-today" : ""}`}
@@ -1135,7 +1319,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                     <button
                       key={`${year}-${month}-${day}`}
                       type="button"
-                      onClick={() => setSelectedDay(day)}
+                      onClick={() => { if (isAddingEvent || editingEventId !== null) cancelEventEdit(); setSelectedDay(day); }}
                       className={`calendar-day-btn${isSelected ? " is-selected" : ""}${isToday ? " is-today" : ""}`}
                     >
                       <span className="calendar-day-number">{day}</span>
@@ -1171,7 +1355,18 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                     <p className="calendar-panel-subtitle">{selectedEvents.length} event{selectedEvents.length !== 1 ? "s" : ""}</p>
                   </div>
                 </div>
-                <button onClick={startAddEvent} className="calendar-add-link">+ Add</button>
+                {isParent ? (
+                  <button
+                    type="button"
+                    data-testid="calendar-add-button"
+                    className="calendar-add-link"
+                    onClick={startAddEvent}
+                  >
+                    + Add
+                  </button>
+                ) : (
+                  <p className="calendar-readonly-note">Ask a parent to add or change events.</p>
+                )}
               </div>
 
               {selectedEvents.length === 0 ? (
@@ -1192,9 +1387,11 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                     <div key={ev.id} className="flex items-center gap-1">
                       <div
                         className="calendar-event-card flex-1 calendar-fade-in-up"
+                        onClick={ev.source === "google" || ev.member === "Google" ? () => startEditEvent(ev) : undefined}
                         style={{
                           "--event-color": eventColorOf(ev),
                           animationDelay: `${idx * 60}ms`,
+                          cursor: ev.source === "google" || ev.member === "Google" ? "pointer" : undefined,
                         } as CSSProperties}
                       >
                         <div className="calendar-event-time-col">
@@ -1212,16 +1409,37 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                           </div>
                         </div>
                       </div>
-                      <button
-                        onClick={() => startEditEvent(ev)}
-                        className="calendar-edit-btn"
-                        aria-label="Edit event"
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" strokeLinecap="round" strokeLinejoin="round" />
-                          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </button>
+                      {ev.source === "family" && (
+                        <>
+                          {(ev.googleSyncStatus === "pending" || ev.googleSyncStatus === "failed") && (
+                            <button
+                              type="button"
+                              className={`ev-sync-chip ${ev.googleSyncStatus === "failed" ? "is-failed" : "is-pending"}`}
+                              onClick={() => void retryGoogle(ev)}
+                            >
+                              {ev.googleSyncStatus === "failed" ? "Google failed · Retry" : "Google pending · Retry"}
+                            </button>
+                          )}
+                          {isParent && (
+                            <>
+                              <button
+                                type="button"
+                                aria-label={`Edit ${ev.title}`}
+                                onClick={() => startEditEvent(ev)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Delete ${ev.title}`}
+                                onClick={() => void deleteEvent(ev)}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1241,7 +1459,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                         <button
                           key={day}
                           type="button"
-                          onClick={() => setSelectedDay(day)}
+                          onClick={() => { if (isAddingEvent || editingEventId !== null) cancelEventEdit(); setSelectedDay(day); }}
                           className={`calendar-week-row${isToday ? " is-today" : ""}`}
                         >
                           <span className="calendar-week-day">
@@ -1276,44 +1494,131 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
               <WidgetCard tone="#8b5cf6" className="calendar-form-card">
                 <h4 className="calendar-form-heading">{isAddingEvent ? "Add Event" : "Edit Event"}</h4>
                 <div className="space-y-2.5">
-                  <input
-                    type="text" placeholder="Event title"
-                    value={eventForm.title} onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
-                    className="calendar-input" autoFocus
-                  />
-                  <div className="calendar-form-grid">
-                    <input type="text" placeholder="Time (e.g. 4:00 PM)" value={eventForm.time} onChange={(e) => setEventForm({ ...eventForm, time: e.target.value })} className="calendar-input" />
-                    <input type="text" placeholder="Emoji" value={eventForm.emoji} onChange={(e) => setEventForm({ ...eventForm, emoji: e.target.value })} className="calendar-input" />
-                    <input type="text" placeholder="Member" value={eventForm.member} onChange={(e) => setEventForm({ ...eventForm, member: e.target.value })} className="calendar-input" />
-                    <input type="number" min={1} max={daysInMonth} placeholder="Day" value={eventForm.day} onChange={(e) => { const parsed = parseInt(e.target.value, 10); setEventForm({ ...eventForm, day: Number.isNaN(parsed) ? 1 : Math.min(Math.max(parsed, 1), daysInMonth) }); }} className="calendar-input" />
+                  <div className="ev-field ev-field-wide">
+                    <label htmlFor="ev-title">Title</label>
+                    <input
+                      id="ev-title"
+                      value={eventForm.title}
+                      onChange={(e) => updateEventForm({ title: e.currentTarget.value })}
+                      maxLength={200}
+                    />
                   </div>
+                  <div className="ev-field">
+                    <label htmlFor="ev-date">Date</label>
+                    <input
+                      id="ev-date"
+                      type="date"
+                      value={eventForm.date}
+                      onChange={(e) => updateEventForm({ date: e.currentTarget.value })}
+                    />
+                  </div>
+                  <div className="ev-field">
+                    <label htmlFor="ev-member">Member</label>
+                    <select
+                      id="ev-member"
+                      value={eventForm.member}
+                      onChange={(e) => updateEventForm({ member: e.currentTarget.value })}
+                    >
+                      <option value="All">All</option>
+                      {members.map((m: any) => (
+                        <option key={m.name} value={m.name}>{m.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <label className="ev-allday">
+                    <input
+                      type="checkbox"
+                      checked={eventForm.allDay}
+                      onChange={(e) =>
+                        updateEventForm(e.currentTarget.checked ? { allDay: true, startTime: "", endTime: "" } : { allDay: false, startTime: "09:00", endTime: "" })
+                      }
+                    />
+                    All day
+                  </label>
+                  {!eventForm.allDay && (
+                    <>
+                      <div className="ev-field">
+                        <label htmlFor="ev-start">Start</label>
+                        <input
+                          id="ev-start"
+                          type="time"
+                          value={eventForm.startTime}
+                          onChange={(e) => updateEventForm({ startTime: e.currentTarget.value })}
+                        />
+                      </div>
+                      <div className="ev-field">
+                        <label htmlFor="ev-end">End</label>
+                        <input
+                          id="ev-end"
+                          type="time"
+                          value={eventForm.endTime}
+                          onChange={(e) => updateEventForm({ endTime: e.currentTarget.value })}
+                        />
+                      </div>
+                    </>
+                  )}
+                  <div className="ev-field ev-field-wide">
+                    <label htmlFor="ev-location">Location</label>
+                    <input
+                      id="ev-location"
+                      value={eventForm.location}
+                      onChange={(e) => updateEventForm({ location: e.currentTarget.value })}
+                      maxLength={200}
+                    />
+                  </div>
+                  <div className="ev-field ev-field-wide">
+                    <label htmlFor="ev-notes">Notes</label>
+                    <textarea
+                      id="ev-notes"
+                      value={eventForm.notes}
+                      onChange={(e) => updateEventForm({ notes: e.currentTarget.value })}
+                      maxLength={2000}
+                    />
+                  </div>
+                  <label className="ev-notify">
+                    <input
+                      type="checkbox"
+                      checked={eventForm.notify}
+                      onChange={(e) => updateEventForm({ notify: e.currentTarget.checked })}
+                    />
+                    Notify the family
+                  </label>
+                  {formError && <p className="calendar-form-error">{formError}</p>}
                   <div className="calendar-color-swatches">
                     {(["green", "violet", "amber", "cyan", "rose"] as const).map((c) => (
                       <button
                         key={c}
                         type="button"
-                        onClick={() => setEventForm({ ...eventForm, color: c })}
+                        onClick={() => updateEventForm({ color: c })}
                         className={`calendar-color-swatch ${eventForm.color === c ? "is-selected" : ""}`}
                         style={{ "--swatch-color": eventColorValues[c] } as CSSProperties}
                         aria-label={`Color ${c}`}
                       />
                     ))}
                   </div>
-                  <label className="flex min-h-11 items-center gap-3 py-1">
-                    <input
-                      type="checkbox"
-                      checked={eventForm.notify === true}
-                      onChange={(e) => setEventForm({ ...eventForm, notify: e.target.checked })}
-                    />
-                    <span>Notify devices when this starts</span>
-                  </label>
                   <div className="calendar-form-actions">
-                    <button onClick={saveEvent} disabled={!eventForm.title.trim()} className="calendar-primary-btn">
-                      {isAddingEvent ? "Add Event" : "Save"}
+                    <button
+                      type="button"
+                      data-testid="calendar-save-event"
+                      className="calendar-primary-btn"
+                      onClick={() => void saveEvent()}
+                      disabled={savingEvent}
+                    >
+                      {savingEvent ? "Saving…" : "Save event"}
                     </button>
                     <button onClick={cancelEventEdit} className="calendar-secondary-btn">Cancel</button>
-                    {!isAddingEvent && (
-                      <button onClick={() => deleteEvent(eventForm.id)} className="calendar-delete-btn" aria-label="Delete event">{`\uD83D\uDDD1\uFE0F`}</button>
+                    {!isAddingEvent && editingEventId !== null && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ev = calEvents.find((e) => String(e.id) === String(editingEventId));
+                          if (ev) void deleteEvent(ev);
+                        }}
+                        className="calendar-delete-btn"
+                        aria-label="Delete event"
+                      >
+                        {`\uD83D\uDDD1\uFE0F`}
+                      </button>
                     )}
                   </div>
                 </div>

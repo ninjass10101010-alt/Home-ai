@@ -4294,3 +4294,21 @@ html[data-reduce-motion="true"] *::after {
 }
 
 
+
+/* Calendar create/edit form */
+.ev-field { display: flex; flex-direction: column; gap: 4px; }
+.ev-field-wide { grid-column: 1 / -1; }
+.ev-field label { font-size: 0.75rem; color: var(--color-text-muted); }
+.ev-field input, .ev-field select, .ev-field textarea {
+  min-height: 40px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-text-primary) 12%, transparent);
+  background: color-mix(in srgb, var(--color-text-primary) 4%, transparent);
+  color: var(--color-text-primary); font-size: 0.875rem;
+}
+.ev-field textarea { min-height: 72px; resize: vertical; }
+.ev-allday, .ev-notify { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 0.875rem; }
+.calendar-readonly-note { font-size: 0.75rem; color: var(--color-text-muted); }
+.calendar-form-error { color: var(--color-accent-rose); font-size: 0.8rem; }
+.ev-sync-chip { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+.ev-sync-chip.is-pending { background: color-mix(in srgb, var(--warm) 16%, transparent); color: var(--ink-2); }
+.ev-sync-chip.is-failed { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red-ink); }
