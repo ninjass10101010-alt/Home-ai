@@ -33,6 +33,21 @@ async function pushItem(fn: () => Promise<any>): Promise<boolean> {
   }
 }
 
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+// An event without a real date is invisible on every screen (the calendar
+// drops undated rows) and used to be inserted as an empty-date row on every
+// push. Only dated events are worth migrating.
+function hasUsableEventDate(event: any): boolean {
+  return typeof event?.date === "string" && ISO_DATE_PATTERN.test(event.date.trim());
+}
+
+function eventKey(event: any): string {
+  const title = String(event?.title ?? "").trim().toLowerCase();
+  const date = String(event?.date ?? "").trim();
+  return `${title}|${date}`;
+}
+
 export async function pushLocalToPB(): Promise<{ collection: string; pushed: number; errors: number }[]> {
   const results: { collection: string; pushed: number; errors: number }[] = [];
 
@@ -104,15 +119,32 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   }
   results.push({ collection: "recipes", pushed, errors });
 
-  // Events (insert — no dedup check; runs once for initial migration)
-  const events = loadJSON<any[]>("consuela-events", []).filter((event: any) => event?.member !== "Google");
+  // Events (dated rows only, deduped against the server so re-pushing the
+  // same device cache cannot multiply rows)
+  const events = loadJSON<any[]>("consuela-events", [])
+    .filter((event: any) => event?.member !== "Google")
+    .filter(hasUsableEventDate);
   pushed = 0; errors = 0;
   if (events.length) {
-    const outcomes = await Promise.all(
-      events.map((ev: any) => pushItem(() => db.insertEvent(ev)))
-    );
-    pushed = outcomes.filter(Boolean).length;
-    errors = outcomes.length - pushed;
+    try {
+      const existingEvents = await db.selectEventsAuthoritative();
+      const existingKeys = new Set(existingEvents.map(eventKey));
+      const pushedKeys = new Set<string>();
+      const outcomes = await Promise.all(
+        events.map((ev: any) => {
+          const key = eventKey(ev);
+          if (existingKeys.has(key) || pushedKeys.has(key)) return Promise.resolve(null);
+          pushedKeys.add(key);
+          return pushItem(() => db.insertEvent(ev)).then((ok) => (ok ? "pushed" : "error"));
+        })
+      );
+      for (const outcome of outcomes) {
+        if (outcome === "pushed") pushed++;
+        else if (outcome === "error") errors++;
+      }
+    } catch {
+      errors = 1;
+    }
   }
   results.push({ collection: "events", pushed, errors });
 

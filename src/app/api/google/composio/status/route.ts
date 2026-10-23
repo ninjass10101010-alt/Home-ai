@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeCurrentParentRequest } from "@/lib/server-auth";
 import {
+  type ConnectedAccount,
   ComposioError,
   COMPOSIO_TOOLKITS,
   getConnectedAccount,
+  listConnectedAccounts,
 } from "@/lib/google/composio";
 import {
   type ConnectionSnapshot,
@@ -70,22 +72,63 @@ export async function GET(req: NextRequest) {
     return stateUnavailableResponse();
   }
 
-  const connectedAccountId = snapshot.connectedAccountId;
-  if (!connectedAccountId) {
-    return NextResponse.json({ ok: true, connected: false });
+  let connectedAccountId = snapshot.connectedAccountId;
+  let account: ConnectedAccount | null = null;
+  if (connectedAccountId) {
+    try {
+      account = await getConnectedAccount(connectedAccountId);
+    } catch (error) {
+      const mapped = composioErrorResponse(error);
+      if (mapped) return mapped;
+      console.warn("[google/composio/status]", errorMessage(error));
+      return NextResponse.json(
+        { ok: false, code: "api_error", error: "Composio status check failed" },
+        { status: 502 },
+      );
+    }
   }
 
-  let account: Awaited<ReturnType<typeof getConnectedAccount>>;
-  try {
-    account = await getConnectedAccount(connectedAccountId);
-  } catch (error) {
-    const mapped = composioErrorResponse(error);
-    if (mapped) return mapped;
-    console.warn("[google/composio/status]", errorMessage(error));
-    return NextResponse.json(
-      { ok: false, code: "api_error", error: "Composio status check failed" },
-      { status: 502 },
-    );
+  // The snapshot is a cache; Composio is the source of truth. A reconnect can
+  // leave the snapshot pointing at an old pending/failed account while the
+  // replacement is ACTIVE, and a cleared snapshot can still have a live grant.
+  // Recover that grant instead of asking the family to connect again.
+  if (!account || account.status !== "ACTIVE") {
+    let accounts: ConnectedAccount[] = [];
+    try {
+      accounts = await listConnectedAccounts(toolkit);
+    } catch (error) {
+      if (!account) {
+        if (error instanceof ComposioError && error.code === "not_configured") {
+          return NextResponse.json({ ok: true, connected: false });
+        }
+        const mapped = composioErrorResponse(error);
+        if (mapped) return mapped;
+        console.warn("[google/composio/status]", errorMessage(error));
+        return NextResponse.json(
+          { ok: false, code: "api_error", error: "Composio status check failed" },
+          { status: 502 },
+        );
+      }
+      console.warn("[google/composio/status] account list failed:", errorMessage(error));
+    }
+
+    const active = accounts.find((candidate) => candidate.status === "ACTIVE");
+    if (active) {
+      account = active;
+      connectedAccountId = active.id;
+    } else if (!account) {
+      const pending = accounts.find(
+        (candidate) => candidate.status === "INITIALIZING" || candidate.status === "INITIATED",
+      ) ?? accounts[0];
+      if (pending) {
+        account = pending;
+        connectedAccountId = pending.id;
+      }
+    }
+  }
+
+  if (!connectedAccountId) {
+    return NextResponse.json({ ok: true, connected: false });
   }
 
   const now = new Date().toISOString();
@@ -139,9 +182,17 @@ export async function GET(req: NextRequest) {
       console.warn("[google/composio/status] cache prune failed:", errorMessage(error));
     }
   }
-  if (snapshot.status !== accountStatus) {
+  if (snapshot.status !== accountStatus || snapshot.connectedAccountId !== connectedAccountId) {
     try {
-      await writeConnectionSnapshot({ status: accountStatus, lastVerifiedAt: now }, key);
+      await writeConnectionSnapshot(
+        {
+          connectedAccountId,
+          status: accountStatus,
+          ...(account?.email ? { accountEmail: account.email } : {}),
+          lastVerifiedAt: now,
+        },
+        key,
+      );
     } catch (error) {
       console.warn("[google/composio/status] snapshot persist failed:", errorMessage(error));
     }

@@ -14,9 +14,14 @@ const authState = vi.hoisted(() => ({
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => authState.value }));
 
 vi.mock("@/components/settings/SettingsLauncher", () => ({
-  default: ({ sections }: { sections: Array<{ id: string; title: string }> }) => (
+  default: ({ sections, statusOverrides }: {
+    sections: Array<{ id: string; title: string }>;
+    statusOverrides?: Record<string, string>;
+  }) => (
     <nav data-testid="settings-launcher">
-      {sections.map((section) => <span key={section.id}>{section.title}</span>)}
+      {sections.map((section) => (
+        <span key={section.id}>{section.title}{statusOverrides?.[section.id] ? `: ${statusOverrides[section.id]}` : ""}</span>
+      ))}
     </nav>
   ),
 }));
@@ -43,7 +48,12 @@ async function renderPage() {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => root!.render(<SettingsPage />));
+  await act(async () => { await Promise.resolve(); });
   return container;
+}
+
+function googleState(body: Record<string, unknown>) {
+  return { ok: true, status: 200, json: async () => body };
 }
 
 describe("settings launcher page wiring", () => {
@@ -52,6 +62,12 @@ describe("settings launcher page wiring", () => {
       hydrated: true,
       currentUser: { role: "parent" },
     };
+    vi.stubGlobal("fetch", vi.fn(async () => googleState({
+      ok: true,
+      connected: false,
+      pending: false,
+      connection_status: null,
+    })));
   });
 
   afterEach(async () => {
@@ -59,6 +75,8 @@ describe("settings launcher page wiring", () => {
     root = null;
     container = null;
     document.body.innerHTML = "";
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("mounts only the six approved parent categories", async () => {
@@ -68,6 +86,44 @@ describe("settings launcher page wiring", () => {
     expect(launcher).not.toBeNull();
     expect(launcher?.querySelectorAll("span")).toHaveLength(6);
     expect(element.textContent).not.toContain("Export JSON");
+  });
+
+  it("surfaces the Google Calendar connection on the system card for parents", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(googleState({
+      ok: true,
+      connected: true,
+      pending: false,
+      connection_status: "ACTIVE",
+      account_email: "family@example.com",
+    }) as any);
+
+    const element = await renderPage();
+
+    expect(element.textContent).toContain("Connections & System: Google Calendar connected");
+  });
+
+  it("surfaces a pending Google sign-in instead of a generic system description", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(googleState({
+      ok: true,
+      connected: false,
+      pending: true,
+      connection_status: "INITIALIZING",
+    }) as any);
+
+    const element = await renderPage();
+
+    expect(element.textContent).toContain("Connections & System: Google Calendar — finish sign-in");
+  });
+
+  it("does not request Google state for a child", async () => {
+    authState.value = {
+      hydrated: true,
+      currentUser: { role: "child" },
+    };
+
+    await renderPage();
+
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("mounts only Me, Safety, and Appearance for a child", async () => {

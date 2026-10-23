@@ -10,7 +10,7 @@ vi.mock("@/lib/google/api-quota", () => ({ recordApiCall }));
 
 import {
   createConnectedAccountLink, deleteConnectedAccount, ensureAuthConfig, executeComposioAction,
-  getConnectedAccount,
+  getConnectedAccount, listConnectedAccounts,
 } from "@/lib/google/composio";
 
 describe("composio client", () => {
@@ -78,6 +78,43 @@ describe("composio client", () => {
     getServiceConfig.mockResolvedValue("sk-test");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
     expect(await getConnectedAccount("missing")).toBeNull();
+  });
+
+  it("lists the family's connected accounts for one toolkit", async () => {
+    getServiceConfig.mockResolvedValue("sk-test");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      items: [
+        {
+          id: "ca_calendar",
+          status: "ACTIVE",
+          toolkit: { slug: "googlecalendar" },
+          params: { user_info: { email: "family@example.com" } },
+        },
+        {
+          id: "ca_tasks",
+          status: "INITIALIZING",
+          toolkit: { slug: "googletasks" },
+          params: {},
+        },
+      ],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listConnectedAccounts("googlecalendar")).resolves.toEqual([
+      {
+        id: "ca_calendar",
+        status: "ACTIVE",
+        toolkitSlug: "googlecalendar",
+        email: "family@example.com",
+      },
+    ]);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/v3.1/connected_accounts?");
+    expect(String(url)).toContain("toolkit_slug=googlecalendar");
+    expect(String(url)).toContain("user_id=consuela-family");
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>)["X-API-Key"]).toBe("sk-test");
   });
 
   it("throws api_error with status 502 when a 200 execute response is malformed", async () => {

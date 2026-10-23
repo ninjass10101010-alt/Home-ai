@@ -23,11 +23,13 @@ const mocks = vi.hoisted(() => {
       isCurrentGeneration: vi.fn((generation: number) => generation === mocks.currentGeneration),
       state,
       waiting: null,
+      pending: false,
       tasksConnected: false,
       errorMessage: null,
       connect: vi.fn(async () => undefined),
       disconnect: vi.fn(async () => ({ outcome: "disconnected", remoteRevoked: true, localRevoked: true })),
       cancel: vi.fn(),
+      checkConnection: vi.fn(async () => true),
       refresh: vi.fn(async () => undefined),
     },
     fetchCalls: [] as Array<{ url: string; init?: RequestInit }>,
@@ -120,12 +122,14 @@ beforeEach(() => {
     minutes_until_expiry: null,
   };
   mocks.hook.waiting = null;
+  mocks.hook.pending = false;
   mocks.hook.tasksConnected = false;
   mocks.hook.errorMessage = null;
   mocks.hook.disconnect.mockReset();
   mocks.hook.disconnect.mockResolvedValue({ outcome: "disconnected", remoteRevoked: true, localRevoked: true } as any);
   mocks.hook.connect.mockClear();
   mocks.hook.cancel.mockClear();
+  mocks.hook.checkConnection.mockClear();
   mocks.hook.refresh.mockClear();
   vi.stubGlobal("matchMedia", vi.fn(() => ({
     matches: false,
@@ -161,6 +165,34 @@ describe("GoogleConnectCard", () => {
     expect(host.textContent).toContain("Calendar sync");
     expect(host.textContent).not.toContain("Reminders");
     expect(host.querySelectorAll(".widget-card .widget-card")).toHaveLength(0);
+  });
+
+  it("shows a persisted pending sign-in with a manual re-check and start-over action", async () => {
+    mocks.hook.status = "unconnected";
+    mocks.hook.pending = true;
+    mocks.hook.state = {
+      connected: false,
+      pending: true,
+      connection_status: "INITIALIZING",
+      account_email: null,
+      granted_at: null,
+      revoked_at: null,
+      expires_at: null,
+      scope: null,
+      minutes_until_expiry: null,
+    } as any;
+    const host = render(<GoogleConnectCard />);
+    await settle();
+
+    expect(host.textContent).toContain("Finish Google sign-in");
+    expect(host.textContent).toContain("still open");
+    expect(host.textContent).not.toContain("Connect a Google account");
+
+    await act(async () => button(host, /Check connection/).click());
+    expect(mocks.hook.checkConnection).toHaveBeenCalledTimes(1);
+
+    await act(async () => button(host, /Start over/).click());
+    expect(mocks.hook.connect).toHaveBeenCalledTimes(1);
   });
 
   it("does not repeat the card description inside the connect body", async () => {

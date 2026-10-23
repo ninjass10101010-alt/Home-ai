@@ -189,6 +189,9 @@ export const db = {
       });
   },
 
+  async selectEventsAuthoritative(): Promise<any[]> {
+    return authoritativeList<any>("events");
+  },
   async insertEvent(event: any): Promise<any> {
     return safeCreate("events", event);
   },

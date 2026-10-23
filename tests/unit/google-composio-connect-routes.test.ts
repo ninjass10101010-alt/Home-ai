@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
     ensureGoogleCollections: vi.fn(),
     createConnectedAccountLink: vi.fn(),
     getConnectedAccount: vi.fn(),
+    listConnectedAccounts: vi.fn(),
     deleteConnectedAccount: vi.fn(),
     readConnectionSnapshot: vi.fn(),
     writeConnectionSnapshot: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("@/lib/google/composio", () => ({
   COMPOSIO_TOOLKITS: { CALENDAR: "googlecalendar", TASKS: "googletasks" },
   createConnectedAccountLink: mocks.createConnectedAccountLink,
   getConnectedAccount: mocks.getConnectedAccount,
+  listConnectedAccounts: mocks.listConnectedAccounts,
   deleteConnectedAccount: mocks.deleteConnectedAccount,
 }));
 vi.mock("@/lib/google/connection-state", () => ({
@@ -85,6 +87,7 @@ const spies = [
   mocks.ensureGoogleCollections,
   mocks.createConnectedAccountLink,
   mocks.getConnectedAccount,
+  mocks.listConnectedAccounts,
   mocks.deleteConnectedAccount,
   mocks.readConnectionSnapshot,
   mocks.writeConnectionSnapshot,
@@ -121,6 +124,7 @@ beforeEach(() => {
   mocks.pruneCachedEvents.mockResolvedValue(0);
   mocks.deleteConnectedAccount.mockResolvedValue(true);
   mocks.getConnectedAccount.mockResolvedValue(null);
+  mocks.listConnectedAccounts.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -242,7 +246,89 @@ describe("GET /api/google/composio/status", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, connected: false });
     expect(mocks.getConnectedAccount).not.toHaveBeenCalled();
+    expect(mocks.listConnectedAccounts).toHaveBeenCalledWith("googlecalendar");
     expect(mocks.writeConnectionSnapshot).not.toHaveBeenCalled();
+    expect(mocks.syncCalendar).not.toHaveBeenCalled();
+  });
+
+  it("adopts an ACTIVE Composio account when the snapshot was lost", async () => {
+    mocks.listConnectedAccounts.mockResolvedValueOnce([
+      { id: "ca_live", status: "ACTIVE", toolkitSlug: "googlecalendar", email: "family@example.com" },
+    ]);
+
+    const response = await status(get("/api/google/composio/status"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      connected: true,
+      status: "ACTIVE",
+      connected_account_id: "ca_live",
+      account_email: "family@example.com",
+    });
+    expect(mocks.writeConnectionSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectedAccountId: "ca_live",
+        status: "ACTIVE",
+        accountEmail: "family@example.com",
+      }),
+      undefined,
+    );
+    expect(mocks.syncCalendar).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces a stale pending snapshot with a newly ACTIVE account", async () => {
+    mocks.readConnectionSnapshot.mockResolvedValueOnce({
+      connectedAccountId: "ca_old",
+      status: "INITIATED",
+      accountEmail: null,
+      connectedAt: null,
+      lastVerifiedAt: null,
+    });
+    mocks.getConnectedAccount.mockResolvedValueOnce({
+      id: "ca_old",
+      status: "FAILED",
+      toolkitSlug: "googlecalendar",
+      email: null,
+    });
+    mocks.listConnectedAccounts.mockResolvedValueOnce([
+      { id: "ca_new", status: "ACTIVE", toolkitSlug: "googlecalendar", email: "family@example.com" },
+    ]);
+
+    const response = await status(get("/api/google/composio/status"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      connected: true,
+      status: "ACTIVE",
+      connected_account_id: "ca_new",
+    });
+    expect(mocks.writeConnectionSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ connectedAccountId: "ca_new", status: "ACTIVE" }),
+      undefined,
+    );
+    expect(mocks.syncCalendar).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores a pending account found after the snapshot was lost", async () => {
+    mocks.listConnectedAccounts.mockResolvedValueOnce([
+      { id: "ca_pending", status: "INITIALIZING", toolkitSlug: "googlecalendar", email: null },
+    ]);
+
+    const response = await status(get("/api/google/composio/status"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      connected: false,
+      status: "INITIALIZING",
+      reason: "account_not_active",
+    });
+    expect(mocks.writeConnectionSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ connectedAccountId: "ca_pending", status: "INITIALIZING" }),
+      undefined,
+    );
     expect(mocks.syncCalendar).not.toHaveBeenCalled();
   });
 

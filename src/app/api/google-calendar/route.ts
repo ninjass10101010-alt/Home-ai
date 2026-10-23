@@ -5,6 +5,7 @@ import {
   GoogleAuthError,
   mapGoogleAuthError,
   readConnectionSnapshot,
+  reconcileGoogleConnection,
 } from "@/lib/google/connection-state";
 import { readCachedEvents, syncCalendar, readCalendarSyncRows } from "@/lib/google/calendar";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
@@ -96,6 +97,13 @@ export async function GET(request: NextRequest) {
   let connected: boolean;
   try {
     connected = await isGoogleConnected();
+    if (!connected) {
+      const snapshot = await readConnectionSnapshot();
+      if (snapshot.status === "INITIALIZING" || snapshot.status === "INITIATED") {
+        const reconciled = await reconcileGoogleConnection();
+        connected = !!reconciled.connectedAccountId && reconciled.status === "ACTIVE";
+      }
+    }
   } catch (error) {
     if (error instanceof GoogleAuthError && error.code === "no_grant") {
       return noGrantResponse();

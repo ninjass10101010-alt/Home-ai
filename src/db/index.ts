@@ -408,6 +408,10 @@ export const db = {
     return [];
   },
 
+  selectEventsAuthoritative: async () => isServer()
+    ? pbDb.selectEventsAuthoritative()
+    : authoritativeClientList("events"),
+
   insertEvent: async (event: any) => {
     const result = isServer()
       ? await pbDb.insertEvent(event)

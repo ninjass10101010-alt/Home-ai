@@ -43,8 +43,9 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/push/vapid-public` | GET | Session (any signed-in member). Returns ONLY the VAPID public key (from Services & Keys), never the private key |
 | `/api/push/subscribe` | POST / DELETE | Session + live member row (`requireLiveSession`); POST upserts `push_subscriptions` by `endpoint` (caps 6 per member), DELETE removes by `endpoint` |
 | `/api/push/test` | POST | Parent session + live PB `parent` row (`requireLiveSession({ requireRole: "parent" })`); sends a test push to every subscription; `409 push_not_configured` when VAPID is unset |
+| `/api/google/state` | GET | Parent session (`authorizeCurrentParentRequest`, live PB identity); the connection shape the Settings card and the launcher read. Reads the `consuela_data_snapshots` snapshot and, when it is not ACTIVE, **reconciles it against Composio** (single-account read, then the toolkit's `connected_accounts` list) so a lost or stale snapshot never asks the family to reconnect a working grant. Answers `{ok, connected, pending, connection_status, account_email, granted_at, revoked_at, expires_at, scope, minutes_until_expiry}` — `pending:true` + `connection_status:"INITIALIZING"` is an in-flight sign-in, never a flat disconnect; 503 `google_state_unavailable` when PocketBase cannot be read |
 | `/api/google/composio/setup` | POST | Parent session (`authorizeAdminRequest`); body `{toolkit?: "googlecalendar"\|"googletasks"}` (default calendar); returns the hosted Composio `auth_url` + `connected_account_id`; 400 `invalid_json`/`invalid_body`/`invalid_toolkit`, 401 `auth_failed`, 502 Composio failure, 503 `not_configured`/`google_state_unavailable` |
-| `/api/google/composio/status` | GET | Parent session (`authorizeCurrentParentRequest`, live PB identity); optional `?toolkit=`; reads the `consuela_data_snapshots` snapshot then Composio, persists the first ACTIVE transition and triggers one calendar sync; `connected:false` + `status`/`reason` when not active; 502 `api_error`, 503 `google_state_unavailable` |
+| `/api/google/composio/status` | GET | Parent session (`authorizeCurrentParentRequest`, live PB identity); optional `?toolkit=`; reads the `consuela_data_snapshots` snapshot then Composio, **recovers a lost or stale snapshot from Composio's connected-account list** (prefers an ACTIVE account, else adopts the pending account and persists it), persists the first ACTIVE transition and triggers one calendar sync; `connected:false` + `status`/`reason` when not active; 502 `api_error`, 503 `google_state_unavailable` |
 | `/api/google/composio/disconnect` | POST | Parent session (`authorizeAdminRequest`); deletes the remote connected account + clears the local snapshot and calendar cache; `outcome:"disconnected"`, or an honest `outcome:"local_only"` with a warning when the remote delete fails; 500 `failed`, 503 `google_state_unavailable` |
 
 **The direct Google connect routes are deleted (2026-10-05).** `/api/google/device-grant`, `device-poll` and `device-revoke` no longer exist, and neither do `src/lib/google/{device-auth,oauth-client,device-attempts,encryption}.ts`; there is no direct Google OAuth/consent path, by policy (parent `docs/INTEGRATIONS.md` + the PROVIDER POLICY rule in `AGENTS.md`). The only connect affordance is the hosted Composio link above.
@@ -605,11 +606,23 @@ a token-store message is a developer string, not a family one.
 state lives in `consuela_data_snapshots`, key `google_composio_connection`
 (calendar) / `google_composio_tasks` (tasks) — the opaque `connectedAccountId` +
 `status`/`accountEmail`/timestamps, **no Google tokens on the NAS**.
+**The snapshot is a cache, not the source of truth (2026-10-23).** Composio
+holds the grant. When the snapshot is missing, stale, or still pointing at a
+replaced pending account, the status/state routes read Composio's
+`connected_accounts` (the one account, then the toolkit list filtered to
+`googlecalendar` / `googletasks`) and adopt the ACTIVE account — so a family is
+never asked to re-connect a grant that is already live. A sign-in that is still
+in flight is reported as `pending:true` + `connection_status:"INITIALIZING"` and
+renders as **"Finish Google sign-in"** (Check connection / Start over), never as
+a silent disconnect.
 `GET /api/google-calendar` adds `provider:"composio"` and a real `last_sync_at`
 (the newest selected per-calendar sync row) when live, and answers
 `connected:false` + `source:"none"` + `stale:true` + `events:[]` when the account
 is missing or not ACTIVE — cached Google rows must never render as current, and
-`last_sync_at` must never be the legacy sync-state stamp. Calendar sync is one
+`last_sync_at` must never be the legacy sync-state stamp. A **pending** snapshot
+is reconciled once against Composio before the answer (the grant may have been
+approved in another tab since the last poll), so the calendar recovers without
+a detour through Settings. Calendar sync is one
 full-window `GOOGLECALENDAR_EVENTS_LIST` per selected calendar (30 days back /
 90 forward, upsert by `(calendar_id, google_id)`) — Composio exposes no
 incremental sync token — and tasks sync best-effort via `GOOGLETASKS_*` on a

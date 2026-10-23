@@ -158,25 +158,61 @@ export async function deleteConnectedAccount(id: string): Promise<boolean> {
   throw classify(res.status);
 }
 
+export interface ConnectedAccount {
+  id: string;
+  status: string;
+  toolkitSlug: string;
+  email: string | null;
+}
+
+function mapConnectedAccount(value: unknown, fallbackId?: string): ConnectedAccount | null {
+  const d = asRecord(value);
+  if (!d) return null;
+  const id = firstId(d.id) ?? fallbackId ?? null;
+  if (!id) return null;
+  const toolkit = asRecord(d.toolkit);
+  const userInfo = asRecord(asRecord(d.params)?.user_info);
+  const statusSource = d.status ?? d.state;
+  return {
+    id,
+    status: String(statusSource ?? "").toUpperCase(),
+    toolkitSlug: typeof toolkit?.slug === "string" ? toolkit.slug : typeof d.appName === "string" ? d.appName : "",
+    email: typeof userInfo?.email === "string" ? userInfo.email : typeof d.email === "string" ? d.email : null,
+  };
+}
+
 export async function getConnectedAccount(
   id: string,
-): Promise<{ id: string; status: string; toolkitSlug: string; email: string | null } | null> {
+): Promise<ConnectedAccount | null> {
   const key = await getComposioKey();
   const res = await call(`${COMPOSIO_CONNECTED_ACCOUNTS_PATH}/${encodeURIComponent(id)}`, {
     method: "GET", headers: { "X-API-Key": key },
   });
   if (res.status === 404) return null;
   if (!res.ok) throw classify(res.status);
-  const d = asRecord(await readJson(res));
-  const toolkit = asRecord(d?.toolkit);
-  const userInfo = asRecord(asRecord(d?.params)?.user_info);
-  const statusSource = d?.status ?? d?.state;
-  return {
-    id: firstId(d?.id) ?? id,
-    status: String(statusSource ?? "").toUpperCase(),
-    toolkitSlug: typeof toolkit?.slug === "string" ? toolkit.slug : typeof d?.appName === "string" ? d.appName : "",
-    email: typeof userInfo?.email === "string" ? userInfo.email : typeof d?.email === "string" ? d.email : null,
-  };
+  return mapConnectedAccount(await readJson(res), id);
+}
+
+export async function listConnectedAccounts(toolkit: string): Promise<ConnectedAccount[]> {
+  const key = await getComposioKey();
+  const query = new URLSearchParams({
+    toolkit_slug: toolkit,
+    user_id: COMPOSIO_CONNECT_FLOW_NOTES.USER_ID,
+  });
+  const res = await call(`${COMPOSIO_CONNECTED_ACCOUNTS_PATH}?${query.toString()}`, {
+    method: "GET", headers: { "X-API-Key": key },
+  });
+  if (!res.ok) throw classify(res.status);
+  const body = asRecord(await readJson(res));
+  const items = Array.isArray(body?.items)
+    ? body.items
+    : Array.isArray(body?.data)
+      ? body.data
+      : [];
+  return items
+    .map((item) => mapConnectedAccount(item))
+    .filter((account): account is ConnectedAccount => account !== null)
+    .filter((account) => !account.toolkitSlug || account.toolkitSlug === toolkit);
 }
 
 export { COMPOSIO_ACTIONS, COMPOSIO_TOOLKITS };

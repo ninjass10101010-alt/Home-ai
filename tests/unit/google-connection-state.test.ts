@@ -2,10 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
+  listConnectedAccounts: vi.fn(),
+  getConnectedAccount: vi.fn(),
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
+}));
+
+vi.mock("@/lib/google/composio", () => ({
+  listConnectedAccounts: mocks.listConnectedAccounts,
+  getConnectedAccount: mocks.getConnectedAccount,
 }));
 
 import {
@@ -15,6 +22,7 @@ import {
   isGoogleConnected,
   mapGoogleAuthError,
   readConnectionSnapshot,
+  reconcileGoogleConnection,
   TASKS_SNAPSHOT_KEY,
   writeConnectionSnapshot,
 } from "@/lib/google/connection-state";
@@ -55,6 +63,10 @@ function activeRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mocks.withAdmin.mockReset();
+  mocks.listConnectedAccounts.mockReset();
+  mocks.getConnectedAccount.mockReset();
+  mocks.listConnectedAccounts.mockResolvedValue([]);
+  mocks.getConnectedAccount.mockResolvedValue(null);
 });
 
 describe("google connection snapshot store", () => {
@@ -76,6 +88,111 @@ describe("google connection snapshot store", () => {
       lastVerifiedAt: "2030-01-02T00:00:00.000Z",
     });
     await expect(isGoogleConnected()).resolves.toBe(true);
+  });
+
+  it("adopts an ACTIVE Composio calendar account when the snapshot was lost", async () => {
+    const rows: any[] = [];
+    mocks.withAdmin.mockImplementation((fn: (pb: unknown) => Promise<unknown>) =>
+      fn({
+        collection: () => ({
+          getFullList: vi.fn(async () => rows),
+          create: vi.fn(async (payload: any) => {
+            const row = { id: "row-new", ...payload };
+            rows.push(row);
+            return row;
+          }),
+          update: vi.fn(async (id: string, payload: any) => {
+            const row = { id, ...payload };
+            rows[0] = row;
+            return row;
+          }),
+          delete: vi.fn(async () => true),
+        }),
+      })
+    );
+    mocks.listConnectedAccounts.mockResolvedValueOnce([
+      { id: "ca_live", status: "ACTIVE", toolkitSlug: "googlecalendar", email: "family@example.com" },
+    ]);
+
+    await expect(reconcileGoogleConnection()).resolves.toMatchObject({
+      connectedAccountId: "ca_live",
+      status: "ACTIVE",
+      accountEmail: "family@example.com",
+    });
+    expect(mocks.listConnectedAccounts).toHaveBeenCalledWith("googlecalendar");
+    expect(rows[0]?.data).toMatchObject({
+      connectedAccountId: "ca_live",
+      status: "ACTIVE",
+      accountEmail: "family@example.com",
+    });
+  });
+
+  it("replaces a stale pending snapshot with a newly ACTIVE account", async () => {
+    const rows = [{
+      id: "row-1",
+      key: "google_composio_connection",
+      data: {
+        connectedAccountId: "ca_pending",
+        status: "INITIALIZING",
+        accountEmail: null,
+        connectedAt: null,
+        lastVerifiedAt: null,
+      },
+    }];
+    const update = vi.fn(async (id: string, payload: any) => {
+      const row = { id, ...payload };
+      rows[0] = row;
+      return row;
+    });
+    mocks.withAdmin.mockImplementation((fn: (pb: unknown) => Promise<unknown>) =>
+      fn({
+        collection: () => ({
+          getFullList: vi.fn(async () => rows),
+          create: vi.fn(),
+          update,
+          delete: vi.fn(async () => true),
+        }),
+      })
+    );
+    mocks.getConnectedAccount.mockResolvedValueOnce({
+      id: "ca_pending",
+      status: "FAILED",
+      toolkitSlug: "googlecalendar",
+      email: null,
+    });
+    mocks.listConnectedAccounts.mockResolvedValueOnce([
+      { id: "ca_live", status: "ACTIVE", toolkitSlug: "googlecalendar", email: "family@example.com" },
+    ]);
+
+    await expect(reconcileGoogleConnection()).resolves.toMatchObject({
+      connectedAccountId: "ca_live",
+      status: "ACTIVE",
+    });
+    expect(update).toHaveBeenCalledWith(
+      "row-1",
+      expect.objectContaining({
+        data: expect.objectContaining({ connectedAccountId: "ca_live", status: "ACTIVE" }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("leaves a genuinely pending snapshot pending when no account is ACTIVE", async () => {
+    mocks.withAdmin.mockImplementation((fn: (pb: unknown) => Promise<unknown>) =>
+      fn(pbForRows([activeRow({ status: "INITIALIZING" })]))
+    );
+    mocks.getConnectedAccount.mockResolvedValueOnce({
+      id: "ca_calendar_1",
+      status: "INITIALIZING",
+      toolkitSlug: "googlecalendar",
+      email: null,
+    });
+
+    await expect(reconcileGoogleConnection()).resolves.toMatchObject({
+      connectedAccountId: "ca_calendar_1",
+      status: "INITIALIZING",
+    });
+    expect(mocks.listConnectedAccounts).toHaveBeenCalledWith("googlecalendar");
   });
 
   it("reports disconnected when the snapshot is FAILED even with an account id", async () => {

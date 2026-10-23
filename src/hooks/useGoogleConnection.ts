@@ -16,6 +16,8 @@ export type GoogleToolkit = "googlecalendar" | "googletasks";
 
 export interface PublicState {
   connected: boolean;
+  pending?: boolean;
+  connection_status?: string | null;
   account_email: string | null;
   granted_at: string | null;
   revoked_at: string | null;
@@ -58,7 +60,9 @@ function isGoogleToolkit(value: unknown): value is GoogleToolkit {
 
 function isGoogleState(value: unknown): value is PublicState {
   if (!isRecord(value) || value.ok !== true || typeof value.connected !== "boolean") return false;
-  return isNullableString(value.account_email)
+  return (value.pending === undefined || typeof value.pending === "boolean")
+    && (value.connection_status === undefined || isNullableString(value.connection_status))
+    && isNullableString(value.account_email)
     && isNullableString(value.granted_at)
     && isNullableString(value.revoked_at)
     && isNullableString(value.expires_at)
@@ -216,6 +220,13 @@ export function useGoogleConnection() {
 
   const refresh = useCallback((): Promise<boolean> => {
     if (disconnectInFlightRef.current || statusRef.current !== "connected") return Promise.resolve(false);
+    const requestedGeneration = pollGenerationRef.current;
+    const requestedStatusVersion = statusVersionRef.current;
+    return readState(requestedGeneration, requestedStatusVersion, true);
+  }, [readState]);
+
+  const checkConnection = useCallback((): Promise<boolean> => {
+    if (disconnectInFlightRef.current) return Promise.resolve(false);
     const requestedGeneration = pollGenerationRef.current;
     const requestedStatusVersion = statusVersionRef.current;
     return readState(requestedGeneration, requestedStatusVersion, true);
@@ -408,6 +419,7 @@ export function useGoogleConnection() {
   }, [invalidatePolling, readState]);
 
   const tasksConnected = status === "connected" && tasksAccountActive;
+  const pending = status !== "connected" && state?.pending === true;
 
   return {
     mounted,
@@ -415,6 +427,7 @@ export function useGoogleConnection() {
     statusVersion,
     state,
     waiting,
+    pending,
     tasksConnected,
     errorMessage: errorMessageState,
     generation,
@@ -422,6 +435,7 @@ export function useGoogleConnection() {
     connect,
     disconnect,
     cancel,
+    checkConnection,
     refresh,
   };
 }

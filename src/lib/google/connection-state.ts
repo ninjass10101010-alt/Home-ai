@@ -1,5 +1,6 @@
 import { withAdmin } from "../pb-auth.ts";
 import { withKeyedLock } from "@/lib/keyed-lock";
+import { getConnectedAccount, listConnectedAccounts } from "./composio";
 
 const SNAPSHOT_COLLECTION = "consuela_data_snapshots";
 const SNAPSHOT_KEY = "google_composio_connection";
@@ -108,6 +109,60 @@ export async function isGoogleConnected(): Promise<boolean> {
   } catch (e) {
     throw new GoogleAuthError("unavailable", "Google connection state unavailable");
   }
+}
+
+// The snapshot is only a cache of Composio's account state. If it was lost —
+// or still points at a just-replaced pending account — recover the ACTIVE
+// account from Composio instead of making the family reconnect a working
+// grant. Snapshot reads stay authoritative for ACTIVE; no external call is
+// made in the healthy path.
+export async function reconcileGoogleConnection(
+  key: string = SNAPSHOT_KEY,
+  toolkit: string = "googlecalendar",
+): Promise<ConnectionSnapshot> {
+  const snapshot = await readConnectionSnapshot(key);
+  if (snapshot.connectedAccountId && snapshot.status === "ACTIVE") return snapshot;
+
+  if (snapshot.connectedAccountId) {
+    try {
+      const current = await getConnectedAccount(snapshot.connectedAccountId);
+      if (current?.status === "ACTIVE") {
+        const now = new Date().toISOString();
+        const updated: ConnectionSnapshot = {
+          connectedAccountId: current.id,
+          status: "ACTIVE",
+          accountEmail: current.email,
+          connectedAt: snapshot.connectedAt ?? now,
+          lastVerifiedAt: now,
+        };
+        await writeConnectionSnapshot(updated, key).catch(() => null);
+        return updated;
+      }
+    } catch {
+      // Fall through to the toolkit list; a transient single-account read
+      // must not hide a healthy grant from the list endpoint.
+    }
+  }
+
+  let accounts: Awaited<ReturnType<typeof listConnectedAccounts>>;
+  try {
+    accounts = await listConnectedAccounts(toolkit);
+  } catch {
+    return snapshot;
+  }
+  const active = accounts.find((account) => account.status === "ACTIVE");
+  if (!active) return snapshot;
+
+  const now = new Date().toISOString();
+  const updated: ConnectionSnapshot = {
+    connectedAccountId: active.id,
+    status: "ACTIVE",
+    accountEmail: active.email,
+    connectedAt: snapshot.connectedAt ?? now,
+    lastVerifiedAt: now,
+  };
+  await writeConnectionSnapshot(updated, key).catch(() => null);
+  return updated;
 }
 
 export async function disconnectGoogle(): Promise<void> {

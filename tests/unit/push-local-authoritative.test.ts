@@ -15,6 +15,7 @@ vi.mock("@/db", () => ({
   db: {
     selectMealsAuthoritative: h.mealsRead,
     selectSchedulesAuthoritative: h.schedulesRead,
+    selectEventsAuthoritative: async () => [],
     insertMeal: async (meal: any) => {
       h.insertedMeals.push(meal);
       return { ...meal, id: "meal-new" };
@@ -97,16 +98,27 @@ describe("pushLocalToPB authoritative reads", () => {
     expect(results.some((result) => result.collection === "family_goals")).toBe(false);
   });
 
-  it("excludes cached Google events while retaining family events", async () => {
+  it("excludes cached Google events while retaining dated family events", async () => {
     localStorage.setItem("consuela-events", JSON.stringify([
       { id: "g1", title: "Google event", member: "Google" },
-      { id: "f1", title: "Family event", member: "Rebecca" },
+      { id: "f1", title: "Family event", date: "2026-10-24", member: "Rebecca" },
     ]));
 
     const results = await pushLocalToPB();
 
     expect(results.find((result) => result.collection === "events")).toMatchObject({ pushed: 1, errors: 0 });
     expect(h.insertedEvents.map((event) => event.title)).toEqual(["Family event"]);
+  });
+
+  it("skips family events that carry no usable date instead of creating empty-date rows", async () => {
+    localStorage.setItem("consuela-events", JSON.stringify([
+      { id: "f1", title: "Legacy event", time: "3:00 PM", member: "Rebecca" },
+    ]));
+
+    const results = await pushLocalToPB();
+
+    expect(results.find((result) => result.collection === "events")).toMatchObject({ pushed: 0, errors: 0 });
+    expect(h.insertedEvents).toHaveLength(0);
   });
 
   it("does not include legacy emergency contacts in the bulk push result", async () => {

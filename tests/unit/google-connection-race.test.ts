@@ -30,6 +30,10 @@ function connectedState(email = "family@example.com") {
   return response({ ok: true, connected: true, account_email: email, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
 }
 
+function pendingState() {
+  return response({ ok: true, connected: false, pending: true, connection_status: "INITIALIZING", account_email: null, granted_at: null, revoked_at: null, expires_at: null, scope: null, minutes_until_expiry: null });
+}
+
 function setupPayload(toolkit: "googlecalendar" | "googletasks" = "googlecalendar", expiresInMs = 600_000) {
   return response({
     ok: true,
@@ -112,6 +116,31 @@ describe("useGoogleConnection composio consent flow", () => {
 
     expect(hook.status).toBe("connected");
     expect(hook.state?.account_email).toBe("family@example.com");
+  });
+
+  it("surfaces a sign-in that was still pending on reload and lets the user re-check it", async () => {
+    let stateReads = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/api/google/state")) {
+        stateReads += 1;
+        return stateReads === 1 ? pendingState() : connectedState();
+      }
+      return response({ ok: true });
+    });
+    await mount();
+
+    expect(hook.status).toBe("unconnected");
+    expect(hook.pending).toBe(true);
+
+    let recovered!: boolean;
+    await act(async () => {
+      recovered = await hook.checkConnection();
+    });
+
+    expect(recovered).toBe(true);
+    expect(stateReads).toBe(2);
+    expect(hook.status).toBe("connected");
+    expect(hook.pending).toBe(false);
   });
 
   it("discovers connected state after explicit hosted-consent completion", async () => {

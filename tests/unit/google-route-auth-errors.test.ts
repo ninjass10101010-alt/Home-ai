@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   isGoogleConnected: vi.fn(),
+  reconcileGoogleConnection: vi.fn(),
   readConnectionSnapshot: vi.fn(),
   authorizeAdminRequest: vi.fn(),
   authorizeCurrentParentRequest: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("@/lib/google/connection-state", async (importOriginal) => {
   return {
     ...actual,
     isGoogleConnected: mocks.isGoogleConnected,
+    reconcileGoogleConnection: mocks.reconcileGoogleConnection,
     readConnectionSnapshot: mocks.readConnectionSnapshot,
   };
 });
@@ -89,6 +91,13 @@ beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockReset();
   mocks.isGoogleConnected.mockResolvedValue(true);
   mocks.readConnectionSnapshot.mockResolvedValue({
+    connectedAccountId: null,
+    status: null,
+    accountEmail: null,
+    connectedAt: null,
+    lastVerifiedAt: null,
+  });
+  mocks.reconcileGoogleConnection.mockResolvedValue({
     connectedAccountId: null,
     status: null,
     accountEmail: null,
@@ -160,6 +169,45 @@ describe("GET /api/google-calendar auth errors", () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({ ok: true, connected: false, source: "none", stale: true, events: [] });
     expect(body.source).not.toBe("composio");
+  });
+
+  it("recovers an ACTIVE grant while the calendar snapshot is still pending", async () => {
+    mocks.isGoogleConnected.mockResolvedValue(false);
+    mocks.readConnectionSnapshot
+      .mockResolvedValueOnce({
+        connectedAccountId: "ca_pending",
+        status: "INITIALIZING",
+        accountEmail: null,
+        connectedAt: null,
+        lastVerifiedAt: null,
+      })
+      .mockResolvedValueOnce({
+        connectedAccountId: "ca_active",
+        status: "ACTIVE",
+        accountEmail: "family@example.com",
+        connectedAt: "2026-09-24T00:00:00.000Z",
+        lastVerifiedAt: "2026-09-24T00:00:00.000Z",
+      });
+    mocks.reconcileGoogleConnection.mockResolvedValueOnce({
+      connectedAccountId: "ca_active",
+      status: "ACTIVE",
+      accountEmail: "family@example.com",
+      connectedAt: "2026-09-24T00:00:00.000Z",
+      lastVerifiedAt: "2026-09-24T00:00:00.000Z",
+    });
+
+    const response = await getCalendar(request("/api/google-calendar"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.reconcileGoogleConnection).toHaveBeenCalledTimes(1);
+    expect(body).toMatchObject({
+      ok: true,
+      connected: true,
+      source: "google",
+      provider: "composio",
+      account_email: "family@example.com",
+    });
   });
 
   it("keeps no_grant as a successful disconnected response", async () => {

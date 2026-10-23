@@ -227,11 +227,13 @@ export default function GoogleConnectCard() {
     isCurrentGeneration,
     state,
     waiting,
+    pending,
     tasksConnected,
     errorMessage,
     connect,
     disconnect,
     cancel,
+    checkConnection,
     refresh,
   } = useGoogleConnection();
 
@@ -665,6 +667,23 @@ export default function GoogleConnectCard() {
       <div className="flex gap-2">
         <SoftButton onClick={() => window.open(waiting.auth_url, "_blank", "noopener,noreferrer")} className="flex-1">Open Google consent</SoftButton>
         <SoftButton variant="secondary" onClick={handleCancelWaiting} className="flex-1">Cancel</SoftButton>
+      </div>
+    </div>
+  ) : status === "unconnected" && pending ? (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[var(--color-accent-selected)]/20 text-xl" aria-hidden="true">🔗</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-text-primary">Finish Google sign-in</p>
+          <p className="mt-0.5 text-xs text-text-secondary">
+            The Google consent tab was still open. Finish there, then check the connection again.
+          </p>
+        </div>
+      </div>
+      {errorMessage ? <p role="alert" className="rounded-xl border border-[var(--color-accent-rose)]/30 bg-[var(--color-accent-rose)]/10 px-3 py-2 text-xs text-[var(--color-accent-rose)]">{errorMessage}</p> : null}
+      <div className="flex gap-2">
+        <SoftButton onClick={() => { void checkConnection(); }} className="flex-1">Check connection</SoftButton>
+        <SoftButton variant="secondary" onClick={handleConnect} className="flex-1">Start over</SoftButton>
       </div>
     </div>
   ) : (

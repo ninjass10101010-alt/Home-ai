@@ -74,7 +74,7 @@ const endpoints: Endpoint[] = [
   {
     name: "GET /api/google/state",
     call: () => googleStateGET(request("/api/google/state")),
-    reads: () => [mocks.isGoogleConnected, mocks.readConnectionSnapshot],
+    reads: () => [mocks.readConnectionSnapshot],
     configure: () => {
       mocks.isGoogleConnected.mockResolvedValue(true);
       mocks.readConnectionSnapshot.mockResolvedValue({
