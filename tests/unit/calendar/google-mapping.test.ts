@@ -106,7 +106,17 @@ describe("dbEventToCalEvent", () => {
       day: 15,
       month: 8,
       year: 2026,
+      date: "2026-09-15",
+      endTime: "",
+      allDay: false,
+      location: "",
+      notes: "",
       notify: false,
+      source: "family",
+      googleEventId: "",
+      googleCalendarId: "",
+      googleSyncStatus: "",
+      googleSyncError: "",
     });
   });
 
