@@ -1453,3 +1453,11 @@ See files:
 - Controlled by `useTheme` hook (`src/hooks/useTheme.tsx`) and inline anti-FOUC script in `layout.tsx`
 
 Settings page is the single place users change this. Changes are instant across the entire app.
+
+### UI Change Record — Calendar create + date integrity (2026-10-21)
+
+- Surface: `/calendar` parent/child, phone/wall, dark/light.
+- Added: parent create/edit sheet, all-day control, member select, location/notes, Google pending/failed chip + retry.
+- Changed: date edits now move events; all-day events sort before timed; child sees read-only copy.
+- Kept: warm-glass cards, existing tokens, 44px targets, no new fonts.
+- Evidence: `/tmp/calendar-create-web/surface`, `/tmp/calendar-create-web/form-open`, and `Home-native/screenshots/accepted/calendar-create`.

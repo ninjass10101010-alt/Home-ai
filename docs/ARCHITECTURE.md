@@ -873,6 +873,26 @@ reads as a dead stream.
 ---
 
 
+## Calendar create + date integrity (2026-10-21)
+
+**Provider authority:** Composio remains the Google Calendar provider; PocketBase remains the source of truth. No direct Google OAuth.
+
+**API routes (parent-gated writes):**
+- `POST /api/calendar/events` — parent session; validates `EventInput`; writes the PB `events` row first, then mirrors to Google via Composio; returns `201 { ok, event, google: { status, eventId?, error? } }`. Google failure still returns `201` (family row saved).
+- `PATCH /api/calendar/events/[id]` — parent session; edits fields including `date`/`startDate`/`endDate`; moves the event; re-mirrors.
+- `DELETE /api/calendar/events/[id]` — parent session; deletes PB row; Google delete best-effort.
+- `POST /api/calendar/events/[id]/retry-google` — parent session; retries a `pending`/`failed` mirror; idempotent.
+
+**PB fields (`events`):** `title`, `date`/`startDate`/`endDate` (all-day uses inclusive start / exclusive end dates; timed uses start/end datetimes), `startTime`, `endTime`, `allDay`, `member`, `location`, `notes`, `googleEventId`, `googleSyncStatus` (`pending`|`synced`|`failed`), `lastGoogleSyncError`.
+
+**Mirror status/retry flow:** PB written first; Google is best-effort; `googleSyncStatus` records `synced`/`pending`/`failed`. Rows with `pending`/`failed` show a `Google pending` chip with Retry. Cron retries pending/failed mirrors (bounded, 20 per pass) without failing the sync.
+
+**Cron retry call:** `POST /api/cron/consuela/google-sync` calls `retryPendingCalendarMirrors(20)` after `syncCalendar()`; best-effort, never turns a successful sync into a failure.
+
+**Dedupe rule:** mirrored rows appear once — family lane excludes rows already represented in the Google lane (no duplicate family + Google entries).
+
+**Parent gate:** create/edit/delete/retry are parent-only; children/guests see read-only copy with no dead controls.
+
 ## Scaffolding Recipes
 
 ### Project Scaffolding Recipes (original content preserved for the coding agent)
