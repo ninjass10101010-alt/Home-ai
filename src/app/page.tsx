@@ -33,7 +33,7 @@ import FamilyStrip from "@/components/home/FamilyStrip";
 import EmptyState from "@/components/ui/EmptyState";
 import ErrorState from "@/components/ui/ErrorState";
 import ReadStatePill from "@/components/ui/ReadStatePill";
-import { classifyReadError, readMessageFor, type ReadFailure } from "@/lib/read-state";
+import { classifyReadError, readMessageFor, READ_COPY_STALE, type ReadFailure } from "@/lib/read-state";
 import Modal from "@/components/ui/Modal";
 import Toast from "@/components/ui/Toast";
 import StatTile from "@/components/patterns/StatTile";
@@ -203,6 +203,7 @@ export default function HomePage() {
   // "the backboard is down" and "no connection" into one line of copy — and the
   // line had no retry, so the only way back was a page reload.
   const [googleTodayFailure, setGoogleTodayFailure] = useState<ReadFailure | null>(null);
+  const [googleTodayStale, setGoogleTodayStale] = useState(false);
   const [googleRetrying, setGoogleRetrying] = useState(false);
   const refreshTodayEventsRef = useRef<() => Promise<void>>(async () => {});
   const googleTodayRef = useRef<any[]>([]);
@@ -373,6 +374,7 @@ export default function HomePage() {
           // 200 that still says `ok:false` is the backboard's fault, not ours.
           const authFlavoured = typeof data?.error === "string" && /unauthor|no_grant|not_connected/i.test(data.error);
           setGoogleTodayFailure(authFlavoured ? "unauthorised" : classifyReadError({ status: res.ok ? 502 : res.status }));
+          setGoogleTodayStale(false);
         } else {
           const colorMap = data.calendar_colors && typeof data.calendar_colors === "object"
             ? data.calendar_colors as Record<string, string>
@@ -382,11 +384,13 @@ export default function HomePage() {
           googleToday = mapGoogleRows(googleTodayRawRef.current, colorMap, localTodayISO());
           googleTodayRef.current = googleToday;
           setGoogleTodayFailure(null);
+          setGoogleTodayStale(data.stale === true);
         }
       } catch (err) {
         if (requestId === googleTodayRequestRef.current) {
           googleTodayRef.current = googleToday;
           setGoogleTodayFailure(classifyReadError(err));
+          setGoogleTodayStale(false);
         }
       }
       if (requestId !== googleTodayRequestRef.current) return;
@@ -819,12 +823,12 @@ export default function HomePage() {
                             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>
                           ) : undefined
                         }>
-                        {googleTodayFailure && (
+                        {(googleTodayFailure || googleTodayStale) && (
                           <div className="mb-2">
                             <ReadStatePill
-                              state={googleTodayFailure}
+                              state={googleTodayFailure ?? "offline"}
                               subject="Google Calendar"
-                              message={readMessageFor(googleTodayFailure, todayEvents.length > 0)}
+                              message={googleTodayFailure ? readMessageFor(googleTodayFailure, todayEvents.length > 0) : READ_COPY_STALE}
                               retrying={googleRetrying}
                               onRetry={() => void refreshTodayEventsRef.current()}
                             />

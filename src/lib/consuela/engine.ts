@@ -1,8 +1,9 @@
 import { db } from "@/db";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekStartForDate } from "@/lib/meals-week-utils";
-import { localTodayISO, localPreviousDayISO, localWeekStartISO } from "@/lib/local-date";
+import { localTodayISO, localPreviousDayISO, localWeekStartISO, localDayPlusISO } from "@/lib/local-date";
 import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
+import { googleEventClockTime, googleEventCoveredDays } from "@/lib/calendar/google-mapping";
 import { ROUTINE_LEAD_MS } from "@/lib/ha/alerts";
 import type { NewSuggestion } from "./types";
 import { conditionKey } from "./suggestion-key";
@@ -107,15 +108,26 @@ function parseMinutes(time: string | undefined): number {
   return NaN;
 }
 
-export async function scanCalendarConflicts(scopeDate: string): Promise<NewSuggestion[]> {
-  const events = await withAdmin(async (pb) =>
-    pb.collection("events").getFullList({
-      filter: `date="${scopeDate}"`,
-      requestKey: null,
-    }) as unknown as Array<{ id: string; title: string; date: string; time: string; icon?: string; color?: string; member?: string }>
-  );
+// ─── Calendar conflicts — 7-day cache window (2026-10-05) ───────────────────
+// Was today-only. The scanner now walks the next 7 local days (today + 6) over
+// the family `events` collection and the cached Google rows — the SAME cache
+// window `get_week_events` reads, with no live Composio/Google call. Visibility
+// rules are unchanged (calendar_conflict was and stays visible to every role).
 
-  const parsed = events
+interface ConflictRow {
+  id: string;
+  title: string;
+  date: string;
+  time: string;
+  icon?: string;
+  color?: string;
+  member?: string;
+}
+
+const CONFLICT_WINDOW_DAYS = 7;
+
+function conflictSuggestionsForDay(rows: ConflictRow[], dayISO: string): NewSuggestion[] {
+  const parsed = rows
     .map(e => ({ ...e, mins: parseMinutes(e.time) }))
     .filter(e => !isNaN(e.mins))
     .sort((a, b) => a.mins - b.mins);
@@ -134,53 +146,122 @@ export async function scanCalendarConflicts(scopeDate: string): Promise<NewSugge
           kind: "calendar_conflict",
           severity: "warn" as const,
           title: `${t1} and ${t2} overlap`,
-          body: `"${t1}" (${time1}) and "${t2}" (${time2}) on ${scopeDate} are within 30 minutes of each other.`,
+          body: `"${t1}" (${time1}) and "${t2}" (${time2}) on ${dayISO} are within 30 minutes of each other.`,
           emoji: "📅",
           actionLabel: "View calendar",
-          actionPayload: { tool: "open_calendar", args: { date: scopeDate } },
-          scopeDate,
+          actionPayload: { tool: "open_calendar", args: { date: dayISO } },
+          scopeDate: dayISO,
         });
       }
     }
   }
+  return suggestions;
+}
 
+function overnightConflictsForDay(
+  previousRows: ConflictRow[],
+  dayRows: ConflictRow[],
+  previousDayISO: string,
+  dayISO: string,
+): NewSuggestion[] {
   // L2 (overnight) — a late-night event (>= 23:00) on the previous day spills
-  // into the early hours; catch overlaps against today's pre-01:30 events.
+  // into the early hours; catch overlaps against this day's pre-01:30 events.
+  const earlyEvents = dayRows
+    .map(e => ({ ...e, mins: parseMinutes(e.time) }))
+    .filter(e => !isNaN(e.mins) && e.mins < 90); // before 01:30
+  const suggestions: NewSuggestion[] = [];
+  if (previousRows.length === 0 || earlyEvents.length === 0) return suggestions;
+  for (const late of previousRows) {
+    const lateMins = parseMinutes(late.time);
+    if (isNaN(lateMins) || lateMins < 23 * 60) continue; // only >= 23:00
+    for (const early of earlyEvents) {
+      // 23:50 + 30min = 00:20 next day (1440+20); overlaps 00:10 (1450 > 1450? no).
+      // Overlap iff lateEnd (in next-day minutes) > early start (next-day minutes).
+      if (lateMins + 30 > 24 * 60 + early.mins) {
+        const lateTitle = late.title || "Untitled event";
+        const earlyTitle = early.title || "Untitled event";
+        const lateTime = late.time || "unknown time";
+        const earlyTime = early.time || "unknown time";
+        suggestions.push({
+          kind: "calendar_conflict",
+          severity: "warn" as const,
+          title: `${lateTitle} and ${earlyTitle} overlap`,
+          body: `"${lateTitle}" (${lateTime} on ${previousDayISO}) runs into "${earlyTitle}" (${earlyTime} on ${dayISO}).`,
+          emoji: "📅",
+          actionLabel: "View calendar",
+          actionPayload: { tool: "open_calendar", args: { date: dayISO } },
+          scopeDate: dayISO,
+        });
+      }
+    }
+  }
+  return suggestions;
+}
+
+export async function scanCalendarConflicts(scopeDate: string): Promise<NewSuggestion[]> {
+  const windowDays: string[] = [];
+  for (let i = 0; i < CONFLICT_WINDOW_DAYS; i++) windowDays.push(localDayPlusISO(scopeDate, i));
+  const lastDay = windowDays[windowDays.length - 1];
   const previousDay = localPreviousDayISO(scopeDate);
-  const lateEvents = await withAdmin(async (pb) =>
-    pb.collection("events").getFullList({
-      filter: `date="${previousDay}"`,
-      requestKey: null,
-    }) as unknown as Array<{ id: string; title: string; date: string; time: string; icon?: string; color?: string; member?: string }>
-  );
-  const earlyEvents = parsed.filter(e => e.mins < 90); // before 01:30
-  if (lateEvents.length > 0 && earlyEvents.length > 0) {
-    for (const late of lateEvents) {
-      const lateMins = parseMinutes(late.time);
-      if (isNaN(lateMins) || lateMins < 23 * 60) continue; // only >= 23:00
-      for (const early of earlyEvents) {
-        // 23:50 + 30min = 00:20 next day (1440+20); overlaps 00:10 (1450 > 1450? no).
-        // Overlap iff lateEnd (in next-day minutes) > early start (next-day minutes).
-        if (lateMins + 30 > 24 * 60 + early.mins) {
-          const lateTitle = late.title || "Untitled event";
-          const earlyTitle = early.title || "Untitled event";
-          const lateTime = late.time || "unknown time";
-          const earlyTime = early.time || "unknown time";
-          suggestions.push({
-            kind: "calendar_conflict",
-            severity: "warn" as const,
-            title: `${lateTitle} and ${earlyTitle} overlap`,
-            body: `"${lateTitle}" (${lateTime} on ${previousDay}) runs into "${earlyTitle}" (${earlyTime} on ${scopeDate}).`,
-            emoji: "📅",
-            actionLabel: "View calendar",
-            actionPayload: { tool: "open_calendar", args: { date: scopeDate } },
-            scopeDate,
-          });
-        }
+
+  // Exact-day reads for today + yesterday keep the original scanner semantics;
+  // one range read adds the rest of the week. Every row is re-checked against
+  // its own `date` below, so a loose filter/mock can never smear a row into a
+  // neighbouring day.
+  const familyRead = (filter: string) =>
+    withAdmin(async (pb) =>
+      pb.collection("events").getFullList({ filter, requestKey: null })
+    ) as Promise<ConflictRow[]>;
+  const [todayRows, laterRows, previousRows, googleRows] = await Promise.all([
+    familyRead(`date="${scopeDate}"`),
+    familyRead(`date>"${scopeDate}" && date<="${lastDay}"`),
+    familyRead(`date="${previousDay}"`),
+    withAdmin(async (pb) =>
+      pb.collection("consuela_google_calendar_events").getFullList({
+        fields: "google_id,summary,start_iso,end_iso,all_day,calendar_id",
+        requestKey: null,
+      })
+    ).catch(() => []) as Promise<any[]>,
+  ]);
+
+  const byDay = new Map<string, ConflictRow[]>();
+  for (const day of windowDays) byDay.set(day, []);
+  byDay.set(previousDay, []);
+  const addRow = (day: string, row: ConflictRow) => {
+    const list = byDay.get(day);
+    if (list) list.push(row);
+  };
+
+  for (const row of todayRows) if (row?.date === scopeDate) addRow(scopeDate, row);
+  const windowSet = new Set(windowDays);
+  for (const row of laterRows) {
+    const day = String(row?.date || "");
+    if (day !== scopeDate && windowSet.has(day)) addRow(day, row);
+  }
+  for (const row of previousRows) if (row?.date === previousDay) addRow(previousDay, row);
+
+  // Cached Google rows join the window (and the previous day used by the
+  // overnight check) so school events participate. All-day / unparseable rows
+  // carry no clock and are skipped — they cannot overlap a time.
+  for (const g of googleRows) {
+    const title = String(g?.summary || "Untitled event");
+    const time = googleEventClockTime(g?.start_iso, g?.all_day);
+    if (!time || !/\d{1,2}:\d{2}/.test(time)) continue;
+    const covered = googleEventCoveredDays({ start_iso: g?.start_iso, end_iso: g?.end_iso, all_day: g?.all_day });
+    for (const day of covered) {
+      if (byDay.has(day)) {
+        addRow(day, { id: `google_${g?.google_id ?? g?.id ?? title}`, title, date: day, time });
       }
     }
   }
 
+  const suggestions: NewSuggestion[] = [];
+  for (const day of windowDays) {
+    const dayRows = byDay.get(day) ?? [];
+    const dayPrevious = localPreviousDayISO(day);
+    suggestions.push(...conflictSuggestionsForDay(dayRows, day));
+    suggestions.push(...overnightConflictsForDay(byDay.get(dayPrevious) ?? [], dayRows, dayPrevious, day));
+  }
   return suggestions;
 }
 

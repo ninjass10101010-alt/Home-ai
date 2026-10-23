@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isGoogleConnected, GoogleAuthError, mapGoogleAuthError } from "@/lib/google/oauth-client";
+import { isGoogleConnected, GoogleAuthError, mapGoogleAuthError } from "@/lib/google/connection-state";
 import {
   listCalendars,
   readCalendarSyncRows,

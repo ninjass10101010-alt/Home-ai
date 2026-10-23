@@ -213,7 +213,14 @@ describe("Bug 1 — an honest, non-alarming state instead of a silent blank", ()
       const el = await renderCalendar();
       const body = text(el);
       expect(body).toMatch(/school events/i);
-      expect(body).toMatch(/parent/i);
+      if (role === "parent") {
+        expect(body).toContain("connect Google Calendar in Settings \u2192 Connections & System");
+        expect(body).not.toMatch(/a parent can connect/i);
+      } else {
+        expect(body).toContain(
+          "a parent can connect Google Calendar in Settings \u2192 Connections & System",
+        );
+      }
       expect(body).toMatch(/settings/i);
       // Non-alarming: no alarm semantics on a not-connected calendar.
       expect(body).not.toMatch(/error|failed|✗|❌/i);

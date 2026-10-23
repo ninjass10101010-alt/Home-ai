@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
 import { syncCalendar, listCalendars } from "@/lib/google/calendar";
-import { isGoogleConnected, GoogleAuthError, mapGoogleAuthError } from "@/lib/google/oauth-client";
+import {
+  isGoogleConnected,
+  GoogleAuthError,
+  mapGoogleAuthError,
+  readConnectionSnapshot,
+} from "@/lib/google/connection-state";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
-import { getStoredTokensStrict } from "@/lib/google/token-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,15 +19,16 @@ function googleAuthResponse(error: unknown): NextResponse {
 
 function googleStateUnavailableResponse(): NextResponse {
   return googleAuthResponse(
-    new GoogleAuthError("unavailable", "Google token state unavailable"),
+    new GoogleAuthError("unavailable", "Google connection state unavailable"),
   );
 }
 
-async function readTokensStrict() {
+async function readAccountEmail(): Promise<string | null> {
   try {
-    return await getStoredTokensStrict();
+    const snapshot = await readConnectionSnapshot();
+    return snapshot.accountEmail ?? null;
   } catch {
-    throw new GoogleAuthError("unavailable", "Google token state unavailable");
+    throw new GoogleAuthError("unavailable", "Google connection state unavailable");
   }
 }
 
@@ -86,31 +91,24 @@ export async function POST(req: NextRequest) {
     }
 
     if (resource === "tasks" || resource === "all") {
-      const tokens = await readTokensStrict();
-      const hasTasksScope = tokens?.scope?.includes("googleapis.com/auth/tasks");
-      if (!hasTasksScope) {
-        result.tasks = {
-          skipped: true,
-          reason:
-            "Google Tasks scope is not granted. Add https://www.googleapis.com/auth/tasks to GOOGLE_OAUTH_SCOPES and reconnect (requires a Web OAuth client with a public redirect URI; Device Flow does not allow Tasks).",
-        };
-        taskFailure = { status: 409, error: "tasks_scope_missing", partial: true };
-      } else {
-        try {
-          const { syncTasks } = await import("@/lib/google/tasks");
-          const t = await syncTasks();
+      try {
+        const { syncTasks } = await import("@/lib/google/tasks");
+        const t = await syncTasks();
+        if ("skipped" in t) {
+          result.tasks = { skipped: true, reason: t.reason };
+        } else {
           result.tasks = { tasks: t.tasks, deleted: t.deleted };
-        } catch (e: any) {
-          if (e instanceof GoogleAuthError) throw e;
-          result.tasks = { skipped: true, reason: e?.message || "Tasks sync failed" };
-          taskFailure = { status: 502, error: "tasks_sync_failed", partial: true };
         }
+      } catch (e: any) {
+        if (e instanceof GoogleAuthError) throw e;
+        result.tasks = { skipped: true, reason: e?.message || "Tasks sync failed" };
+        taskFailure = { status: 502, error: "tasks_sync_failed", partial: true };
       }
     }
 
-    const tokens = await readTokensStrict();
-    if (tokens) {
-      result.account_email = tokens.account_email;
+    const accountEmail = await readAccountEmail();
+    if (accountEmail) {
+      result.account_email = accountEmail;
     }
 
     if (skippedFailure) {

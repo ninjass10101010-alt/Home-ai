@@ -158,9 +158,11 @@ export interface CapsulePreview {
 export function getDaysUntilUnlock(unlockDate: string): number {
   const now = new Date();
   const unlock = new Date(unlockDate);
-  const diffMs = unlock.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  return Math.max(0, diffDays);
+  const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const unlockDay = new Date(unlock.getFullYear(), unlock.getMonth(), unlock.getDate());
+  const dayDiff = Math.round((unlockDay.getTime() - nowDay.getTime()) / (1000 * 60 * 60 * 24));
+  if (dayDiff === 0 && unlock.getTime() > now.getTime()) return 1;
+  return Math.max(0, dayDiff);
 }
 
 export function isCapsuleUnlocked(capsule: TimeCapsule): boolean {

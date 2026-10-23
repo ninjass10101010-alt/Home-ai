@@ -206,6 +206,20 @@ CONTRACTS:
 7. `GLASS`/`GLASS_NIGHT` are retuned in place (Drive alphas, night derived by the historical +0.10s) — **not** a second card material; the app-wide `.glass` family is untouched.
 8. The pre-existing night-wash AA gap (top stop `#6f74a8` vs slate-800 = 3.30) is documented and out of scope; the new keys do not regress it.
 
+### UI Change Record — 2026-10-05 — Google connection: hosted Composio consent card + role-aware calendar status line
+- Added / Changed: `src/components/settings/GoogleConnectCard.tsx` (hosted-consent flow — opens the Composio consent link returned by `POST /api/google/composio/setup`, polls `GET /api/google/composio/status` until ACTIVE; Tasks renders as a separate optional connect), `src/hooks/useGoogleConnection.ts` (connection state from the `consuela_data_snapshots` snapshot — no tokens), `src/app/calendar/page.tsx` (status line: connected / not connected / stale), `src/app/api/google-calendar/route.ts` (`provider:"composio"`, real `last_sync_at`, `stale` on a dead connection).
+- Visual / Motion: no new colors, keyframes or tokens — the card uses the existing Settings glass primitives, the 12px type floor and the 44px control floor; the calendar status line is quiet text, not a new badge or chip. The connect control hands off to Composio's own hosted consent page in the browser; there is no in-app OAuth screen and no device code to type.
+- Role-aware copy: a parent sees the connect/reconnect action under Settings → Connections & System; a child, guest or pet sees who can fix it (ask a parent), never a control that cannot work. A not-connected or not-ACTIVE connection renders **no stale Google rows as current** — the Calendar status line says the calendar is showing family events only.
+- Agent action required: Update this section + "Current Dashboard Snapshot" + Change Log. **CONTRACTS to keep:**
+  1. Connection state is the `consuela_data_snapshots` snapshot key `google_composio_connection` (tasks: `google_composio_tasks`) — never a token row. `isGoogleConnected()` is true only for `status === "ACTIVE"`, and a snapshot read failure is an `unavailable` state (503), never a false disconnect.
+  2. A not-connected / not-ACTIVE connection must never render stale Google rows as current: `/api/google-calendar` answers `connected:false` + `source:"none"` + `stale:true` + `events:[]`, and the page's status line names who can fix it. A connected-but-empty read says **nothing** — an empty day is a real answer.
+  3. `provider:"composio"` is additive; `source` semantics stay `"google"` when connected / `"none"` when not. `last_sync_at` is the newest per-calendar sync timestamp, never the legacy sync-state stamp.
+  4. The connect card is the only connect affordance: hosted Composio consent (no redirect URI, no device code, no in-app OAuth), parent-gated setup/status/disconnect, and no Google token ever reaches the client or the NAS.
+  5. Calendar sync is a full-window `GOOGLECALENDAR_EVENTS_LIST` (30 back / 90 forward) per selected calendar — Composio exposes no incremental sync token; do not "optimize" it into a sync-token flow.
+  6. Status copy is role-aware and honest: a child/guest/pet gets direction, not a dead control, and no raw server error string is ever rendered.
+- User-facing description (copy-paste ready for responses):
+  > "Connecting Google Calendar now happens on Google's own consent page: tap Connect in Settings → Connections & System, finish in the browser, and come back — the card confirms when it's active. The Calendar page tells you honestly when Google isn't connected (and who can connect it) instead of showing old events as if they were current."
+
 ### UI Change Record — Monster weather skin + dashboard holiday tint (2026-10-01)
 - Added / Changed: `src/lib/weather-skins/types.ts` (NEW — `WeatherMaterial` seam), `src/components/ui/wx-tokens.ts` (Monster `SKY` washes, `MONSTER` capsule palette, retuned `GLASS`), `src/components/ui/WxToys.tsx` (`MonsterDigit`, face-free `Condition` silhouettes), `src/components/ui/WeatherWidget.tsx` (hero digit glyphs, weather-exclusive holiday mount removed), `src/lib/holiday.ts` (single-source 11-window detector + palette/style), `src/hooks/useAtmosphericTheme.tsx` (holiday provider 5→11), `src/app/page.tsx` (`HomeShell` injects `[data-holiday]` + `--holiday-*`), `src/app/globals.css` (holiday glaze rules, retuned keyframes), tests `monster-skin`, `holiday`, `atmospheric-holiday`, `holiday-tint` + the weather family.
 - **Monster is the canonical weather material.** `WEATHER_MATERIAL` (`src/lib/weather-skins/types.ts`) is typed `"monster" | "mem" | "opal"` and ships `"monster"`; Mem and Opal are named future skins with no picker and no implementation — the seam exists so a later material swap is a value change, not a rewrite.
@@ -1439,3 +1453,11 @@ See files:
 - Controlled by `useTheme` hook (`src/hooks/useTheme.tsx`) and inline anti-FOUC script in `layout.tsx`
 
 Settings page is the single place users change this. Changes are instant across the entire app.
+
+### UI Change Record — Calendar create + date integrity (2026-10-21)
+
+- Surface: `/calendar` parent/child, phone/wall, dark/light.
+- Added: parent create/edit sheet, all-day control, member select, location/notes, Google pending/failed chip + retry.
+- Changed: date edits now move events; all-day events sort before timed; child sees read-only copy.
+- Kept: warm-glass cards, existing tokens, 44px targets, no new fonts.
+- Evidence: `/tmp/calendar-create-web/surface`, `/tmp/calendar-create-web/form-open`, and `Home-native/screenshots/accepted/calendar-create`.

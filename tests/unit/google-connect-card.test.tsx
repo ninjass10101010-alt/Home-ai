@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
       isCurrentGeneration: vi.fn((generation: number) => generation === mocks.currentGeneration),
       state,
       waiting: null,
+      tasksConnected: false,
       errorMessage: null,
       connect: vi.fn(async () => undefined),
       disconnect: vi.fn(async () => ({ outcome: "disconnected", remoteRevoked: true, localRevoked: true })),
@@ -90,6 +91,12 @@ function button(scope: ParentNode, pattern: RegExp): HTMLButtonElement {
   return result;
 }
 
+function findButton(scope: ParentNode, pattern: RegExp): HTMLButtonElement | undefined {
+  return Array.from(scope.querySelectorAll("button")).find((candidate) =>
+    pattern.test(candidate.textContent || "") || pattern.test(candidate.getAttribute("aria-label") || ""),
+  );
+}
+
 function dialog(): HTMLElement {
   const result = document.querySelector<HTMLElement>('[role="dialog"]');
   if (!result) throw new Error("Dialog not found");
@@ -113,6 +120,7 @@ beforeEach(() => {
     minutes_until_expiry: null,
   };
   mocks.hook.waiting = null;
+  mocks.hook.tasksConnected = false;
   mocks.hook.errorMessage = null;
   mocks.hook.disconnect.mockReset();
   mocks.hook.disconnect.mockResolvedValue({ outcome: "disconnected", remoteRevoked: true, localRevoked: true } as any);
@@ -144,15 +152,25 @@ afterEach(() => {
 });
 
 describe("GoogleConnectCard", () => {
-  it("owns its card and promises Calendar sync without Tasks or Reminders copy", async () => {
+  it("owns its card and promises Calendar sync without Reminders copy", async () => {
     const host = render(<GoogleConnectCard />);
     await settle();
 
     expect(host.querySelector(".settings-google-card")).toBeTruthy();
     expect(host.textContent).toContain("Google Calendar");
     expect(host.textContent).toContain("Calendar sync");
-    expect(host.textContent).not.toMatch(/Tasks|Reminders/);
+    expect(host.textContent).not.toContain("Reminders");
     expect(host.querySelectorAll(".widget-card .widget-card")).toHaveLength(0);
+  });
+
+  it("does not repeat the card description inside the connect body", async () => {
+    mocks.hook.status = "unconnected";
+    mocks.hook.state = null as any;
+    const host = render(<GoogleConnectCard />);
+    await settle();
+
+    expect(host.textContent).toContain("Google sign-in opens a secure consent page in a new tab.");
+    expect(host.textContent).not.toContain("Sync your family calendar with Consuela.");
   });
 
   it("syncs only the calendar resource", async () => {
@@ -166,7 +184,6 @@ describe("GoogleConnectCard", () => {
     expect(call).toBeTruthy();
     expect(JSON.parse(String(call!.init?.body))).toEqual({ resource: "calendar" });
     expect(host.textContent).toContain("2 events");
-    expect(host.textContent).not.toMatch(/tasks/i);
   });
 
   it("does not report a partial calendar selection save as saved", async () => {
@@ -476,10 +493,9 @@ describe("GoogleConnectCard", () => {
     mocks.hook.status = "waiting";
     mocks.hook.state = null as any;
     mocks.hook.waiting = {
-      device_code: "device",
-      user_code: "code",
-      verification_url: "https://google.test/device",
+      auth_url: "https://backend.composio.dev/link/abc",
       expires_at: Date.now() + 600_000,
+      toolkit: "googlecalendar",
       interval: 5,
     } as any;
     const host = render(<GoogleConnectCard />);
@@ -493,10 +509,9 @@ describe("GoogleConnectCard", () => {
     mocks.hook.status = "waiting";
     mocks.hook.state = null as any;
     mocks.hook.waiting = {
-      device_code: "device",
-      user_code: "code",
-      verification_url: "https://google.test/device",
+      auth_url: "https://backend.composio.dev/link/abc",
       expires_at: Date.now() + 600_000,
+      toolkit: "googlecalendar",
       interval: 5,
     } as any;
     const host = render(<GoogleConnectCard />);
@@ -507,6 +522,59 @@ describe("GoogleConnectCard", () => {
     const root = roots.pop();
     if (root) act(() => root.unmount());
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("shows the hosted consent link, countdown and Cancel instead of a device code", async () => {
+    vi.useFakeTimers();
+    const openSpy = vi.fn();
+    vi.stubGlobal("open", openSpy);
+    mocks.hook.status = "waiting";
+    mocks.hook.state = null as any;
+    mocks.hook.waiting = {
+      auth_url: "https://backend.composio.dev/link/abc",
+      expires_at: Date.now() + 600_000,
+      toolkit: "googlecalendar",
+      interval: 5,
+    } as any;
+    const host = render(<GoogleConnectCard />);
+
+    expect(host.textContent).toContain("Waiting for Google sign-in");
+    expect(host.textContent).not.toContain("Your code");
+    expect(host.textContent).not.toContain("Copy code");
+    expect(host.querySelector('[data-google-countdown="true"]')).toBeTruthy();
+
+    await act(async () => button(host, /Open Google consent/).click());
+    expect(openSpy).toHaveBeenCalledWith("https://backend.composio.dev/link/abc", "_blank", "noopener,noreferrer");
+
+    await act(async () => button(host, /^Cancel$/).click());
+    expect(mocks.hook.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Connect Google Tasks only while tasks are not connected", async () => {
+    const host = render(<GoogleConnectCard />);
+    await settle();
+
+    expect(findButton(host, /Connect Google Tasks/)).toBeTruthy();
+    await act(async () => button(host, /Connect Google Tasks/).click());
+    expect(mocks.hook.connect).toHaveBeenCalledWith("googletasks");
+
+    mocks.hook.tasksConnected = true;
+    await act(async () => roots[roots.length - 1].render(<GoogleConnectCard />));
+    expect(findButton(host, /Connect Google Tasks/)).toBeUndefined();
+  });
+
+  it("announces a successful tasks connection as a notice", async () => {
+    const host = render(<GoogleConnectCard />);
+    await settle();
+
+    await act(async () => button(host, /Connect Google Tasks/).click());
+
+    mocks.hook.tasksConnected = true;
+    await act(async () => roots[roots.length - 1].render(<GoogleConnectCard />));
+    await settle();
+
+    const notice = host.querySelector('[data-google-disconnect-status="true"]');
+    expect(notice?.textContent).toContain("Google Tasks connected");
   });
 
   it("clears the disconnect focus timer when the card unmounts", async () => {

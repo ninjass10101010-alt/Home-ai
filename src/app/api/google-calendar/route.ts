@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
-import { isGoogleConnected, GoogleAuthError, mapGoogleAuthError } from "@/lib/google/oauth-client";
+import {
+  isGoogleConnected,
+  GoogleAuthError,
+  mapGoogleAuthError,
+  readConnectionSnapshot,
+} from "@/lib/google/connection-state";
 import { readCachedEvents, syncCalendar, readCalendarSyncRows } from "@/lib/google/calendar";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
-import { getStoredTokensStrict } from "@/lib/google/token-store";
+import { withAdmin } from "@/lib/pb-auth";
+import { filterMirroredFamilyRows } from "@/lib/calendar/google-dedupe";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,29 +24,51 @@ function noGrantResponse() {
     ok: true,
     connected: false,
     source: "none",
+    stale: true,
     events: [],
   });
 }
 
-async function readTokensStrict() {
+async function readAccountEmail(): Promise<string | null> {
   try {
-    const tokens = await getStoredTokensStrict();
-    if (!tokens || tokens.revoked_at) {
-      throw new GoogleAuthError("no_grant", "Google account is not connected");
-    }
-    return tokens;
-  } catch (error) {
-    if (error instanceof GoogleAuthError) throw error;
-    throw new GoogleAuthError("unavailable", "Google token state unavailable");
+    const snapshot = await readConnectionSnapshot();
+    return snapshot.accountEmail ?? null;
+  } catch {
+    throw new GoogleAuthError("unavailable", "Google connection state unavailable");
   }
 }
 
+async function readSyncRows(): Promise<Awaited<ReturnType<typeof readCalendarSyncRows>>> {
+  try {
+    return await readCalendarSyncRows();
+  } catch {
+    return [];
+  }
+}
+
+function newestSyncAt(rows: Awaited<ReturnType<typeof readCalendarSyncRows>>): string | null {
+  let newest: string | null = null;
+  for (const row of rows) {
+    if (row.last_sync_at && (!newest || row.last_sync_at > newest)) newest = row.last_sync_at;
+  }
+  return newest;
+}
+
+const STALE_SYNC_MS = 15 * 60_000;
+
+// Connected but not fresh: a missing timestamp or one older than 15 minutes
+// (the cron cadence is every 5 minutes) means the rows on screen may be stale.
+function isStaleSync(lastSyncAt: string | null): boolean {
+  if (!lastSyncAt) return true;
+  const parsed = Date.parse(lastSyncAt);
+  return !Number.isFinite(parsed) || Date.now() - parsed > STALE_SYNC_MS;
+}
+
 // Plain GET remains session-scoped for product calendar events; only `sync=now`
-// enters the parent gate before collection or token work. calendarId → Google
-// colorRgb, so the client can paint each synced event in its own calendar's color
-// (mapGoogleEvent's colorHex passthrough).
-async function calendarColors(): Promise<Record<string, string>> {
-  const rows = await readCalendarSyncRows().catch(() => []);
+// enters the parent gate before collection or connection-state work. calendarId
+// → Google colorRgb, so the client can paint each synced event in its own
+// calendar's color (mapGoogleEvent's colorHex passthrough).
+function calendarColors(rows: Awaited<ReturnType<typeof readCalendarSyncRows>>): Record<string, string> {
   const map: Record<string, string> = {};
   for (const r of rows) if (r.color_rgb) map[r.calendar_id] = r.color_rgb;
   return map;
@@ -98,8 +126,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const events = await readCachedEvents();
-    const tokens = await readTokensStrict();
+    const cachedEvents = await readCachedEvents();
+    const accountEmail = await readAccountEmail();
+    const rows = await readSyncRows();
+    const familyRows = (await withAdmin((pb) =>
+      pb.collection("events").getFullList({
+        filter: 'source = "family" && googleEventId != ""',
+        requestKey: null,
+      }),
+    ).catch(() => [])) as { googleEventId?: string }[];
+    const events = filterMirroredFamilyRows(cachedEvents, familyRows);
     if (partialSync) {
       return NextResponse.json({
         ok: false,
@@ -107,19 +143,22 @@ export async function GET(request: NextRequest) {
         stale: true,
         error: "calendar_partial_failure",
         source: "google",
-        account_email: tokens?.account_email || null,
-        last_sync_at: tokens?.granted_at || null,
-        calendar_colors: await calendarColors(),
+        account_email: accountEmail,
+        last_sync_at: newestSyncAt(rows),
+        calendar_colors: calendarColors(rows),
         events,
       }, { status: 502 });
     }
+    const lastSyncAt = newestSyncAt(rows);
     return NextResponse.json({
       ok: true,
       connected: true,
       source: "google",
-      account_email: tokens?.account_email || null,
-      last_sync_at: tokens?.granted_at || null,
-      calendar_colors: await calendarColors(),
+      provider: "composio",
+      stale: isStaleSync(lastSyncAt),
+      account_email: accountEmail,
+      last_sync_at: lastSyncAt,
+      calendar_colors: calendarColors(rows),
       events,
     });
   } catch (error) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 
 export type ConnectionStatus =
   | "unconnected"
@@ -11,6 +11,8 @@ export type ConnectionStatus =
   | "error:revoked"
   | "error:config"
   | "error:unknown";
+
+export type GoogleToolkit = "googlecalendar" | "googletasks";
 
 export interface PublicState {
   connected: boolean;
@@ -23,11 +25,9 @@ export interface PublicState {
 }
 
 export interface WaitingState {
-  attempt_id: string;
-  device_code: string;
-  user_code: string;
-  verification_url: string;
+  auth_url: string;
   expires_at: number;
+  toolkit: GoogleToolkit;
   interval: number;
 }
 
@@ -41,12 +41,19 @@ export interface DisconnectResult {
   error?: string;
 }
 
+const CONSENT_POLL_INTERVAL_MS = 5000;
+const CONSENT_FALLBACK_TTL_MS = 10 * 60_000;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
+}
+
+function isGoogleToolkit(value: unknown): value is GoogleToolkit {
+  return value === "googlecalendar" || value === "googletasks";
 }
 
 function isGoogleState(value: unknown): value is PublicState {
@@ -59,40 +66,27 @@ function isGoogleState(value: unknown): value is PublicState {
     && (value.minutes_until_expiry === null || (typeof value.minutes_until_expiry === "number" && Number.isFinite(value.minutes_until_expiry)));
 }
 
-function isDeviceGrant(value: unknown): value is {
-  attempt_id: string;
-  device_code: string;
-  user_code: string;
-  verification_url: string;
-  expires_in: number;
-  interval: number;
+function isSetupPayload(value: unknown): value is {
+  auth_url: string;
+  expires_at: string | null;
+  toolkit: GoogleToolkit;
 } {
   if (!isRecord(value) || value.ok !== true) return false;
-  return typeof value.attempt_id === "string"
-    && value.attempt_id.length > 0
-    && typeof value.device_code === "string"
-    && value.device_code.length > 0
-    && typeof value.user_code === "string"
-    && value.user_code.length > 0
-    && typeof value.verification_url === "string"
-    && value.verification_url.length > 0
-    && typeof value.expires_in === "number"
-    && Number.isFinite(value.expires_in)
-    && value.expires_in > 0
-    && typeof value.interval === "number"
-    && Number.isFinite(value.interval)
-    && value.interval > 0;
+  return typeof value.auth_url === "string"
+    && value.auth_url.length > 0
+    && (value.expires_at === null || typeof value.expires_at === "string")
+    && isGoogleToolkit(value.toolkit);
 }
 
-function isPollResult(value: unknown): value is {
-  status: "pending" | "denied" | "expired" | "complete";
-  next_interval?: number;
+function isToolkitStatusPayload(value: unknown): value is {
+  connected: boolean;
+  status?: string;
+  reason?: string;
 } {
-  if (!isRecord(value) || value.ok !== true) return false;
-  if (value.status === "pending") {
-    return typeof value.next_interval === "number" && Number.isFinite(value.next_interval) && value.next_interval > 0;
-  }
-  return value.status === "denied" || value.status === "expired" || value.status === "complete";
+  if (!isRecord(value) || value.ok !== true || typeof value.connected !== "boolean") return false;
+  if (value.status !== undefined && typeof value.status !== "string") return false;
+  if (value.reason !== undefined && typeof value.reason !== "string") return false;
+  return true;
 }
 
 function isDisconnectPayload(value: unknown): value is DisconnectResult {
@@ -121,12 +115,21 @@ function failedDisconnect(error: string): DisconnectResult {
   return { outcome: "failed", remoteRevoked: false, localRevoked: false, error };
 }
 
+function parseConsentExpiry(value: string | null): number {
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Date.now() + CONSENT_FALLBACK_TTL_MS;
+}
+
 export function useGoogleConnection() {
   const [mounted, setMounted] = useState(false);
   const [status, setStatus] = useState<ConnectionStatus>("unconnected");
   const [statusVersion, setStatusVersion] = useState(0);
   const [state, setState] = useState<PublicState | null>(null);
   const [waiting, setWaiting] = useState<WaitingState | null>(null);
+  const [tasksAccountActive, setTasksAccountActive] = useState(false);
   const [errorMessageState, setErrorMessage] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -135,11 +138,7 @@ export function useGoogleConnection() {
   const statusVersionRef = useRef(0);
   const disconnectInFlightRef = useRef(false);
   const mountedRef = useRef(false);
-  const waitingRef = useRef<WaitingState | null>(null);
-
-  useLayoutEffect(() => {
-    waitingRef.current = waiting;
-  }, [waiting]);
+  const preWaitingStatusRef = useRef<"connected" | "unconnected">("unconnected");
 
   const updateStatus = useCallback((next: SetStateAction<ConnectionStatus>) => {
     const resolved = typeof next === "function" ? next(statusRef.current) : next;
@@ -223,82 +222,82 @@ export function useGoogleConnection() {
   }, [readState]);
 
   const startPolling = useCallback(
-    (attemptId: string, deviceCode: string, initialInterval: number, pollGeneration: number) => {
+    (toolkit: GoogleToolkit, expiresAt: number, pollGeneration: number) => {
       const pollStatusVersion = statusVersionRef.current;
       const requestIsCurrent = () => generationIsCurrent(pollGeneration)
         && statusVersionRef.current === pollStatusVersion;
       if (!requestIsCurrent()) return;
       stopPolling();
-      let interval = initialInterval;
       const tick = async () => {
         if (!requestIsCurrent()) return;
         try {
-          const res = await fetch("/api/google/device-poll", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-             body: JSON.stringify({ attempt_id: attemptId, device_code: deviceCode, interval }),
+          const res = await fetch(`/api/google/composio/status?toolkit=${encodeURIComponent(toolkit)}`, {
+            cache: "no-store",
           });
           if (!requestIsCurrent()) return;
-          const data = await res.json() as unknown;
+          const data = await res.json().catch(() => null) as unknown;
           if (!requestIsCurrent()) return;
           if (!res.ok) {
-            updateStatus("error:unknown");
-            setErrorMessage(isRecord(data) && typeof data.error === "string" ? data.error : "Poll failed");
-            return;
-          }
-          if (!isPollResult(data)) {
-            updateStatus("error:unknown");
-            setErrorMessage("Google returned an invalid device-flow response.");
             setWaiting(null);
+            updateStatus("error:unknown");
+            setErrorMessage(isRecord(data) && typeof data.error === "string" ? data.error : "Status check failed");
             return;
           }
-          if (data.status === "pending") {
-            if (data.next_interval && data.next_interval > interval) interval = data.next_interval;
-            if (requestIsCurrent()) {
-              pollTimerRef.current = setTimeout(tick, interval * 1000);
+          if (!isToolkitStatusPayload(data)) {
+            setWaiting(null);
+            updateStatus("error:unknown");
+            setErrorMessage("Google returned an invalid connection response.");
+            return;
+          }
+          if (data.connected && data.status === "ACTIVE") {
+            setWaiting(null);
+            if (toolkit === "googletasks" && preWaitingStatusRef.current === "connected") {
+              setTasksAccountActive(true);
+              updateStatus("connected");
+              return;
             }
-            return;
-          }
-          if (data.status === "denied") {
-            updateStatus("error:denied");
-            setErrorMessage("Access was denied at the Google screen. Try again to grant access.");
-            setWaiting(null);
-            return;
-          }
-          if (data.status === "expired") {
-            updateStatus("error:expired");
-            setErrorMessage("The device code expired before you granted access. Tap Connect to get a new code.");
-            setWaiting(null);
-            return;
-          }
-          if (data.status === "complete") {
-            setWaiting(null);
             await readState(pollGeneration, pollStatusVersion, true);
+            return;
+          }
+          if (Date.now() >= expiresAt || data.reason === "account_not_found") {
+            setWaiting(null);
+            updateStatus("error:expired");
+            setErrorMessage("The Google sign-in link expired before access was granted. Tap Connect to try again.");
+            return;
+          }
+          if (requestIsCurrent()) {
+            pollTimerRef.current = setTimeout(tick, CONSENT_POLL_INTERVAL_MS);
           }
         } catch (error: unknown) {
           if (!requestIsCurrent()) return;
+          setWaiting(null);
           updateStatus("error:unknown");
-          setErrorMessage(errorMessage(error, "Poll failed"));
+          setErrorMessage(errorMessage(error, "Status check failed"));
         }
       };
-      pollTimerRef.current = setTimeout(tick, interval * 1000);
+      pollTimerRef.current = setTimeout(tick, CONSENT_POLL_INTERVAL_MS);
     },
-     [generationIsCurrent, readState, stopPolling, updateStatus],
+    [generationIsCurrent, readState, stopPolling, updateStatus],
   );
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (toolkit: GoogleToolkit = "googlecalendar") => {
     const pollGeneration = advanceGeneration();
     stopPolling();
     setErrorMessage(null);
-    updateStatus("unconnected");
     setWaiting(null);
+    const previousStatus = statusRef.current === "waiting" ? preWaitingStatusRef.current : statusRef.current;
+    preWaitingStatusRef.current = previousStatus === "connected" ? "connected" : "unconnected";
     try {
-      const res = await fetch("/api/google/device-grant", { method: "POST" });
+      const res = await fetch("/api/google/composio/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toolkit }),
+      });
       if (!generationIsCurrent(pollGeneration)) return;
-      const data = await res.json() as unknown;
+      const data = await res.json().catch(() => null) as unknown;
       if (!generationIsCurrent(pollGeneration)) return;
       if (!res.ok) {
-        if (isRecord(data) && data.code === "config") {
+        if (isRecord(data) && data.code === "not_configured") {
           updateStatus("error:config");
           setErrorMessage(typeof data.error === "string" ? data.error : "Google credentials are not configured.");
         } else {
@@ -307,22 +306,20 @@ export function useGoogleConnection() {
         }
         return;
       }
-      if (!isDeviceGrant(data)) {
+      if (!isSetupPayload(data)) {
         updateStatus("error:unknown");
-        setErrorMessage("Google sign-in returned an invalid device code.");
+        setErrorMessage("Google sign-in returned an invalid consent link.");
         return;
       }
-      const grant = data;
+      const expiresAt = parseConsentExpiry(data.expires_at);
       setWaiting({
-        attempt_id: grant.attempt_id,
-        device_code: grant.device_code,
-        user_code: grant.user_code,
-        verification_url: grant.verification_url,
-        expires_at: Date.now() + grant.expires_in * 1000,
-        interval: grant.interval,
+        auth_url: data.auth_url,
+        expires_at: expiresAt,
+        toolkit: data.toolkit,
+        interval: CONSENT_POLL_INTERVAL_MS / 1000,
       });
       updateStatus("waiting");
-      startPolling(grant.attempt_id, grant.device_code, grant.interval, pollGeneration);
+      startPolling(data.toolkit, expiresAt, pollGeneration);
     } catch (error: unknown) {
       if (!generationIsCurrent(pollGeneration)) return;
       updateStatus("error:unknown");
@@ -336,11 +333,7 @@ export function useGoogleConnection() {
     stopPolling();
     setErrorMessage(null);
     try {
-      const res = await fetch("/api/google/device-revoke", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "disconnect" }),
-      });
+      const res = await fetch("/api/google/composio/disconnect", { method: "POST" });
       if (!generationIsCurrent(disconnectGeneration)) return failedDisconnect("Disconnect was superseded.");
       const data = await res.json().catch(() => null) as unknown;
       if (!generationIsCurrent(disconnectGeneration)) return failedDisconnect("Disconnect was superseded.");
@@ -369,19 +362,35 @@ export function useGoogleConnection() {
   }, [advanceGeneration, generationIsCurrent, stopPolling, updateStatus]);
 
   const cancel = useCallback(() => {
-    const attemptId = waiting?.attempt_id;
-    if (attemptId) {
-      void fetch("/api/google/device-revoke", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "cancel", attempt_id: attemptId }),
-      }).catch(() => undefined);
-    }
     invalidatePolling();
     setWaiting(null);
-    updateStatus("unconnected");
+    updateStatus(preWaitingStatusRef.current === "connected" ? "connected" : "unconnected");
     setErrorMessage(null);
-  }, [invalidatePolling, updateStatus, waiting]);
+  }, [invalidatePolling, updateStatus]);
+
+  useEffect(() => {
+    if (status !== "connected") return;
+    const requestedGeneration = generation;
+    const requestedStatusVersion = statusVersion;
+    let cancelled = false;
+    const requestIsCurrent = () => !cancelled
+      && generationIsCurrent(requestedGeneration)
+      && statusVersionRef.current === requestedStatusVersion;
+    void (async () => {
+      try {
+        const res = await fetch("/api/google/composio/status?toolkit=googletasks", { cache: "no-store" });
+        if (!requestIsCurrent()) return;
+        const data = await res.json().catch(() => null) as unknown;
+        if (!requestIsCurrent()) return;
+        setTasksAccountActive(res.ok && isToolkitStatusPayload(data) && data.connected === true && data.status === "ACTIVE");
+      } catch {
+        if (requestIsCurrent()) setTasksAccountActive(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [generation, generationIsCurrent, status, statusVersion]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -392,20 +401,13 @@ export function useGoogleConnection() {
       void readState(initialGeneration, initialStatusVersion, true);
     }, 0);
     return () => {
-      const attemptId = waitingRef.current?.attempt_id;
-      if (attemptId) {
-        void fetch("/api/google/device-revoke", {
-          method: "POST",
-          keepalive: true,
-          headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "cancel", attempt_id: attemptId }),
-        }).catch(() => undefined);
-      }
       mountedRef.current = false;
       window.clearTimeout(timer);
       invalidatePolling();
     };
   }, [invalidatePolling, readState]);
+
+  const tasksConnected = status === "connected" && tasksAccountActive;
 
   return {
     mounted,
@@ -413,6 +415,7 @@ export function useGoogleConnection() {
     statusVersion,
     state,
     waiting,
+    tasksConnected,
     errorMessage: errorMessageState,
     generation,
     isCurrentGeneration: generationIsCurrent,

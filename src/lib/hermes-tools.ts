@@ -28,7 +28,9 @@ import {
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { calculateXPProgress } from "@/db/features/skill-tree";
 import { getStoreLabel, groupByStore } from "@/lib/stores";
-import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
+import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO, localDayPlusISO } from "@/lib/local-date";
+import { createCalendarEvent, deleteCalendarEvent } from "@/lib/google/calendar";
+import { googleEventCoversDay } from "@/lib/calendar/google-mapping";
 import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, listActiveFacts, replaceMemoryContent, isMemoryRefusal, type MemoryCategory } from "@/lib/family-memory";
@@ -221,6 +223,113 @@ async function adminInsertEvent(event: Record<string, unknown>): Promise<any | n
     console.error("[hermes-tools] insertEvent failed:", e?.message);
     return null;
   }
+}
+
+// ─── Composio calendar dual-write (2026-10-05) ───────────────────────────────
+// The family `events` collection stays the dashboard's source of truth. The
+// connected Google calendar is a best-effort mirror: a Google failure must
+// never fail or hide the family write — it is reported honestly instead.
+
+const GOOGLE_EVENTS_COLLECTION = "consuela_google_calendar_events";
+
+/** Family-LOCAL wall time (`YYYY-MM-DDTHH:MM:00`) — the frame the chat tool's
+ *  `date`/`time` args are in. Never `.toISOString()`: converting a family
+ *  evening to UTC lands it on the wrong calendar day west of Greenwich. */
+function localDateTimeString(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`;
+}
+
+/** Google leg of the `add_event` dual-write. NEVER throws: the PB row is
+ *  already saved. `"not_connected"` is a normal family-only outcome (no Google
+ *  account connected), not an error; a connected account whose write fails is
+ *  `"failed"` with the honest partial message the model must repeat. */
+async function mirrorEventToGoogle(
+  row: any
+): Promise<{ status: "created" | "failed" | "not_connected"; warning?: string }> {
+  const date = String(row.date || "");
+  const time = /^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(String(row.time || "09:00").trim());
+  const invalid = `saved to the family calendar; Google Calendar update failed: "${row.time ?? ""}" on "${date}" is not a schedulable date/time`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !time) return { status: "failed", warning: invalid };
+  let hours = Number(time[1]);
+  const minutes = Number(time[2]);
+  const meridiem = time[3]?.toUpperCase();
+  // The tool contract is 24-hour, but a stored row may carry the UI's 12-hour
+  // shape ("7:00 PM") — accept both rather than declare a real event unschedulable.
+  if (meridiem === "PM" && hours !== 12) hours += 12;
+  if (meridiem === "AM" && hours === 12) hours = 0;
+  if (hours > 23 || minutes > 59) return { status: "failed", warning: invalid };
+  const start = new Date(`${date}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00`);
+  if (Number.isNaN(start.getTime())) return { status: "failed", warning: invalid };
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  try {
+    await createCalendarEvent({
+      summary: String(row.title || "Event"),
+      start: { dateTime: localDateTimeString(start), timeZone: familyTimeZone() },
+      end: { dateTime: localDateTimeString(end), timeZone: familyTimeZone() },
+    });
+    return { status: "created" };
+  } catch (e: any) {
+    if (e?.code === "no_grant") return { status: "not_connected" };
+    return {
+      status: "failed",
+      warning: `saved to the family calendar; Google Calendar update failed: ${e?.message || "unknown error"}`,
+    };
+  }
+}
+
+/** Google-origin half of `remove_event`. The remote delete IS the action; the
+ *  cache row is pruned only AFTER it succeeds — the sync full-pulls a 30d-back/
+ *  90d-forward window, so pruning first would let a still-live event resurrect
+ *  after telling the family it was gone. */
+async function removeGoogleEvent(titleLower: string, date?: string): Promise<{
+  removed: boolean;
+  title?: string;
+  source?: string;
+  reason?: string;
+  warning?: string;
+}> {
+  let candidates: any[];
+  try {
+    const all = await withAdmin(async (pb) =>
+      pb.collection(GOOGLE_EVENTS_COLLECTION).getFullList({ requestKey: null })
+    );
+    candidates = (Array.isArray(all) ? all : []).filter((r: any) => {
+      if (String(r.summary || "").trim().toLowerCase() !== titleLower) return false;
+      if (!date) return true;
+      return googleEventCoversDay({ start_iso: r.start_iso, end_iso: r.end_iso, all_day: r.all_day }, date);
+    });
+  } catch (e: any) {
+    return { removed: false, reason: `error: ${e?.message}` };
+  }
+  if (candidates.length === 0) return { removed: false, reason: "not found" };
+  const googleIds = new Set(candidates.map((c) => String(c.google_id || "")));
+  if (googleIds.size > 1) {
+    return { removed: false, reason: "multiple Google events share that title — pass the event's date to pick one" };
+  }
+  const googleId = String(candidates[0].google_id || "");
+  if (!googleId) return { removed: false, reason: "Google event cache row has no google_id — resync and try again" };
+  try {
+    await deleteCalendarEvent(googleId);
+  } catch (e: any) {
+    if (e?.code === "no_grant") {
+      return { removed: false, reason: "that is a Google Calendar event and the Google account is not connected — it was not removed" };
+    }
+    return { removed: false, reason: `Google Calendar delete failed: ${e?.message || "unknown error"}` };
+  }
+  try {
+    await withAdmin(async (pb) => {
+      for (const row of candidates) await pb.collection(GOOGLE_EVENTS_COLLECTION).delete(row.id);
+    });
+  } catch (e: any) {
+    return {
+      removed: true,
+      title: candidates[0].summary,
+      source: "google",
+      warning: `Google Calendar deleted it, but the local cache prune failed: ${e?.message || "unknown error"}`,
+    };
+  }
+  return { removed: true, title: candidates[0].summary, source: "google" };
 }
 
 async function adminUpsertMeal(meal: Record<string, unknown>): Promise<{ row: any | null; replaced: boolean }> {
@@ -651,8 +760,22 @@ const TOOLS: Tool[] = [
   },
   {
     definition: {
+      name: "get_week_events",
+      description: "Get the next 7 days of calendar events (family + school/Google, merged), grouped by day. Reads the synced calendar caches — no live Google call. Use for 'what's coming up this week?'; use get_calendar_range for arbitrary dates.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      const start = localTodayISO();
+      const end = localDayPlusISO(start, 6);
+      const merged = await liveEventsRange(start, end);
+      if (merged === null) return summarize({ error: "calendar data unavailable — do not guess events", days: {} });
+      return summarize({ start, end, days: merged.days });
+    },
+  },
+  {
+    definition: {
       name: "add_event",
-      description: "Add a new event to the family calendar. Use this when the user asks to create or schedule an event.",
+      description: "Add a new event to the family calendar and mirror it to the connected Google Calendar (best-effort). Use this when the user asks to create or schedule an event.",
       parameters: {
         type: "object",
         properties: {
@@ -677,6 +800,7 @@ const TOOLS: Tool[] = [
       };
       const row = await adminInsertEvent(event);
       if (!row) return summarize({ ok: false, error: "Could not create event" });
+      const google = await mirrorEventToGoogle(row);
       return summarize({
         ok: true,
         event: {
@@ -688,13 +812,15 @@ const TOOLS: Tool[] = [
           color: row.color,
           member: row.member,
         },
+        google: google.status,
+        ...(google.warning ? { warning: google.warning } : {}),
       });
     },
   },
   {
     definition: {
       name: "remove_event",
-      description: "Remove an event from the family calendar by title. Optionally narrow by date.",
+      description: "Remove an event from the calendar by title. A family event is deleted from the family calendar; a Google-synced event is deleted from Google Calendar and its cache. Optionally narrow by date.",
       parameters: {
         type: "object",
         properties: {
@@ -710,7 +836,10 @@ const TOOLS: Tool[] = [
       // Model-supplied garbage must never reach the PB filter string unescaped;
       // an invalid date degrades to a title-only search (same as omitting it).
       const safeDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
-      let result: { removed: boolean; title?: any; reason?: string };
+      let result: { removed: boolean; title?: any; reason?: string; source?: string; warning?: string } = {
+        removed: false,
+        reason: "not found",
+      };
       try {
         result = await withAdmin(async (pb) => {
           // PB `~` is a coarse pre-narrowing; the exact client-side match below
@@ -725,10 +854,14 @@ const TOOLS: Tool[] = [
           );
           if (!match) return { removed: false, reason: "not found" };
           await pb.collection("events").delete(match.id);
-          return { removed: true, title: match.title };
+          return { removed: true, title: match.title, source: "family" };
         });
       } catch (e: any) {
         result = { removed: false, reason: `error: ${e?.message}` };
+      }
+      // No family row owns that title: it may be a Google-synced event.
+      if (!result.removed && result.reason === "not found") {
+        result = await removeGoogleEvent(title, safeDate);
       }
       return summarize(result);
     },
@@ -3455,6 +3588,7 @@ const KID_TOOL_NAMES: ReadonlySet<string> = new Set([
   "get_family_members",
   "get_todays_events",
   "get_calendar_range",
+  "get_week_events",
   "get_todays_schedule",
   "get_pending_tasks",
   "get_completed_tasks",
