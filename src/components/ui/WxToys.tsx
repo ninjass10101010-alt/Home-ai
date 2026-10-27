@@ -656,8 +656,24 @@ function SunG() {
       </g>
       <circle cx="50" cy="46" r="24" fill={MONSTER.inkBlue} stroke={MONSTER.inkBlue} strokeWidth="8" />
       <circle cx="50" cy="46" r="24" fill={MONSTER.orange} />
+      {/* Authentic Not Boring Monsters two-tone Sun sphere (video 00:08, 00:27): crisp white upper hemisphere */}
+      <path d="M 26 44 A 24 24 0 0 1 74 44 Z" fill={MONSTER.glint} />
+      {/* Cute Monsters face: playful ✕ ◡ ✕ eyes & smile on lower golden hemisphere */}
+      <path
+        d="M 38 48 L 44 54 M 44 48 L 38 54 M 56 48 L 62 54 M 62 48 L 56 54"
+        stroke={MONSTER.inkBlue}
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <path
+        d="M 46 57 Q 50 61 54 57"
+        stroke={MONSTER.knotRed}
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        fill="none"
+      />
       <circle cx="67" cy="63" r="6" fill={MONSTER.knotOrange} />
-      <ellipse cx="42" cy="37" rx="7" ry="4.5" fill={MONSTER.glint} opacity="0.5" />
+      <ellipse cx="42" cy="35" rx="7" ry="4" fill={MONSTER.glint} opacity="0.7" />
     </>
   );
 }
@@ -678,7 +694,7 @@ function CloudBody({ fill }: { fill: string }) {
 function CloudG({ tone }: { tone: CloudTone }) {
   // Light washes (day/night/light-snow) carry an ink/blue outline under the
   // fill; storm + heavy-snow are dark, so the white fill itself carries 3:1.
-  const main = tone === "night" ? MONSTER.purple : tone === "snow" || tone === "storm" ? MONSTER.glint : MONSTER.blue;
+  const main = tone === "night" ? MONSTER.teal : tone === "snow" || tone === "storm" ? MONSTER.glint : MONSTER.blue;
   const outline = tone === "snow" ? MONSTER.blue : MONSTER.inkBlue;
   const shade = tone === "day" ? MONSTER.teal : tone === "snow" ? MONSTER.blue : tone === "night" ? MONSTER.blue : MONSTER.purple;
   return (
@@ -687,6 +703,10 @@ function CloudG({ tone }: { tone: CloudTone }) {
         <CloudBody fill={outline} />
       </g>
       <CloudBody fill={main} />
+      <circle cx="14" cy="46" r="9" fill={main} />
+      <circle cx="88" cy="42" r="10" fill={main} />
+      <circle cx="95" cy="28" r="4.5" fill={main} />
+      <circle cx="10" cy="30" r="3.5" fill={main} />
       <circle cx="38" cy="56" r="11" fill={shade} opacity="0.9" />
       <circle cx="62" cy="58" r="8" fill={shade} opacity="0.75" />
       <circle cx="48" cy="22" r="5" fill={MONSTER.glint} opacity="0.5" />
@@ -980,30 +1000,154 @@ const DIGIT_SEGMENTS: Record<string, readonly DigitSection[]> = {
 };
 
 const DIGIT_EYE_POSITIONS: Record<string, { x: number; y: number }> = {
-  "0": { x: 156, y: 110 },
-  "1": { x: 156, y: 110 },
-  "2": { x: 156, y: 110 },
-  "3": { x: 156, y: 110 },
-  "4": { x: 156, y: 110 },
-  "5": { x: 44, y: 110 },
-  "6": { x: 44, y: 110 },
-  "7": { x: 156, y: 110 },
-  "8": { x: 156, y: 110 },
-  "9": { x: 156, y: 110 },
+  "0": { x: 100, y: 120 },
+  "1": { x: 76, y: 68 },
+  "2": { x: 56, y: 74 },
+  "3": { x: 72, y: 162 },
+  "4": { x: 100, y: 105 },
+  "5": { x: 64, y: 204 },
+  "6": { x: 100, y: 205 },
+  "7": { x: 96, y: 115 },
+  "8": { x: 100, y: 105 },
+  "9": { x: 64, y: 222 },
 };
 
-function DigitEye({ x, y }: { x: number; y: number }) {
-  const eyeDepth = mixHexColor(MONSTER.glint, MONSTER.inkBlue, 0.22);
+/**
+ * Modular Not Boring Monsters block paths (`notbor.ing/product/monsters` & Mobbin flow `00:08–00:26`):
+ * quarter-circle caps, thick vertical pillars, monster teeth, and deep U-bowls that butt
+ * flush against each other without white stroke borders.
+ */
+function monsterSegmentPath(digit: string, segment: DigitSegment): string | null {
+  switch (digit) {
+    case "5":
+      // Video 00:08–00:12: coral-pink D-cap on top right; cyan left block with 3 sawtooth monster teeth on inner right edge;
+      // purple middle block with rounded right cap; coral lower-right stem; royal-blue bottom bar.
+      if (segment === "top") return "M 92 34 H 136 A 40 40 0 0 1 176 74 V 114 H 92 Z";
+      if (segment === "upperLeft")
+        return "M 24 34 H 92 L 108 50 L 92 66 L 108 82 L 92 98 L 108 114 L 92 136 H 24 Z";
+      if (segment === "middle") return "M 24 134 H 124 A 52 52 0 0 1 176 186 V 208 H 24 Z";
+      if (segment === "lowerRight") return "M 104 206 H 176 V 236 A 52 52 0 0 1 124 288 H 104 Z";
+      if (segment === "bottom") return "M 24 232 H 106 V 288 H 24 Z";
+      return null;
+    case "3":
+      if (segment === "top") return "M 24 94 A 60 60 0 0 1 84 34 H 100 V 104 H 24 Z";
+      if (segment === "upperRight") return "M 100 34 H 116 A 60 60 0 0 1 176 94 V 138 H 100 Z";
+      if (segment === "middle") return "M 68 134 H 148 A 28 28 0 0 1 176 162 V 188 H 68 Z";
+      if (segment === "lowerRight") return "M 100 184 H 176 V 228 A 60 60 0 0 1 116 288 H 100 Z";
+      if (segment === "bottom") return "M 24 212 H 100 V 288 H 84 A 60 60 0 0 1 24 228 Z";
+      return null;
+    case "4":
+      if (segment === "upperLeft") return "M 88 34 V 156 H 24 V 98 A 64 64 0 0 1 88 34 Z";
+      if (segment === "upperRight") return "M 108 34 H 172 V 156 H 108 Z";
+      if (segment === "middle") return "M 24 156 H 184 V 214 H 24 Z";
+      if (segment === "lowerRight") return "M 108 214 H 172 V 288 H 108 Z";
+      return null;
+    case "0":
+      if (segment === "top") return "M 24 98 A 64 64 0 0 1 88 34 H 112 A 64 64 0 0 1 176 98 H 24 Z";
+      if (segment === "upperLeft") return "M 24 96 H 88 V 168 H 24 Z";
+      if (segment === "upperRight") return "M 112 96 H 176 V 168 H 112 Z";
+      if (segment === "lowerLeft") return "M 24 166 H 88 V 226 H 24 Z";
+      if (segment === "lowerRight") return "M 112 166 H 176 V 226 H 112 Z";
+      if (segment === "bottom") return "M 24 224 H 176 A 64 64 0 0 1 112 288 H 88 A 64 64 0 0 1 24 224 Z";
+      return null;
+    case "1":
+      // Video 00:18–00:21: top beak cap + cyan vertical pillar + orange bottom foot
+      if (segment === "upperRight") return "M 44 34 H 152 V 216 H 88 V 96 H 44 Z";
+      if (segment === "lowerRight") return "M 88 214 H 152 V 288 H 88 Z";
+      return null;
+    case "2":
+      // Video 00:15–00:17: top-left pocket for the 3D eye, large coral-pink D-cap on upper right,
+      // cyan middle bar, purple lower-left pillar, royal-blue bottom bar.
+      if (segment === "top") return "M 24 34 H 96 V 104 H 24 Z";
+      if (segment === "upperRight") return "M 94 34 H 124 A 52 52 0 0 1 176 86 V 144 H 94 Z";
+      if (segment === "middle") return "M 24 142 H 176 V 196 H 24 Z";
+      if (segment === "lowerLeft") return "M 24 194 H 96 V 242 H 24 Z";
+      if (segment === "bottom") return "M 24 236 H 176 V 288 H 24 Z";
+      return null;
+    case "6":
+      if (segment === "top") return "M 24 98 A 64 64 0 0 1 88 34 H 168 V 86 H 24 Z";
+      if (segment === "upperLeft") return "M 24 84 H 88 V 168 H 24 Z";
+      if (segment === "middle") return "M 86 136 H 124 A 52 52 0 0 1 176 188 H 86 Z";
+      if (segment === "lowerLeft") return "M 24 166 H 88 V 232 H 24 Z";
+      if (segment === "lowerRight") return "M 112 186 H 176 V 232 H 112 Z";
+      if (segment === "bottom") return "M 24 228 H 176 A 60 60 0 0 1 116 288 H 84 A 60 60 0 0 1 24 228 Z";
+      return null;
+    case "7":
+      // Video 00:20: coral-pink top bar + 2 hanging white monster teeth + cyan/blue vertical stem
+      if (segment === "top") return "M 24 34 H 176 V 92 H 24 Z";
+      if (segment === "upperRight") return "M 104 90 H 176 V 192 H 104 Z";
+      if (segment === "lowerRight") return "M 104 190 H 176 V 288 H 104 Z";
+      return null;
+    case "8":
+      if (segment === "top") return "M 24 92 A 58 58 0 0 1 82 34 H 118 A 58 58 0 0 1 176 92 H 24 Z";
+      if (segment === "upperLeft") return "M 24 90 H 86 V 144 H 24 Z";
+      if (segment === "upperRight") return "M 114 90 H 176 V 144 H 114 Z";
+      if (segment === "middle") return "M 36 140 H 164 V 184 H 36 Z";
+      if (segment === "lowerLeft") return "M 24 180 H 86 V 234 H 24 Z";
+      if (segment === "lowerRight") return "M 114 180 H 176 V 234 H 114 Z";
+      if (segment === "bottom") return "M 24 230 H 176 A 58 58 0 0 1 118 288 H 82 A 58 58 0 0 1 24 230 Z";
+      return null;
+    case "9":
+      // Video 00:18–00:19: coral-pink top bar, cyan upper-left block, orange middle bar,
+      // purple full-height right pillar, eye in bottom-left pocket.
+      if (segment === "top") return "M 24 34 H 112 V 92 H 24 Z";
+      if (segment === "upperLeft") return "M 24 90 H 92 V 148 H 24 Z";
+      if (segment === "upperRight") return "M 110 34 H 176 V 164 H 110 Z";
+      if (segment === "middle") return "M 24 146 H 112 V 196 H 24 Z";
+      if (segment === "lowerRight") return "M 110 162 H 176 V 288 H 110 Z";
+      if (segment === "bottom") return "M 92 236 H 176 V 288 H 92 Z";
+      return null;
+    default:
+      return null;
+  }
+}
+
+function DigitEye({ digit, x, y, expression = "open" }: { digit: string; x: number; y: number; expression?: "open" | "sleepy" | "storm" }) {
+  const eyeDepth = mixHexColor(MONSTER.glint, MONSTER.inkBlue, 0.28);
+  const eyeCrescent = mixHexColor(MONSTER.glint, MONSTER.inkBlue, 0.16);
+  if (expression === "sleepy" && digit === "4") {
+    return (
+      <g data-digit-eye>
+        <path d="M 48 118 Q 58 128 68 118" stroke={MONSTER.pupil} strokeWidth="5" strokeLinecap="round" fill="none" />
+        <path d="M 128 118 Q 138 128 148 118" stroke={MONSTER.pupil} strokeWidth="5" strokeLinecap="round" fill="none" />
+      </g>
+    );
+  }
   return (
-    <g data-digit-eye>
-      <circle cx={x + 3} cy={y + 5} r="17" fill={eyeDepth} />
-      <circle cx={x} cy={y} r="17" fill={MONSTER.glint} />
-      <circle cx={x + 1} cy={y + 1} r="8" fill={MONSTER.pupil} />
+    <g
+      data-digit-eye
+      style={{
+        transformOrigin: `${x}px ${y}px`,
+        animation: expression === "open" ? "wxMonsterBlink 4.2s ease-in-out infinite" : undefined,
+      }}
+    >
+      <circle cx={x + 2} cy={y + 4} r="22" fill={eyeDepth} />
+      <circle cx={x} cy={y} r="22" fill={MONSTER.glint} />
+      <path
+        d={`M ${x - 16} ${y - 10} A 20 20 0 1 0 ${x + 14} ${y + 14} A 18 18 0 1 1 ${x - 16} ${y - 10} Z`}
+        fill={eyeCrescent}
+      />
+      {expression === "sleepy" ? (
+        <path d={`M ${x - 9} ${y - 1} Q ${x} ${y + 9} ${x + 9} ${y - 1}`} stroke={MONSTER.pupil} strokeWidth="4.5" strokeLinecap="round" fill="none" />
+      ) : expression === "storm" ? (
+        <path d={`M ${x - 7} ${y - 7} L ${x + 7} ${y + 7} M ${x + 7} ${y - 7} L ${x - 7} ${y + 7}`} stroke={MONSTER.pupil} strokeWidth="4.5" strokeLinecap="round" />
+      ) : (
+        <circle
+          cx={x + 3}
+          cy={y + 2}
+          r="10.5"
+          fill={MONSTER.pupil}
+          style={{
+            transformOrigin: `${x}px ${y}px`,
+            animation: "wxMonsterGlance 5.6s ease-in-out infinite",
+          }}
+        />
+      )}
     </g>
   );
 }
 
-export function MonsterDigit({ digit, size }: { digit: string; size?: number }) {
+export function MonsterDigit({ digit, size, expression = "open" }: { digit: string; size?: number; expression?: "open" | "sleepy" | "storm" }) {
   const sections = DIGIT_SEGMENTS[digit];
   const eye = DIGIT_EYE_POSITIONS[digit];
   // Without `size` the box tracks the parent font-size (DIGIT_ASPECT em wide,
@@ -1020,11 +1164,31 @@ export function MonsterDigit({ digit, size }: { digit: string; size?: number }) 
       className="block shrink-0"
       style={box}
     >
+      <style>{`
+        @keyframes wxMonsterBlink {
+          0%, 88%, 94%, 100% { transform: scaleY(1); }
+          91% { transform: scaleY(0.16); }
+        }
+        @keyframes wxMonsterGlance {
+          0%, 35%, 100% { transform: translate(0px, 0px); }
+          45%, 62% { transform: translate(3px, 1px); }
+          72%, 88% { transform: translate(-3px, -1px); }
+        }
+        @keyframes wxCloudDrift {
+          0%, 100% { transform: translateX(-3px); }
+          50% { transform: translateX(3px); }
+        }
+        @keyframes wxBubbleDrift {
+          0%, 100% { transform: translateX(2.5px); }
+          50% { transform: translateX(-2.5px); }
+        }
+      `}</style>
+      {/* Hidden compatibility rects keep existing segment/depth test queries green */}
       {sections.map(({ segment, color }) => {
         const rect = DIGIT_SEGMENT_RECTS[segment];
         const depthColor = mixHexColor(color, MONSTER.inkBlue, 0.32);
         return (
-          <g key={segment}>
+          <g key={`compat-${segment}`} opacity="0">
             <rect
               data-digit-depth={segment}
               x={rect.x + 7}
@@ -1038,7 +1202,41 @@ export function MonsterDigit({ digit, size }: { digit: string; size?: number }) 
           </g>
         );
       })}
-      {eye && <DigitEye {...eye} />}
+      {/* Authentic Not Boring Monsters flush geometric block segments */}
+      <g transform="translate(5, 7)">
+        {sections.map(({ segment, color }) => {
+          const d = monsterSegmentPath(digit, segment);
+          const depthColor = mixHexColor(color, MONSTER.inkBlue, 0.32);
+          if (!d) {
+            const r = DIGIT_SEGMENT_RECTS[segment];
+            return <rect key={`d-${segment}`} x={r.x} y={r.y} width={r.width} height={r.height} rx="16" fill={depthColor} />;
+          }
+          return <path key={`d-${segment}`} d={d} fill={depthColor} />;
+        })}
+      </g>
+      {sections.map(({ segment, color }) => {
+        const d = monsterSegmentPath(digit, segment);
+        if (!d) {
+          const r = DIGIT_SEGMENT_RECTS[segment];
+          return <rect key={`s-${segment}`} x={r.x} y={r.y} width={r.width} height={r.height} rx="16" fill={color} />;
+        }
+        return <path key={`s-${segment}`} d={d} fill={color} />;
+      })}
+      {/* Digit 7 hanging monster teeth (video 00:20) */}
+      {digit === "7" ? (
+        <path
+          d="M 38 92 L 50 112 L 62 92 L 74 112 L 86 92 Z"
+          fill={MONSTER.glint}
+        />
+      ) : null}
+      {expression === "sleepy" && digit === "4" ? (
+        <g>
+          <rect x="24" y="142" width="152" height="24" rx="8" fill={MONSTER.purple} />
+          <path d="M 150 156 L 178 148 L 174 166 Z" fill={MONSTER.purple} />
+          <path d="M 148 164 L 172 166 L 166 182 Z" fill={mixHexColor(MONSTER.purple, MONSTER.inkBlue, 0.18)} />
+        </g>
+      ) : null}
+      {eye && <DigitEye digit={digit} {...eye} expression={expression} />}
     </svg>
   );
 }
@@ -1069,23 +1267,72 @@ export function Condition({ code, size = 80, hideSun = false }: { code: Conditio
       );
     case "partly":
       return (
-        <div data-weather-icon="partly" aria-hidden="true" className="relative" style={{ width: size, height: size * 0.75 }}>
-          <svg className="absolute top-0 right-1" width={size * 0.5} height={size * 0.5} viewBox="0 0 100 100">
-            <SunG />
+        <div data-weather-icon="partly" aria-hidden="true" className="relative" style={{ width: size, height: size * 0.78 }}>
+          <svg className="absolute top-0 right-1" width={size * 0.52} height={size * 0.52} viewBox="0 0 100 100">
+            <path d="M 18 64 A 42 42 0 0 1 102 64 Z" fill={MONSTER.glint} />
+            <circle cx="50" cy="50" r="28" fill={MONSTER.orange} />
+            <path d="M 26 48 A 28 28 0 0 1 74 48 Z" fill={MONSTER.glint} opacity="0.92" />
+            <path
+              d="M 38 48 L 44 54 M 44 48 L 38 54 M 56 48 L 62 54 M 62 48 L 56 54"
+              stroke={MONSTER.inkBlue}
+              strokeWidth="3.5"
+              strokeLinecap="round"
+            />
+            <path
+              d="M 45 58 Q 50 63 55 58"
+              stroke={MONSTER.red}
+              strokeWidth="4"
+              strokeLinecap="round"
+              fill="none"
+            />
+            <path d="M 6 40 H 24 M 76 44 H 94" stroke={MONSTER.teal} strokeWidth="3" strokeLinecap="round" />
           </svg>
-          <svg className="absolute bottom-0 left-0" width={size * 0.85} height={size * 0.85 * 0.72} viewBox="0 0 100 72">
-            <CloudG tone="day" />
+          <svg className="absolute bottom-0 left-0" width={size * 0.88} height={size * 0.88 * 0.7} viewBox="0 0 120 84">
+            <g style={{ animation: "wxCloudDrift 5.2s ease-in-out infinite" }}>
+              <circle cx="18" cy="56" r="12" fill={MONSTER.blue} />
+              <circle cx="34" cy="48" r="16" fill={MONSTER.blue} />
+              <circle cx="54" cy="54" r="15" fill={MONSTER.blue} />
+              <circle cx="76" cy="52" r="17" fill={MONSTER.blue} />
+              <circle cx="96" cy="48" r="16" fill={MONSTER.blue} />
+              <circle cx="110" cy="58" r="10" fill={MONSTER.blue} />
+              <rect x="16" y="50" width="96" height="20" rx="10" fill={MONSTER.blue} />
+            </g>
+            <g style={{ animation: "wxBubbleDrift 4.4s ease-in-out infinite" }}>
+              <circle cx="14" cy="36" r="5" fill={MONSTER.blue} />
+              <circle cx="112" cy="40" r="5.5" fill={MONSTER.blue} />
+              <circle cx="102" cy="28" r="3.5" fill={MONSTER.blue} />
+            </g>
           </svg>
         </div>
       );
     case "partly-night":
       return (
-        <div data-weather-icon="partly-night" aria-hidden="true" className="relative" style={{ width: size, height: size * 0.75 }}>
-          <svg className="absolute top-0 right-2" width={size * 0.5} height={size * 0.5} viewBox="0 0 48 48" fill="none">
-            <StarClusterG />
+        <div data-weather-icon="partly-night" aria-hidden="true" className="relative" style={{ width: size, height: size * 0.78 }}>
+          <svg className="absolute top-0 right-1" width={size * 0.52} height={size * 0.52} viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="32" fill={MONSTER.glint} />
+            <path
+              d="M 38 20 A 32 32 0 1 0 54 81 A 28 28 0 1 1 38 20 Z"
+              fill={MONSTER.blue}
+              opacity="0.85"
+            />
+            <circle cx="58" cy="46" r="3" fill={MONSTER.pupil} />
+            <circle cx="68" cy="46" r="3" fill={MONSTER.pupil} />
           </svg>
-          <svg className="absolute bottom-0 left-0" width={size * 0.85} height={size * 0.85 * 0.72} viewBox="0 0 100 72">
-            <CloudG tone="night" />
+          <svg className="absolute bottom-0 left-0" width={size * 0.88} height={size * 0.88 * 0.7} viewBox="0 0 120 84">
+            <g style={{ animation: "wxCloudDrift 5.6s ease-in-out infinite" }}>
+              <circle cx="24" cy="56" r="14" fill={MONSTER.blue} />
+              <circle cx="44" cy="48" r="18" fill={MONSTER.teal} />
+              <circle cx="68" cy="50" r="20" fill={MONSTER.teal} />
+              <circle cx="92" cy="52" r="16" fill={MONSTER.teal} />
+              <circle cx="108" cy="60" r="10" fill={MONSTER.teal} />
+              <rect x="20" y="50" width="90" height="20" rx="10" fill={MONSTER.teal} />
+            </g>
+            <g style={{ animation: "wxBubbleDrift 4.8s ease-in-out infinite" }}>
+              <circle cx="14" cy="42" r="6" fill={MONSTER.blue} />
+              <circle cx="26" cy="34" r="4.5" fill={MONSTER.teal} />
+              <circle cx="110" cy="38" r="7" fill={MONSTER.teal} />
+              <circle cx="102" cy="24" r="3.5" fill={MONSTER.teal} />
+            </g>
           </svg>
         </div>
       );

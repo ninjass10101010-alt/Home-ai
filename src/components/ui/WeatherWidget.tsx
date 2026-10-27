@@ -1215,21 +1215,29 @@ export default function WeatherWidget({ className = "" }: { className?: string }
             ) : (
               <>
                 {/* isolate: keeps the scene SVG from stacking over the hero digits */}
-                <div className="isolate relative mt-1 sm:mt-2 flex w-full items-center justify-between">
-                  <div className="flex items-baseline leading-none">
+                <div className="isolate relative mt-1 flex w-full flex-col items-center justify-center gap-1">
+                  {/* Monster condition hero at top (Not Boring Monsters vertical poster hierarchy) */}
+                  <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: wall ? "124px" : "clamp(64px, 18vw, 96px)", height: wall ? "96px" : "clamp(52px, 14vw, 76px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>
+                    <Condition code={heroPresentation.icon} size={wall ? 124 : 88} hideSun={posterCarriesSun(heroScene, heroSunProgress)} />
+                  </div>
+                  <div className="flex items-baseline justify-center leading-none">
                   {heroTempTarget == null ? (
                     <span data-testid="wx-hero-temp" className="text-[64px] font-black leading-none tracking-[-0.03em] sm:text-[80px] xl:text-[96px]" style={{ color: skin.ink }}>—</span>
                   ) : (
                     <>
-                      {/* Monster digits use flat color sections, a shallow
-                          extruded side face, and one simple eye per numeral. */}
+                      {/* Monster digits use flush modular geometric blocks,
+                          extruded depth, and 3D/sleepy eyes per numeral. */}
                       <span
                         data-testid="wx-hero-temp"
                         className="relative z-10 flex text-[64px] font-black leading-none tracking-[-0.03em] tabular-nums sm:text-[80px] xl:text-[96px]"
                         style={{ color: skin.ink }}
                       >
                         {String(heroTemp).split("").map((ch, i) => (
-                          <MonsterDigit key={i} digit={ch} />
+                          <MonsterDigit
+                            key={i}
+                            digit={ch}
+                            expression={!weatherData?.isDay || heroScene === "night" ? "sleepy" : heroScene === "storm" ? "storm" : "open"}
+                          />
                         ))}
                       </span>
                       <span className="self-start mt-1.5 ml-0.5 text-[22px] font-light leading-none sm:mt-2 sm:text-[28px]" style={{ color: skin.inkSoft }} aria-hidden="true">°</span>
@@ -1237,15 +1245,9 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                     </>
                   )}
                   </div>
-                  {/* Monster condition — clamp prevents overflow on 320 px phones.
-                      The poster already paints the sun on a clear day, so the
-                      hero suppresses its own disc (same rule as the night moon). */}
-                  <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: wall ? "124px" : "clamp(56px, 16vw, 80px)", height: wall ? "124px" : "clamp(56px, 16vw, 80px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>
-                    <Condition code={heroPresentation.icon} size={wall ? 124 : 80} hideSun={posterCarriesSun(heroScene, heroSunProgress)} />
-                  </div>
                 </div>
                 {heroCondition && (
-                  <p className="relative z-10 mt-1 text-[15px] font-semibold leading-none" style={{ color: skin.ink }}>
+                  <p className="relative z-10 mt-1 text-[15px] font-extrabold uppercase tracking-[0.14em] leading-none" style={{ color: skin.ink }}>
                     {heroCondition}
                   </p>
                 )}
