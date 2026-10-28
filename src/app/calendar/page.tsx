@@ -24,7 +24,8 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-function parseTimeToMinutes(timeStr: string): number {
+function parseTimeToMinutes(timeStr?: string | null): number {
+  if (!timeStr || typeof timeStr !== "string") return 0;
   const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (match) {
     let hours = parseInt(match[1], 10);
@@ -270,7 +271,8 @@ const eventColorValues: Record<CalEvent["color"], string> = {
 
 // Google-synced events paint in their own calendar's color (colorHex from
 // the sync-state map, e.g. "#616161"); everything else keeps the named tone.
-function eventColorOf(ev: CalEvent): string {
+function eventColorOf(ev?: CalEvent | null): string {
+  if (!ev) return eventColorValues.cyan;
   return ev.colorHex || eventColorValues[ev.color] || eventColorValues.cyan;
 }
 
@@ -330,7 +332,7 @@ const scheduleCategories = {
 
 type ScheduleCategory = keyof typeof scheduleCategories;
 
-function getScheduleCategory(timeStr: string): ScheduleCategory {
+function getScheduleCategory(timeStr?: string | null): ScheduleCategory {
   const minutes = parseTimeToMinutes(timeStr);
   if (minutes < 720) return "morning";
   if (minutes < 1020) return "afternoon";
@@ -516,7 +518,10 @@ const [formError, setFormError] = useState<string | null>(null);
   const [isAddingSched, setIsAddingSched] = useState(false);
   const [schedFormSession, setSchedFormSession] = useState(0);
 
-  const mounted = useSyncExternalStore(subscribeNoop, clientTrue, serverFalse);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const renderEvents = useMemo(() => (mounted ? calEvents : events), [mounted, calEvents]);
   const renderSchedules = useMemo(
@@ -545,8 +550,9 @@ const [formError, setFormError] = useState<string | null>(null);
 
   const sortedSchedules = useMemo(() => {
     return [...renderSchedules].sort((a, b) => {
-      const getMinutes = (t: string) => parseTimeToMinutes(t) || parseInt(t.replace(":", ""), 10);
-      return getMinutes(a.time) - getMinutes(b.time);
+      const getMinutes = (t: string | undefined | null) =>
+        parseTimeToMinutes(t) || parseInt((t || "").replace(":", ""), 10) || 0;
+      return getMinutes(a?.time) - getMinutes(b?.time);
     });
   }, [renderSchedules]);
 
@@ -1865,7 +1871,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
 
                         <div className="space-y-2">
                           {items.map((item) => {
-                            const itemColor = item.color ?? "green";
+                            const itemColor = (item.color && scheduleColorValues[item.color]) ? item.color : "green";
                             const dayIndices = getActiveDayIndices(item.days);
                             return (
                               <div key={item.id} className="calendar-routine-card" style={{ "--routine-color": scheduleColorValues[itemColor] } as CSSProperties}>

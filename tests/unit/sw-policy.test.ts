@@ -10,6 +10,7 @@ describe("sw routePolicy", () => {
       "https://x/api/data/x",
       "https://x/api/ofx/x",
       "https://x/_next/data/abc.json",
+      "https://x/calendar?_rsc=1a2b3c",
     ]) {
       expect(routePolicy(u, "cors").strategy).toBe("network-only");
     }

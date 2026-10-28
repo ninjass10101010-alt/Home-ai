@@ -3,9 +3,17 @@
 export function routePolicy(url, mode) {
   if (mode === "navigate") return { strategy: "navigate", cacheable: false };
   let pathname = "/";
+  let search = "";
   try {
-    pathname = new URL(url).pathname;
+    const parsed = new URL(url);
+    pathname = parsed.pathname;
+    search = parsed.search;
   } catch {
+    return { strategy: "network-only", cacheable: false };
+  }
+  // Next.js App Router RSC payloads (_rsc query param) must be network-only,
+  // same as the legacy Pages router /_next/data/ queries.
+  if (search && /[?&]_rsc=/.test(search)) {
     return { strategy: "network-only", cacheable: false };
   }
   const NEVER = [

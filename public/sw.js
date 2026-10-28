@@ -41,7 +41,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       (async () => {
         try {
-          return await withTimeout(fetch(req), 3000);
+          return await withTimeout(fetch(req), 10000);
         } catch {
           const cache = await caches.open(SHELL_CACHE);
           return (await cache.match("/offline.html")) || Response.error();
