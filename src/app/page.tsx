@@ -533,7 +533,9 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!mounted) return;
-    const timer = setInterval(() => setNow(new Date()), 1000);
+    const updateTime = () => setNow(new Date());
+    updateTime();
+    const timer = setInterval(updateTime, 30_000);
     return () => clearInterval(timer);
   }, [mounted]);
 
