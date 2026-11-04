@@ -31,6 +31,7 @@ const API_EXEMPT = [
   "/api/db/events",
   "/api/db/schedules",
   "/api/db/meal_plan_entries",
+  "/api/google-calendar",
   // Family-visible photo library: the wall display is signed out, and the
   // photo bytes/settings routes gate writes at the route level (parent only).
   "/api/photos",
