@@ -25,7 +25,8 @@ then reads family context and calls the guarded assistant tools over HTTP.
 | `POST /api/muse/auth/login` | Public-surface, key-authenticated + rate limited |
 | `POST /api/muse/auth/logout` | Bearer (no-op) |
 | `GET /api/muse/whoami` / `tools` / `tool` / `context` | Bearer |
-| `GET /api/muse/docs` | Public (protocol docs only, no family data) |
+| `POST /api/muse/tool/:name` | Bearer (individual tool execution) |
+| `GET /api/muse/docs` / `openapi.json` | Public (protocol docs & OpenAPI 3.0 spec, no family data) |
 | `/api/muse/settings`, `settings/rotate`, `settings/revoke-tokens`, `log` | **Adult dashboard session** (parent), the server-only `ADMIN_SECRET`, or a parent PIN via `x-admin-pin` — never the MUSE bearer token |
 
 
@@ -174,6 +175,22 @@ curl -sS -X POST http://<dashboard-host>:3000/api/muse/tool \
   -d '{"name":"get_weather","args":{"location":"home"}}'
 ```
 
+### `POST /api/muse/tool/:name`
+
+Individual tool execution endpoint (OpenAPI standard). Instead of nesting arguments
+under `args`, the tool name is in the path and the tool arguments are sent directly
+as the request body (or empty body `{}` for zero-arg tools).
+
+```bash
+curl -sS -X POST http://<dashboard-host>:3000/api/muse/tool/get_weather \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+A convenience `GET /api/muse/tool/:name` is also supported for read tools, mapping query
+parameters into arguments.
+
 Response (success):
 
 ```json
@@ -217,6 +234,17 @@ describes the protocol only and contains no family data.
 
 ```bash
 curl -sS http://<dashboard-host>:3000/api/muse/docs
+```
+
+### `GET /api/muse/openapi.json` (or `/api/muse/openapi`)
+
+Full OpenAPI 3.0.3 specification for the MUSE API, as `application/json`.
+**Unauthenticated** — maps all dashboard tools to individual `POST /api/muse/tool/:name`
+endpoints with parameter schemas and Bearer authentication. Used by agents and
+custom connectors (e.g. Meta Muse, Custom GPTs).
+
+```bash
+curl -sS http://<dashboard-host>:3000/api/muse/openapi.json
 ```
 
 ---

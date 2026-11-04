@@ -69,6 +69,9 @@ vi.mock("@/db", () => ({
 
 import { GET as toolsGET } from "@/app/api/muse/tools/route";
 import { POST as toolPOST } from "@/app/api/muse/tool/route";
+import { POST as individualToolPOST, GET as individualToolGET } from "@/app/api/muse/tool/[name]/route";
+import { GET as openApiJsonGET } from "@/app/api/muse/openapi.json/route";
+import { GET as openApiGET } from "@/app/api/muse/openapi/route";
 import { GET as whoamiGET } from "@/app/api/muse/whoami/route";
 import { GET as contextGET } from "@/app/api/muse/context/route";
 import { GET as docsGET } from "@/app/api/muse/docs/route";
@@ -451,6 +454,45 @@ describe("POST /api/muse/tool — deep redaction + truthful audit + scrub (revie
   });
 });
 
+describe("individual tool routing (POST /api/muse/tool/[name])", () => {
+  it("executes a tool using route params and direct request body", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    const res = await individualToolPOST(
+      museReq("/api/muse/tool/get_weather", { token, method: "POST", body: {} }),
+      { params: Promise.resolve({ name: "get_weather" }) }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(typeof body.result.current_temp).toBe("number");
+  });
+
+  it("unwraps args if client wrapped them in { args: { ... } }", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    const res = await individualToolPOST(
+      museReq("/api/muse/tool/get_weather", { token, method: "POST", body: { args: {} } }),
+      { params: Promise.resolve({ name: "get_weather" }) }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+  });
+
+  it("supports GET for read tools via searchParams", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    const res = await individualToolGET(
+      museReq("/api/muse/tool/get_weather", { token, method: "GET" }),
+      { params: Promise.resolve({ name: "get_weather" }) }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+  });
+});
+
 // Fold-in (Task 8 review): the middleware exempts the whole `/api/muse/`
 // prefix, so each route must self-gate. Family-data routes 401 without a
 // bearer; the route inventory is pinned so a newly added route must be
@@ -472,6 +514,9 @@ const ROUTE_INVENTORY: Record<string, RouteKind> = {
   "auth/logout/route.ts": "public",
   "tools/route.ts": "bearer",
   "tool/route.ts": "bearer",
+  "tool/[name]/route.ts": "bearer",
+  "openapi/route.ts": "public",
+  "openapi.json/route.ts": "public",
   "whoami/route.ts": "bearer",
   "context/route.ts": "bearer",
   "docs/route.ts": "public",
@@ -503,18 +548,32 @@ describe("muse route self-gating under the middleware exemption", () => {
     const toolRes = await toolPOST(
       museReq("/api/muse/tool", { method: "POST", body: { name: "get_weather", args: {} } })
     );
+    const indToolRes = await individualToolPOST(
+      museReq("/api/muse/tool/get_weather", { method: "POST", body: {} }),
+      { params: Promise.resolve({ name: "get_weather" }) }
+    );
     const whoamiRes = await whoamiGET(museReq("/api/muse/whoami"));
     const contextRes = await contextGET(museReq("/api/muse/context"));
     expect(toolsRes.status).toBe(401);
     expect(toolRes.status).toBe(401);
+    expect(indToolRes.status).toBe(401);
     expect(whoamiRes.status).toBe(401);
     expect(contextRes.status).toBe(401);
   });
 
-  it("docs serves markdown publicly with no auth", async () => {
+  it("docs and openapi serve public specs with no auth", async () => {
     const res = await docsGET();
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/markdown");
+
+    const openApiRes = await openApiJsonGET(museReq("/api/muse/openapi.json"));
+    expect(openApiRes.status).toBe(200);
+    const openApiBody = await openApiRes.json();
+    expect(openApiBody.openapi).toBe("3.0.3");
+    expect(openApiBody.paths["/api/muse/tool/get_weather"]).toBeDefined();
+
+    const openApiAlias = await openApiGET(museReq("/api/muse/openapi"));
+    expect(openApiAlias.status).toBe(200);
   });
 
   it("admin-gated routes 401 without any adult credential", async () => {
