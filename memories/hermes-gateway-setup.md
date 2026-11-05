@@ -1,7 +1,7 @@
 # Hermes Gateway Layout (saved for Drogon)
 
 ## In a nutshell
-We run **four Hermes gateway profiles** — `default` (Drogon), `consuela`, `finance` (Alex), and `rubio` — as separate API servers on unique ports, all under **one** s6-overlay container (`hermes-agent-2`). Every profile's LLM brain is the same: **OpenCode Go → `deepseek-v4-flash`** (provider `opencode-go`). The gateways speak HTTP API (OpenAI-compatible `/v1/chat/completions`) so the dashboard and other services can talk to them. **Never record a key/token value in this file — env-var NAMES only.**
+We run **four Hermes gateway profiles** — `default` (Drogon), `consuela`, `finance` (Alex), and `rubio` — as separate API servers on unique ports, all under **one** s6-overlay container (`hermes-agent-2`). Every profile's LLM brain is the same: **OpenCode Go → `deepseek-v4.1-flash`** (provider `opencode-go`). The gateways speak HTTP API (OpenAI-compatible `/v1/chat/completions`) so the dashboard and other services can talk to them. **Never record a key/token value in this file — env-var NAMES only.**
 
 ## The environment
 - **Host:** QNAP NAS (Container Station)
@@ -24,7 +24,7 @@ All four resolve to the same model block:
 ```yaml
 model:
   provider: opencode-go
-  default: deepseek-v4-flash
+  default: deepseek-v4.1-flash
 ```
 (No `base_url`/`api_key` in the block — the built-in provider pins its own relay and reads its key from env.)
 
