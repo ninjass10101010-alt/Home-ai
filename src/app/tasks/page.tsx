@@ -29,6 +29,7 @@ import CrewTasksCard from "@/components/tasks/CrewTasksCard";
 import DueDatePicker from "@/components/tasks/DueDatePicker";
 import TasksArchive from "@/components/tasks/TasksArchive";
 import TasksRewardsPanel from "@/components/tasks/TasksRewardsPanel";
+import RoutinesPanel from "@/components/tasks/RoutinesPanel";
 import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useWallMode } from "@/hooks/useWallMode";
@@ -450,7 +451,7 @@ export default function TasksPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoggedIn]);
 
-  const [activeTab, setActiveTab] = useState<"tasks" | "leaderboard">("tasks");
+  const [activeTab, setActiveTab] = useState<"tasks" | "routines" | "leaderboard">("tasks");
   const { wall } = useWallMode();
   // Wall 2-step chore confirm (wall-only UI gate on the row-tap ENTRY point;
   // every downstream path — PIN-free, PIN-gated, undo — is unchanged). The
@@ -2597,7 +2598,7 @@ export default function TasksPage() {
 
           {/* The roster filter, reflowed from a sideways snap-scroller into a
               two-column rail grid by `.wall-board-member-strip`. */}
-          {activeTab === "tasks" && (
+          {(activeTab === "tasks" || activeTab === "routines") && (
             <div
               role="group"
               aria-label="Filter chores by family member"
@@ -3604,6 +3605,16 @@ export default function TasksPage() {
               </button>
             ))}
           </>
+          </div>
+        )}
+
+        {activeTab === "routines" && (
+          <div className="panel-swap space-y-6 md:col-span-2 2xl:col-span-1 2xl:col-start-2">
+            <RoutinesPanel
+              filterMember={filterMember}
+              allMembers={allMembers}
+              canManage={isParent}
+            />
           </div>
         )}
 

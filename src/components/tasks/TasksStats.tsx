@@ -23,6 +23,7 @@ export const TASKS_VIEW_SWITCH_ID = "tasks-view-switch";
 /** The panel each switch option reveals, keyed by the option id. */
 export const TASKS_PANEL_IDS = {
   tasks: "tasks-board-panel",
+  routines: "tasks-routines-panel",
   leaderboard: "tasks-leaderboard-panel",
 } as const;
 
@@ -33,7 +34,7 @@ interface TasksStatsProps {
   allTimePoints: number | null | undefined;
   allTimeRead: { state: AllTimeReadState; updatedAt: string | null };
   activeTab: string;
-  onChange: (tab: "tasks" | "leaderboard") => void;
+  onChange: (tab: "tasks" | "routines" | "leaderboard") => void;
 }
 
 export default function TasksStats({
@@ -83,9 +84,10 @@ export default function TasksStats({
       ariaControls={(option) => TASKS_PANEL_IDS[option.id as keyof typeof TASKS_PANEL_IDS]}
       emphasize
       value={activeTab}
-      onChange={(value) => onChange(value as "tasks" | "leaderboard")}
+      onChange={(value) => onChange(value as "tasks" | "routines" | "leaderboard")}
       options={[
         { id: "tasks", label: "Tasks" },
+        { id: "routines", label: "Routines" },
         { id: "leaderboard", label: "Leaderboard" },
       ]}
     />

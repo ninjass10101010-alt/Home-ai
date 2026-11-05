@@ -30,6 +30,7 @@ const API_EXEMPT = [
   // POINTS, the approvals and the ledger stay gated (PIN-required).
   "/api/db/events",
   "/api/db/schedules",
+  "/api/routines",
   "/api/db/meal_plan_entries",
   "/api/google-calendar",
   // Family-visible photo library: the wall display is signed out, and the
