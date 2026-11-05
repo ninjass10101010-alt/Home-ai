@@ -65,6 +65,7 @@ export const ADMIN_TOOLS: ReadonlySet<string> = new Set([
   "get_container_status",
   "restart_container",
   "check_pocketbase",
+  "trigger_finance_rebuild",
 ]);
 
 export type MuseToolCatalogEntry = ReturnType<typeof buildToolsForOpenAI>[number];

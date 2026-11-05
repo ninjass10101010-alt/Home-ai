@@ -41,6 +41,8 @@ import { searchConversations } from "./memory-sessions";
 import { createTaskOperationId } from "@/lib/task-operation-payload";
 import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
+import { FINANCE_TOOLS } from "@/lib/finance/tools";
+import { MEDIA_TOOLS } from "@/lib/media/tools";
 // Live readers + shared helpers were extracted to ./consuela/live-reads
 // (Task 8, 2026-09-14). Imported here for the tool handlers below and
 // re-exported for back-compat — same functions, zero logic forked.
@@ -3537,6 +3539,8 @@ const TOOLS: Tool[] = [
       });
     },
   },
+  ...FINANCE_TOOLS,
+  ...MEDIA_TOOLS,
 ];
 
 const HA_ALLOWED_DOMAINS = new Set(["light", "switch", "scene", "climate", "media_player", "vacuum"]);
