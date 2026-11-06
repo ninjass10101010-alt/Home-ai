@@ -3,25 +3,32 @@
 // Integrates Radarr, Sonarr, qBittorrent, and Plex for media search, acquisition, and status.
 
 import type { Tool } from "@/lib/hermes-tools";
+import { getServiceConfig } from "@/lib/services/config";
 
-function getRadarrConfig() {
+async function getRadarrConfig() {
+  const storedUrl = await getServiceConfig("radarr", "RADARR_URL").catch(() => null);
+  const storedKey = await getServiceConfig("radarr", "RADARR_API_KEY").catch(() => null);
   return {
-    url: process.env.RADARR_URL?.trim() || "http://radarr:7878",
-    apiKey: process.env.RADARR_API_KEY?.trim() || "",
+    url: (storedUrl || process.env.RADARR_URL?.trim() || "http://radarr:7878").replace(/\/+$/, ""),
+    apiKey: storedKey || process.env.RADARR_API_KEY?.trim() || "",
   };
 }
 
-function getSonarrConfig() {
+async function getSonarrConfig() {
+  const storedUrl = await getServiceConfig("sonarr", "SONARR_URL").catch(() => null);
+  const storedKey = await getServiceConfig("sonarr", "SONARR_API_KEY").catch(() => null);
   return {
-    url: process.env.SONARR_URL?.trim() || "http://sonarr:8989",
-    apiKey: process.env.SONARR_API_KEY?.trim() || "",
+    url: (storedUrl || process.env.SONARR_URL?.trim() || "http://sonarr:8989").replace(/\/+$/, ""),
+    apiKey: storedKey || process.env.SONARR_API_KEY?.trim() || "",
   };
 }
 
-function getPlexConfig() {
+async function getPlexConfig() {
+  const storedUrl = await getServiceConfig("plex", "PLEX_URL").catch(() => null);
+  const storedToken = await getServiceConfig("plex", "PLEX_TOKEN").catch(() => null);
   return {
-    url: process.env.PLEX_URL?.trim() || "http://192.168.0.28:32400",
-    token: process.env.PLEX_TOKEN?.trim() || "",
+    url: (storedUrl || process.env.PLEX_URL?.trim() || "http://192.168.0.28:32400").replace(/\/+$/, ""),
+    token: storedToken || process.env.PLEX_TOKEN?.trim() || "",
   };
 }
 
@@ -101,7 +108,7 @@ export const MEDIA_TOOLS: Tool[] = [
     handler: async (args) => {
       const query = String(args.query || "").trim();
       if (!query) return JSON.stringify({ error: "query is required" });
-      const { url, apiKey } = getRadarrConfig();
+      const { url, apiKey } = await getRadarrConfig();
       if (!apiKey) {
         return JSON.stringify({ error: "RADARR_API_KEY is not configured" });
       }
@@ -183,7 +190,7 @@ export const MEDIA_TOOLS: Tool[] = [
       if (!tmdbId || Number.isNaN(tmdbId)) {
         return JSON.stringify({ error: "valid tmdbId is required" });
       }
-      const { url, apiKey } = getRadarrConfig();
+      const { url, apiKey } = await getRadarrConfig();
       if (!apiKey) {
         return JSON.stringify({ error: "RADARR_API_KEY is not configured" });
       }
@@ -319,7 +326,7 @@ export const MEDIA_TOOLS: Tool[] = [
     handler: async (args) => {
       const query = String(args.query || "").trim();
       if (!query) return JSON.stringify({ error: "query is required" });
-      const { url, apiKey } = getSonarrConfig();
+      const { url, apiKey } = await getSonarrConfig();
       if (!apiKey) {
         return JSON.stringify({ error: "SONARR_API_KEY is not configured" });
       }
@@ -391,7 +398,7 @@ export const MEDIA_TOOLS: Tool[] = [
       if (!tvdbId || Number.isNaN(tvdbId)) {
         return JSON.stringify({ error: "valid tvdbId is required" });
       }
-      const { url, apiKey } = getSonarrConfig();
+      const { url, apiKey } = await getSonarrConfig();
       if (!apiKey) {
         return JSON.stringify({ error: "SONARR_API_KEY is not configured" });
       }
@@ -580,15 +587,15 @@ export const MEDIA_TOOLS: Tool[] = [
     handler: async (args) => {
       const query = String(args.query || "").trim();
       if (!query) return JSON.stringify({ error: "query is required" });
-      const { url: plexBaseUrl, token } = getPlexConfig();
+      const { url: plexBaseUrl, token } = await getPlexConfig();
       if (!token) {
         return JSON.stringify({ error: "PLEX_TOKEN is not configured" });
       }
 
       try {
-        const url = `${plexBaseUrl}/search?query=${encodeURIComponent(query)}&X-Plex-Token=${token}`;
+        const url = `${plexBaseUrl.replace(/\/+$/, "")}/search?query=${encodeURIComponent(query)}&X-Plex-Token=${token}`;
         const res = await fetch(url, {
-          headers: { Accept: "application/json" },
+          headers: { Accept: "application/json", "X-Plex-Token": token },
           signal: AbortSignal.timeout(8000),
         });
 
@@ -605,6 +612,11 @@ export const MEDIA_TOOLS: Tool[] = [
           library: item.librarySectionTitle?.trim() || "Unknown Library",
           year: item.year,
           type: item.type,
+          watched: Boolean(item.viewCount && item.viewCount > 0),
+          viewCount: item.viewCount || 0,
+          lastViewedAt: item.lastViewedAt
+            ? new Date(item.lastViewedAt * 1000).toISOString()
+            : null,
           resolution: item.Media?.[0]?.videoResolution || "unknown",
           audio: item.Media?.[0]?.audioProfile || item.Media?.[0]?.audioCodec || "unknown",
           summary: item.summary ? item.summary.slice(0, 200) + "..." : "",
@@ -626,6 +638,308 @@ export const MEDIA_TOOLS: Tool[] = [
   },
   {
     definition: {
+      name: "get_plex_watch_history",
+      description:
+        "Get recent watch history from Plex to see what movies or TV episodes have been watched by the family. Returns watched titles, media type, viewed date/time, user, and device. Can filter by media type (movie, episode, or all) and search query.",
+      parameters: {
+        type: "object",
+        properties: {
+          mediaType: {
+            type: "string",
+            enum: ["movie", "episode", "all"],
+            description: "Filter by media type: 'movie' for watched movies, 'episode' for TV episodes, or 'all'. Defaults to 'movie'.",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of history items to return (1-50, default 20).",
+          },
+          query: {
+            type: "string",
+            description: "Optional keyword to filter watched titles by name (e.g. 'Gladiator', 'Dune').",
+          },
+        },
+      },
+    },
+    handler: async (args) => {
+      const mediaType = String(args.mediaType || "movie").toLowerCase();
+      const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+      const query = String(args.query || "").trim().toLowerCase();
+
+      const { url: plexBaseUrl, token } = await getPlexConfig();
+      if (!token) {
+        return JSON.stringify({ error: "PLEX_TOKEN is not configured" });
+      }
+
+      try {
+        let typeQuery = "";
+        if (mediaType === "movie") typeQuery = "&type=1";
+        else if (mediaType === "episode") typeQuery = "&type=4";
+
+        const endpoint = `${plexBaseUrl.replace(/\/+$/, "")}/status/sessions/history/all?sort=viewedAt:desc${typeQuery}&X-Plex-Token=${token}`;
+        const res = await fetch(endpoint, {
+          headers: { Accept: "application/json", "X-Plex-Token": token },
+          signal: AbortSignal.timeout(8000),
+        });
+
+        if (!res.ok) {
+          return JSON.stringify({
+            error: `Plex history query returned HTTP ${res.status}`,
+          });
+        }
+
+        const data: any = await res.json();
+        const items: any[] = data.MediaContainer?.Metadata || [];
+
+        let filtered = items;
+        if (query) {
+          filtered = filtered.filter((item) => {
+            const title = (item.title || "").toLowerCase();
+            const grand = (item.grandparentTitle || "").toLowerCase();
+            return title.includes(query) || grand.includes(query);
+          });
+        }
+
+        const history = filtered.slice(0, limit).map((item) => {
+          const isEpisode = item.type === "episode";
+          const displayTitle = isEpisode
+            ? `${item.grandparentTitle || "Show"} S${item.parentIndex || 0}E${item.index || 0} - ${item.title}`
+            : item.title;
+          const viewedAtIso = item.viewedAt
+            ? new Date(item.viewedAt * 1000).toISOString()
+            : null;
+          const viewedDate = item.viewedAt
+            ? new Date(item.viewedAt * 1000).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "unknown";
+
+          return {
+            title: displayTitle,
+            originalTitle: item.title,
+            mediaType: item.type,
+            year: item.year,
+            viewedAt: viewedAtIso,
+            viewedDate,
+            user: item.userName || (item.accountID ? `User #${item.accountID}` : "Family"),
+            device: item.device || "Unknown Device",
+          };
+        });
+
+        return JSON.stringify({
+          mediaType,
+          query: query || undefined,
+          historyCount: history.length,
+          history,
+        });
+      } catch (err: any) {
+        return JSON.stringify({
+          error: "Failed to get Plex watch history",
+          details: err?.message || String(err),
+        });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "get_plex_watched_movies",
+      description:
+        "Search and retrieve movies marked as watched (viewCount > 0) in the Plex movie libraries. Returns movie titles, year, view count, last watched date, rating, and summary. Useful to see all movies watched or check if a specific movie was watched.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Optional keyword to search within watched movies (e.g. 'Inception', 'Star Wars').",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of watched movies to return (1-50, default 25).",
+          },
+          sortBy: {
+            type: "string",
+            enum: ["lastViewedAt", "title", "viewCount"],
+            description: "Sort order: 'lastViewedAt' (most recently watched first), 'title', or 'viewCount'. Defaults to 'lastViewedAt'.",
+          },
+        },
+      },
+    },
+    handler: async (args) => {
+      const query = String(args.query || "").trim().toLowerCase();
+      const limit = Math.min(Math.max(Number(args.limit) || 25, 1), 50);
+      const sortBy = String(args.sortBy || "lastViewedAt");
+
+      const { url: plexBaseUrl, token } = await getPlexConfig();
+      if (!token) {
+        return JSON.stringify({ error: "PLEX_TOKEN is not configured" });
+      }
+
+      try {
+        const base = plexBaseUrl.replace(/\/+$/, "");
+        const sectionsRes = await fetch(`${base}/library/sections?X-Plex-Token=${token}`, {
+          headers: { Accept: "application/json", "X-Plex-Token": token },
+          signal: AbortSignal.timeout(8000),
+        });
+
+        if (!sectionsRes.ok) {
+          return JSON.stringify({
+            error: `Plex library sections query returned HTTP ${sectionsRes.status}`,
+          });
+        }
+
+        const sectionsData: any = await sectionsRes.json();
+        const directories: any[] = sectionsData.MediaContainer?.Directory || [];
+        const movieSections = directories.filter((d) => d.type === "movie");
+
+        if (movieSections.length === 0) {
+          return JSON.stringify({
+            watchedCount: 0,
+            movies: [],
+            message: "No movie libraries found on Plex server.",
+          });
+        }
+
+        let plexSort = "lastViewedAt:desc";
+        if (sortBy === "title") plexSort = "titleSort:asc";
+        else if (sortBy === "viewCount") plexSort = "viewCount:desc";
+
+        const allWatched: any[] = [];
+
+        for (const section of movieSections) {
+          const secUrl = `${base}/library/sections/${section.key}/all?unwatched=0&sort=${plexSort}&X-Plex-Token=${token}`;
+          const secRes = await fetch(secUrl, {
+            headers: { Accept: "application/json", "X-Plex-Token": token },
+            signal: AbortSignal.timeout(8000),
+          });
+
+          if (secRes.ok) {
+            const secData: any = await secRes.json();
+            const items: any[] = secData.MediaContainer?.Metadata || [];
+            for (const item of items) {
+              if (item.viewCount && item.viewCount > 0) {
+                allWatched.push({
+                  ...item,
+                  library: section.title,
+                });
+              }
+            }
+          }
+        }
+
+        let filtered = allWatched;
+        if (query) {
+          filtered = filtered.filter((m) => (m.title || "").toLowerCase().includes(query));
+        }
+
+        filtered.sort((a, b) => {
+          if (sortBy === "title") return (a.title || "").localeCompare(b.title || "");
+          if (sortBy === "viewCount") return (b.viewCount || 0) - (a.viewCount || 0);
+          return (b.lastViewedAt || 0) - (a.lastViewedAt || 0);
+        });
+
+        const results = filtered.slice(0, limit).map((m) => ({
+          title: m.title,
+          year: m.year,
+          library: m.library,
+          viewCount: m.viewCount || 1,
+          lastViewedAt: m.lastViewedAt ? new Date(m.lastViewedAt * 1000).toISOString() : null,
+          lastViewedDate: m.lastViewedAt
+            ? new Date(m.lastViewedAt * 1000).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+            : "unknown",
+          userRating: m.userRating || m.rating || null,
+          summary: m.summary ? m.summary.slice(0, 200) + "..." : "",
+        }));
+
+        return JSON.stringify({
+          query: query || undefined,
+          sortBy,
+          watchedMovieCount: results.length,
+          totalWatchedFound: filtered.length,
+          movies: results,
+        });
+      } catch (err: any) {
+        return JSON.stringify({
+          error: "Failed to get watched movies from Plex",
+          details: err?.message || String(err),
+        });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "get_plex_active_sessions",
+      description:
+        "Check what is currently playing on Plex right now across all household devices and users. Shows active streams, who is watching, playback progress, and player device.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+    handler: async () => {
+      const { url: plexBaseUrl, token } = await getPlexConfig();
+      if (!token) {
+        return JSON.stringify({ error: "PLEX_TOKEN is not configured" });
+      }
+
+      try {
+        const url = `${plexBaseUrl.replace(/\/+$/, "")}/status/sessions?X-Plex-Token=${token}`;
+        const res = await fetch(url, {
+          headers: { Accept: "application/json", "X-Plex-Token": token },
+          signal: AbortSignal.timeout(6000),
+        });
+
+        if (!res.ok) {
+          return JSON.stringify({
+            error: `Plex sessions query returned HTTP ${res.status}`,
+          });
+        }
+
+        const data: any = await res.json();
+        const items: any[] = data.MediaContainer?.Metadata || [];
+
+        const sessions = items.map((item) => {
+          const isEpisode = item.type === "episode";
+          const displayTitle = isEpisode
+            ? `${item.grandparentTitle || "Show"} - ${item.title}`
+            : item.title;
+          const duration = item.duration || 0;
+          const offset = item.viewOffset || 0;
+          const progressPercent = duration > 0 ? Math.round((offset / duration) * 100) : 0;
+
+          return {
+            title: displayTitle,
+            type: item.type,
+            year: item.year,
+            user: item.User?.title || item.userName || "Family",
+            device: item.Player?.title || item.Player?.device || "Plex Player",
+            state: item.Player?.state || "playing",
+            progress: `${progressPercent}%`,
+            resolution: item.Media?.[0]?.videoResolution || "unknown",
+          };
+        });
+
+        return JSON.stringify({
+          activeSessionCount: sessions.length,
+          nowPlaying: sessions.length > 0,
+          sessions,
+        });
+      } catch (err: any) {
+        return JSON.stringify({
+          error: "Failed to get active Plex sessions",
+          details: err?.message || String(err),
+        });
+      }
+    },
+  },
+  {
+    definition: {
       name: "get_media_stack_health",
       description:
         "Check connection and health status of all media stack services (Plex, Radarr, Sonarr, qBittorrent, Prowlarr).",
@@ -635,9 +949,9 @@ export const MEDIA_TOOLS: Tool[] = [
       },
     },
     handler: async () => {
-      const radarr = getRadarrConfig();
-      const sonarr = getSonarrConfig();
-      const plex = getPlexConfig();
+      const radarr = await getRadarrConfig();
+      const sonarr = await getSonarrConfig();
+      const plex = await getPlexConfig();
       const prowlarr = getProwlarrConfig();
 
       const checks = await Promise.allSettled([
@@ -664,10 +978,19 @@ export const MEDIA_TOOLS: Tool[] = [
         // Plex
         (async () => {
           if (!plex.token) return { name: "Plex", status: "unconfigured" };
-          const res = await fetch(`${plex.url}/identity`, {
+          const idRes = await fetch(`${plex.url}/identity`, {
+            headers: { "X-Plex-Token": plex.token, Accept: "application/json" },
             signal: AbortSignal.timeout(4000),
           });
-          return { name: "Plex", status: res.ok ? "healthy" : "error" };
+          if (!idRes.ok) return { name: "Plex", status: "error", error: `HTTP ${idRes.status}` };
+          const secRes = await fetch(`${plex.url}/library/sections`, {
+            headers: { "X-Plex-Token": plex.token, Accept: "application/json" },
+            signal: AbortSignal.timeout(4000),
+          });
+          if (secRes.status === 401) {
+            return { name: "Plex", status: "unauthorized", error: "PLEX_TOKEN invalid" };
+          }
+          return { name: "Plex", status: "healthy" };
         })(),
         // qBittorrent
         (async () => {

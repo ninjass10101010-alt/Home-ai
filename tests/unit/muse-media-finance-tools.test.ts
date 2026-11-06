@@ -312,7 +312,7 @@ describe("Rubio Media Tools", () => {
     expect(res.torrents[0].eta).toBe("10m");
   });
 
-  it("check_plex_inventory queries Plex and filters matching items", async () => {
+  it("check_plex_inventory queries Plex and filters matching items with watch status", async () => {
     global.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("/search")) {
         return {
@@ -325,6 +325,8 @@ describe("Rubio Media Tools", () => {
                   librarySectionTitle: "Movies ",
                   year: 2025,
                   type: "movie",
+                  viewCount: 2,
+                  lastViewedAt: 1730000000,
                   summary: "Jake and Neytiri...",
                   Media: [
                     {
@@ -352,6 +354,166 @@ describe("Rubio Media Tools", () => {
     expect(res.items[0].title).toBe("Avatar: Fire and Ash");
     expect(res.items[0].resolution).toBe("4k");
     expect(res.items[0].library).toBe("Movies");
+    expect(res.items[0].watched).toBe(true);
+    expect(res.items[0].viewCount).toBe(2);
+    expect(res.items[0].lastViewedAt).toBe(new Date(1730000000 * 1000).toISOString());
+  });
+
+  it("get_plex_watch_history queries recent history and formats entries", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/status/sessions/history/all")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Inception",
+                  type: "movie",
+                  year: 2010,
+                  viewedAt: 1730500000,
+                  userName: "Dad",
+                  device: "Living Room Apple TV",
+                },
+                {
+                  title: "Ozymandias",
+                  grandparentTitle: "Breaking Bad",
+                  parentIndex: 5,
+                  index: 14,
+                  type: "episode",
+                  year: 2013,
+                  viewedAt: 1730400000,
+                  userName: "Alex",
+                  device: "Bedroom Shield",
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("get_plex_watch_history");
+    expect(tool).toBeDefined();
+
+    // Query movies
+    const rawMovies = await tool!.handler({ mediaType: "movie", limit: 10 });
+    const resMovies = JSON.parse(rawMovies);
+
+    expect(resMovies.historyCount).toBe(2);
+    expect(resMovies.history[0].title).toBe("Inception");
+    expect(resMovies.history[0].mediaType).toBe("movie");
+    expect(resMovies.history[0].user).toBe("Dad");
+    expect(resMovies.history[0].device).toBe("Living Room Apple TV");
+
+    // Query episodes formatting
+    expect(resMovies.history[1].title).toBe("Breaking Bad S5E14 - Ozymandias");
+    expect(resMovies.history[1].mediaType).toBe("episode");
+
+    // Filter by query
+    const rawFiltered = await tool!.handler({ query: "Inception" });
+    const resFiltered = JSON.parse(rawFiltered);
+    expect(resFiltered.historyCount).toBe(1);
+    expect(resFiltered.history[0].title).toBe("Inception");
+  });
+
+  it("get_plex_watched_movies queries library sections and returns watched movies", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/library/sections?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Directory: [
+                { key: "1", type: "movie", title: "Movies" },
+                { key: "2", type: "show", title: "TV Shows" },
+              ],
+            },
+          }),
+        } as any;
+      }
+      if (url.includes("/library/sections/1/all")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Gladiator",
+                  year: 2000,
+                  viewCount: 3,
+                  lastViewedAt: 1730100000,
+                  summary: "A former Roman General...",
+                  userRating: 9.0,
+                },
+                {
+                  title: "The Dark Knight",
+                  year: 2008,
+                  viewCount: 1,
+                  lastViewedAt: 1729000000,
+                  summary: "Batman raises the stakes...",
+                  userRating: 9.5,
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("get_plex_watched_movies");
+    expect(tool).toBeDefined();
+
+    const raw = await tool!.handler({ query: "Gladiator" });
+    const res = JSON.parse(raw);
+
+    expect(res.watchedMovieCount).toBe(1);
+    expect(res.movies[0].title).toBe("Gladiator");
+    expect(res.movies[0].viewCount).toBe(3);
+    expect(res.movies[0].library).toBe("Movies");
+    expect(res.movies[0].userRating).toBe(9.0);
+  });
+
+  it("get_plex_active_sessions reports currently playing media streams", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/status/sessions")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Finding Nemo",
+                  type: "movie",
+                  year: 2003,
+                  duration: 6000000,
+                  viewOffset: 3000000,
+                  User: { title: "Kids" },
+                  Player: { title: "Living Room Apple TV", state: "playing" },
+                  Media: [{ videoResolution: "1080p" }],
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("get_plex_active_sessions");
+    expect(tool).toBeDefined();
+
+    const raw = await tool!.handler({});
+    const res = JSON.parse(raw);
+
+    expect(res.activeSessionCount).toBe(1);
+    expect(res.nowPlaying).toBe(true);
+    expect(res.sessions[0].title).toBe("Finding Nemo");
+    expect(res.sessions[0].user).toBe("Kids");
+    expect(res.sessions[0].progress).toBe("50%");
+    expect(res.sessions[0].state).toBe("playing");
   });
 
   it("get_media_stack_health reports statuses across services", async () => {

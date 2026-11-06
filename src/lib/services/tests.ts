@@ -194,6 +194,61 @@ async function testPush(): Promise<ServiceTestResult> {
   }
 }
 
+async function testPlex(): Promise<ServiceTestResult> {
+  const t = timed();
+  const url = (await getServiceConfig("plex", "PLEX_URL")) || process.env.PLEX_URL || "http://192.168.0.28:32400";
+  const token = (await getServiceConfig("plex", "PLEX_TOKEN")) || process.env.PLEX_TOKEN;
+  if (!token) return { ok: false, detail: "not_configured (missing PLEX_TOKEN)", ms: t.done() };
+  try {
+    const { res } = await fetchJson(`${url.replace(/\/+$/, "")}/identity`, {
+      headers: { "X-Plex-Token": token, Accept: "application/json" },
+    });
+    if (!res.ok) return { ok: false, detail: `HTTP ${res.status}`, ms: t.done() };
+    const secRes = await fetch(`${url.replace(/\/+$/, "")}/library/sections`, {
+      headers: { "X-Plex-Token": token, Accept: "application/json" },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (secRes.status === 401) return { ok: false, detail: "reachable but token rejected (401)", ms: t.done() };
+    return { ok: true, detail: "Plex reachable & authenticated", ms: t.done() };
+  } catch (err) {
+    return { ok: false, detail: errDetail(err), ms: t.done() };
+  }
+}
+
+async function testRadarr(): Promise<ServiceTestResult> {
+  const t = timed();
+  const url = (await getServiceConfig("radarr", "RADARR_URL")) || process.env.RADARR_URL || "http://radarr:7878";
+  const apiKey = (await getServiceConfig("radarr", "RADARR_API_KEY")) || process.env.RADARR_API_KEY;
+  if (!apiKey) return { ok: false, detail: "not_configured (missing RADARR_API_KEY)", ms: t.done() };
+  try {
+    const { res } = await fetchJson(`${url.replace(/\/+$/, "")}/api/v3/system/status`, {
+      headers: { "X-Api-Key": apiKey, Accept: "application/json" },
+    });
+    if (res.status === 401) return { ok: false, detail: "reachable but API key rejected (401)", ms: t.done() };
+    if (!res.ok) return { ok: false, detail: `HTTP ${res.status}`, ms: t.done() };
+    return { ok: true, detail: "Radarr connected", ms: t.done() };
+  } catch (err) {
+    return { ok: false, detail: errDetail(err), ms: t.done() };
+  }
+}
+
+async function testSonarr(): Promise<ServiceTestResult> {
+  const t = timed();
+  const url = (await getServiceConfig("sonarr", "SONARR_URL")) || process.env.SONARR_URL || "http://sonarr:8989";
+  const apiKey = (await getServiceConfig("sonarr", "SONARR_API_KEY")) || process.env.SONARR_API_KEY;
+  if (!apiKey) return { ok: false, detail: "not_configured (missing SONARR_API_KEY)", ms: t.done() };
+  try {
+    const { res } = await fetchJson(`${url.replace(/\/+$/, "")}/api/v3/system/status`, {
+      headers: { "X-Api-Key": apiKey, Accept: "application/json" },
+    });
+    if (res.status === 401) return { ok: false, detail: "reachable but API key rejected (401)", ms: t.done() };
+    if (!res.ok) return { ok: false, detail: `HTTP ${res.status}`, ms: t.done() };
+    return { ok: true, detail: "Sonarr connected", ms: t.done() };
+  } catch (err) {
+    return { ok: false, detail: errDetail(err), ms: t.done() };
+  }
+}
+
 /** Registry-driven entry point. */
 export async function runServiceTest(service: string): Promise<ServiceTestResult> {
   switch (service) {
@@ -205,6 +260,9 @@ export async function runServiceTest(service: string): Promise<ServiceTestResult
     case "themealdb": return testThemealdb();
     case "composio": return testComposio();
     case "push_notifications": return testPush();
+    case "plex": return testPlex();
+    case "radarr": return testRadarr();
+    case "sonarr": return testSonarr();
     case "greenlight":
     case "khanacademy": {
       // Stored-only integrations: report configuration state honestly.

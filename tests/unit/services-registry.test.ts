@@ -18,7 +18,10 @@ describe("services registry", () => {
         "home_assistant",
         "instacart",
         "khanacademy",
+        "plex",
         "push_notifications",
+        "radarr",
+        "sonarr",
         "telegram_alert",
         "telegram_mirror",
         "themealdb",
@@ -38,6 +41,9 @@ describe("services registry", () => {
       ["composio", "COMPOSIO_API_KEY"],
       ["greenlight", "GREENLIGHT_API_KEY"],
       ["khanacademy", "KHAN_API_KEY"],
+      ["plex", "PLEX_TOKEN"],
+      ["radarr", "RADARR_API_KEY"],
+      ["sonarr", "SONARR_API_KEY"],
     ];
     for (const [s, k] of secretPairs) {
       expect(isSecretPair(s, k), `${s}.${k}`).toBe(true);

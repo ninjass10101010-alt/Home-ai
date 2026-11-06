@@ -153,6 +153,75 @@ export const SERVICES_REGISTRY: ServiceDef[] = [
       },
     ],
   },
+  {
+    id: "plex",
+    displayName: "Plex Media Server",
+    description: "Media inventory, watch history, and active sessions for Rubio",
+    testFnId: "plex",
+    fields: [
+      {
+        key: "PLEX_URL",
+        label: "Plex URL",
+        secret: false,
+        required: true,
+        helpText: "e.g. http://192.168.0.28:32400 or http://plex:32400",
+        placeholder: "http://192.168.0.28:32400",
+      },
+      {
+        key: "PLEX_TOKEN",
+        label: "Plex Token",
+        secret: true,
+        required: true,
+        helpText: "X-Plex-Token for library & session queries",
+      },
+    ],
+  },
+  {
+    id: "radarr",
+    displayName: "Radarr (Movies)",
+    description: "Movie search, lookup, and downloads for Rubio",
+    testFnId: "radarr",
+    fields: [
+      {
+        key: "RADARR_URL",
+        label: "Radarr URL",
+        secret: false,
+        required: true,
+        helpText: "e.g. http://radarr:7878",
+        placeholder: "http://radarr:7878",
+      },
+      {
+        key: "RADARR_API_KEY",
+        label: "Radarr API Key",
+        secret: true,
+        required: true,
+        helpText: "Settings → General → Security → API Key",
+      },
+    ],
+  },
+  {
+    id: "sonarr",
+    displayName: "Sonarr (TV Shows)",
+    description: "TV series search, lookup, and downloads for Rubio",
+    testFnId: "sonarr",
+    fields: [
+      {
+        key: "SONARR_URL",
+        label: "Sonarr URL",
+        secret: false,
+        required: true,
+        helpText: "e.g. http://sonarr:8989",
+        placeholder: "http://sonarr:8989",
+      },
+      {
+        key: "SONARR_API_KEY",
+        label: "Sonarr API Key",
+        secret: true,
+        required: true,
+        helpText: "Settings → General → Security → API Key",
+      },
+    ],
+  },
 ];
 
 // These NEVER become registry-configurable — they are required for the app

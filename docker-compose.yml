@@ -67,6 +67,18 @@ services:
       - EMERGENCY_PIN_BYPASS=${EMERGENCY_PIN_BYPASS:-}
       - INSTACART_API_KEY=${INSTACART_API_KEY:-}
       - COMPOSIO_API_KEY=${COMPOSIO_API_KEY:-}
+      # Media stack (Rubio) integrations
+      - PLEX_URL=${PLEX_URL:-http://192.168.0.28:32400}
+      - PLEX_TOKEN=${PLEX_TOKEN:-}
+      - RADARR_URL=${RADARR_URL:-http://radarr:7878}
+      - RADARR_API_KEY=${RADARR_API_KEY:-}
+      - SONARR_URL=${SONARR_URL:-http://sonarr:8989}
+      - SONARR_API_KEY=${SONARR_API_KEY:-}
+      - QBITTORRENT_URL=${QBITTORRENT_URL:-http://qbittorrent:8080}
+      - QBITTORRENT_USER=${QBITTORRENT_USER:-}
+      - QBITTORRENT_PASS=${QBITTORRENT_PASS:-}
+      - PROWLARR_URL=${PROWLARR_URL:-http://prowlarr:9696}
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
     networks:
       - dashboard-net
 
