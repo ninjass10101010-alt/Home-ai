@@ -6,7 +6,9 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // additionally carries the identity version so a key rotation (version bump)
 // revokes every outstanding token. The `adm` claim is a mint-time snapshot
 // kept for diagnostics only — authorization reads the LIVE admin toggle.
-export const MUSE_TOKEN_TTL_SECONDS = 86400;
+// 180 days (approx. 6 months). Deliberately long-lived so connected agents
+// don't expire daily; can be overridden via process.env.MUSE_TOKEN_TTL_SECONDS.
+export const MUSE_TOKEN_TTL_SECONDS = Number(process.env.MUSE_TOKEN_TTL_SECONDS) || 180 * 86400;
 
 const CONTEXT = "muse-token-v1:";
 

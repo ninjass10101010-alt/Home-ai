@@ -36,8 +36,8 @@ export function generateMuseOpenApi(
     "/api/muse/auth/login": {
       post: {
         operationId: "login",
-        summary: "Exchange long-lived key for an expiring 24h Bearer token",
-        description: "Submit the operator-minted MUSE key to receive a stateless 24-hour Bearer token.",
+        summary: "Exchange long-lived key for an expiring 6-month Bearer token",
+        description: "Submit the operator-minted MUSE key to receive a stateless 6-month (180-day) Bearer token.",
         security: [],
         requestBody: {
           required: true,

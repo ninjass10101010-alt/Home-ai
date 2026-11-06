@@ -143,4 +143,27 @@ describe("authorizeMuseRequest", () => {
       if (out.ok) expect(out.adm).toBe(expected);
     }
   });
+
+  it("authorizes a raw muse_ key directly as bearer token", async () => {
+    const g = generateKey();
+    mocks.readMuseRow.mockResolvedValue(row({ keyHash: g.keyHash, keyPrefix: g.keyPrefix }));
+    const out = await authorizeMuseRequest(req(g.key));
+    expect(out).toEqual({ ok: true, adm: false });
+    expect(mocks.touchMuseUsage).toHaveBeenCalled();
+  });
+
+  it("authorizes a raw muse_ key via x-api-key header", async () => {
+    const g = generateKey();
+    mocks.readMuseRow.mockResolvedValue(row({ keyHash: g.keyHash, keyPrefix: g.keyPrefix }));
+    const headers = { "x-api-key": g.key };
+    const customReq = new NextRequest("http://localhost/api/muse/whoami", { headers });
+    const out = await authorizeMuseRequest(customReq);
+    expect(out).toEqual({ ok: true, adm: false });
+  });
+
+  it("rejects an invalid raw muse_ key", async () => {
+    mocks.readMuseRow.mockResolvedValue(row());
+    const out = await authorizeMuseRequest(req("muse_invalid_key_1234567890"));
+    expect(out).toEqual({ ok: false, status: 401, error: "unauthorized" });
+  });
 });

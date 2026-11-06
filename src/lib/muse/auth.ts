@@ -8,9 +8,10 @@
 // gate it, so turning the operator toggle on grants admin to agents that are
 // already connected and turning it off revokes admin immediately.
 
+import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { verifyMuseToken } from "./token";
-import { readMuseRow, touchMuseUsage } from "./store";
+import { readMuseRow, touchMuseUsage, hashMuseKey } from "./store";
 import { checkKeyLimit } from "./ratelimit";
 
 export type MuseAuthResult =
@@ -40,9 +41,13 @@ export function clientIp(request: NextRequest): string {
 
 function bearerToken(request: NextRequest): string | null {
   const header = request.headers.get("authorization");
-  if (!header) return null;
-  const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
-  return match ? match[1] : null;
+  if (header) {
+    const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
+    if (match) return match[1];
+  }
+  const apiKey = request.headers.get("x-api-key");
+  if (apiKey) return apiKey.trim();
+  return null;
 }
 
 export async function authorizeMuseRequest(request: NextRequest): Promise<MuseAuthResult> {
@@ -58,14 +63,32 @@ export async function authorizeMuseRequest(request: NextRequest): Promise<MuseAu
   }
   if (!row) return { ok: false, status: 401, error: "unauthorized" };
 
-  const result = verifyMuseToken(token, {
-    currentVersion: row.version,
-    enabled: row.enabled,
-  });
-  if (!result.ok) {
-    if (result.reason === "disabled") {
+  // Allow either:
+  // 1. Signed v1 bearer token (with 6-month TTL)
+  // 2. Direct raw key (muse_...) matching stored key hash
+  if (token.startsWith("v1.")) {
+    const result = verifyMuseToken(token, {
+      currentVersion: row.version,
+      enabled: row.enabled,
+    });
+    if (!result.ok) {
+      if (result.reason === "disabled") {
+        return { ok: false, status: 403, error: "muse_disabled" };
+      }
+      return { ok: false, status: 401, error: "unauthorized" };
+    }
+  } else if (token.startsWith("muse_")) {
+    if (!row.enabled) {
       return { ok: false, status: 403, error: "muse_disabled" };
     }
+    const storedHash = row.keyHash || "";
+    const a = Buffer.from(hashMuseKey(token), "hex");
+    const b = Buffer.from(storedHash, "hex");
+    const keyOk = a.length > 0 && a.length === b.length && timingSafeEqual(a, b);
+    if (!keyOk) {
+      return { ok: false, status: 401, error: "unauthorized" };
+    }
+  } else {
     return { ok: false, status: 401, error: "unauthorized" };
   }
 

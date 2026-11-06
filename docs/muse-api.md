@@ -64,8 +64,9 @@ Success (`200`):
 }
 ```
 
-The token is an HMAC-signed, stateless credential with a **24-hour lifetime**.
-It is not stored server-side.
+The token is an HMAC-signed, stateless credential with a **6-month lifetime** (180 days).
+It is not stored server-side. Callers may also authenticate directly by passing the raw
+`muse_…` key as a Bearer token (`Authorization: Bearer muse_…`) or `X-API-Key: muse_…`.
 
 ### 2. Call the API
 

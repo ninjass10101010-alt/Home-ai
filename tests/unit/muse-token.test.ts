@@ -12,8 +12,8 @@ afterEach(() => vi.unstubAllEnvs());
 const OK_CTX = { currentVersion: 1, enabled: true };
 
 describe("muse tokens", () => {
-  it("exposes a 24h TTL", () => {
-    expect(MUSE_TOKEN_TTL_SECONDS).toBe(86400);
+  it("exposes a 6-month TTL (180 days)", () => {
+    expect(MUSE_TOKEN_TTL_SECONDS).toBe(180 * 86400);
   });
 
   it("round-trips a signed token for both admin values", () => {
