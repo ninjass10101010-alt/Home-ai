@@ -511,7 +511,7 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
         deleteCallsDispatched++;
         return { ok: true, status: 200, json: async () => ({}) } as any;
       }
-      if (u.includes("/search") || u.includes("/library/metadata/10934")) {
+      if (u.includes("/library/metadata/10934")) {
         return {
           ok: true,
           status: 200,
@@ -538,6 +538,42 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
               ],
             },
           }),
+        } as any;
+      }
+      if (u.includes("/search")) {
+        if (u.includes("Dune")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              MediaContainer: {
+                Metadata: [
+                  {
+                    title: "Dune: Part Two",
+                    year: 2024,
+                    type: "movie",
+                    ratingKey: "10934",
+                    viewCount: 1,
+                    Media: [
+                      {
+                        Part: [
+                          {
+                            file: "/share/CACHEDEV1_DATA/Multimedia/Movies/Dune Part Two 2024 2160p WEB-DL DDP5 1 Atmos DV HDR H 265-FLUX/Dune Part Two 2024 2160p WEB-DL DDP5 1 Atmos DV HDR H 265-FLUX.mkv",
+                            size: 31418992412,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
+          } as any;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ MediaContainer: { Metadata: [] } }),
         } as any;
       }
       if (u.includes("/api/v3/movie")) {
@@ -572,6 +608,7 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     expect(previewRes.status).toBe(200);
     const previewBody = await previewRes.json();
     expect(previewBody.ok).toBe(true);
+    expect(previewBody.result.count).toBe(1);
     expect(previewBody.result.status).toBe("confirmation_required");
     expect(previewBody.result.confirmationRequired).toBe(true);
     expect(previewBody.result.needsConfirm).toBe(true);
@@ -585,6 +622,24 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     );
     expect(previewBody.result.fileSizeBytes).toBe(31418992412);
     // Verified item is still in Plex afterwards (zero DELETE calls)
+    expect(deleteCallsDispatched).toBe(0);
+
+    // 2b. Preview call for a title not in Plex returns count: 0, no deletion
+    const notInPlexRes = await individualToolPOST(
+      museReq("/api/muse/tool/delete_plex_media", {
+        token,
+        method: "POST",
+        body: { query: "Nonexistent Movie Title" },
+      }),
+      { params: Promise.resolve({ name: "delete_plex_media" }) }
+    );
+    expect(notInPlexRes.status).toBe(200);
+    const notInPlexBody = await notInPlexRes.json();
+    expect(notInPlexBody.ok).toBe(true);
+    expect(notInPlexBody.result.count).toBe(0);
+    expect(notInPlexBody.result.deleted).toBe(false);
+    expect(notInPlexBody.result.fileDeleted).toBe(false);
+    expect(notInPlexBody.result.needsConfirm).toBe(false);
     expect(deleteCallsDispatched).toBe(0);
 
     // 3. Confirmed call with { query: "Dune: Part Two", confirm: true }

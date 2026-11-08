@@ -580,6 +580,27 @@ describe("Rubio Media Tools", () => {
   });
 
   it("delete_plex_movie requires confirm: true before deleting", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Gladiator",
+                  year: 2000,
+                  type: "movie",
+                  ratingKey: "401",
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
     const tool = getTool("delete_plex_movie");
     expect(tool).toBeDefined();
 
@@ -588,6 +609,44 @@ describe("Rubio Media Tools", () => {
 
     expect(resNoConfirm.error).toBe("confirmation_required");
     expect(resNoConfirm.message).toContain("confirm: true");
+    expect(resNoConfirm.count).toBe(1);
+    expect(resNoConfirm.deleted).toBe(false);
+  });
+
+  it("preview call for a title not in Plex returns count: 0, no deletion", async () => {
+    let deleteCallsDispatched = 0;
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        deleteCallsDispatched++;
+        return { ok: true } as any;
+      }
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    const previewRaw = await tool!.handler({ query: "Nonexistent Movie Title" });
+    const preview = JSON.parse(previewRaw);
+
+    expect(preview.ok).toBe(true);
+    expect(preview.count).toBe(0);
+    expect(preview.deleted).toBe(false);
+    expect(preview.fileDeleted).toBe(false);
+    expect(preview.needsConfirm).toBe(false);
+    expect(preview.message).toContain("was not found in Plex");
+    expect(deleteCallsDispatched).toBe(0);
   });
 
   it("delete_plex_movie deletes from Plex and Radarr when confirmed", async () => {

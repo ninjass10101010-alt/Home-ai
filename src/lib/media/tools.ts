@@ -223,7 +223,12 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
                 }
                 match = partialMatches[0];
               } else {
-                match = candidates[0];
+                const looseMatch = candidates.find(
+                  (m) =>
+                    m.title?.toLowerCase().includes(title.toLowerCase()) ||
+                    title.toLowerCase().includes(m.title?.toLowerCase())
+                );
+                match = looseMatch;
               }
             }
 
@@ -342,12 +347,28 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
 
     // 3. Confirm-first Guard
     if (!confirm) {
+      if (!ratingKey) {
+        return JSON.stringify({
+          ok: true,
+          count: 0,
+          deleted: false,
+          fileDeleted: false,
+          filesDeleted: false,
+          needsConfirm: false,
+          confirmationRequired: false,
+          query: title,
+          title: targetTitle,
+          message: `Title '${targetTitle}' was not found in Plex. Nothing to delete.`,
+        });
+      }
+
       const typeLabel = resolvedType === "show" ? "TV show" : resolvedType === "episode" ? "episode" : "movie";
       const episodeDetail = resolvedType === "episode"
         ? ` (S${parentIndex}E${episodeIndex}${seriesTitle ? ` of '${seriesTitle}'` : ""})`
         : "";
       return JSON.stringify({
         ok: true,
+        count: 1,
         deleted: false,
         fileDeleted: false,
         filesDeleted: false,
@@ -385,7 +406,10 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
     if (!ratingKey && !radarrId && !sonarrId && !episodeFileId) {
       return JSON.stringify({
         ok: false,
+        count: 0,
         deleted: false,
+        fileDeleted: false,
+        filesDeleted: false,
         error: `Could not delete '${targetTitle}'. Media not found in Plex, Radarr, or Sonarr, or deletion rejected.`,
       });
     }
@@ -485,6 +509,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
     const typeLabel = resolvedType === "show" ? "TV show" : resolvedType === "episode" ? "episode" : "movie";
     return JSON.stringify({
       ok: true,
+      count: 1,
       deleted: true,
       fileDeleted: deleteFiles,
       filesDeleted: deleteFiles,
@@ -501,6 +526,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
   } catch (err: any) {
     return JSON.stringify({
       ok: false,
+      count: 0,
       deleted: false,
       fileDeleted: false,
       filesDeleted: false,
