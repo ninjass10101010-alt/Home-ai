@@ -281,6 +281,10 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         error: "confirmation_required",
         status: "confirmation_required",
         confirmationRequired: true,
+        title: targetTitle,
+        year: targetYear,
+        mediaType: resolvedType,
+        ratingKey: ratingKey || undefined,
         target: {
           title: targetTitle,
           mediaType: resolvedType,
