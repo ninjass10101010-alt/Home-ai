@@ -100,7 +100,7 @@ export async function dispatchMuseTool(
   if ("error" in out) {
     return NextResponse.json({ ok: false, error: scrubInternal(out.error) }, { status: out.status });
   }
-  if (isPlainObject(resultValue) && typeof resultValue.error === "string") {
+  if (isPlainObject(resultValue) && typeof resultValue.error === "string" && resultValue.ok !== true) {
     return NextResponse.json({ ok: false, error: scrubInternal(resultValue.error) }, { status: 200 });
   }
   if (isPlainObject(resultValue) && resultValue.ok === false) {
