@@ -494,6 +494,7 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
 
   it("delete_plex_media appears in openapi and returns ok: true with Bearer token", async () => {
     makeRow();
+    vi.stubEnv("PLEX_TOKEN", "test-plex-token");
     const { token } = signMuseToken({ ver: 1, adm: false });
 
     // 1. Verify OpenAPI spec carries the path
@@ -502,8 +503,65 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     expect(spec.paths["/api/muse/tool/delete_plex_media"]).toBeDefined();
     expect(spec.paths["/api/muse/tool/delete_plex_media"].post.operationId).toBe("delete_plex_media");
 
-    // 2. Execute via individual tool routing
-    const res = await individualToolPOST(
+    let deleteCallsDispatched = 0;
+    const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async (url: any, opts?: any) => {
+      const u = String(url);
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        deleteCallsDispatched++;
+        return { ok: true, status: 200, json: async () => ({}) } as any;
+      }
+      if (u.includes("/search") || u.includes("/library/metadata/10934")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Dune: Part Two",
+                  year: 2024,
+                  type: "movie",
+                  ratingKey: "10934",
+                  viewCount: 1,
+                  Media: [
+                    {
+                      Part: [
+                        {
+                          file: "/share/CACHEDEV1_DATA/Multimedia/Movies/Dune Part Two 2024 2160p WEB-DL DDP5 1 Atmos DV HDR H 265-FLUX/Dune Part Two 2024 2160p WEB-DL DDP5 1 Atmos DV HDR H 265-FLUX.mkv",
+                          size: 31418992412,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      if (u.includes("/api/v3/movie")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 99,
+              title: "Dune: Part Two",
+              year: 2024,
+              movieFile: {
+                path: "/share/CACHEDEV1_DATA/Multimedia/Movies/Dune Part Two 2024 2160p WEB-DL DDP5 1 Atmos DV HDR H 265-FLUX/Dune Part Two 2024 2160p WEB-DL DDP5 1 Atmos DV HDR H 265-FLUX.mkv",
+                size: 31418992412,
+              },
+            },
+          ],
+        } as any;
+      }
+      return { ok: false, status: 404 } as any;
+    });
+
+    // 2. Preview call with { query: "Dune: Part Two" }
+    const previewRes = await individualToolPOST(
       museReq("/api/muse/tool/delete_plex_media", {
         token,
         method: "POST",
@@ -511,12 +569,59 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
       }),
       { params: Promise.resolve({ name: "delete_plex_media" }) }
     );
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.result.status).toBe("confirmation_required");
-    expect(body.result.confirmationRequired).toBe(true);
-    expect(body.result.title).toBe("Dune: Part Two");
+    expect(previewRes.status).toBe(200);
+    const previewBody = await previewRes.json();
+    expect(previewBody.ok).toBe(true);
+    expect(previewBody.result.status).toBe("confirmation_required");
+    expect(previewBody.result.confirmationRequired).toBe(true);
+    expect(previewBody.result.needsConfirm).toBe(true);
+    expect(previewBody.result.deleted).toBe(false);
+    expect(previewBody.result.fileDeleted).toBe(false);
+    expect(previewBody.result.ratingKey).toBe("10934");
+    expect(previewBody.result.title).toBe("Dune: Part Two");
+    expect(previewBody.result.viewCount).toBe(1);
+    expect(previewBody.result.filePath).toBe(
+      "/share/CACHEDEV1_DATA/Multimedia/Movies/Dune Part Two 2024 2160p WEB-DL DDP5 1 Atmos DV HDR H 265-FLUX/Dune Part Two 2024 2160p WEB-DL DDP5 1 Atmos DV HDR H 265-FLUX.mkv"
+    );
+    expect(previewBody.result.fileSizeBytes).toBe(31418992412);
+    // Verified item is still in Plex afterwards (zero DELETE calls)
+    expect(deleteCallsDispatched).toBe(0);
+
+    // 3. Confirmed call with { query: "Dune: Part Two", confirm: true }
+    const confirmRes = await individualToolPOST(
+      museReq("/api/muse/tool/delete_plex_media", {
+        token,
+        method: "POST",
+        body: { query: "Dune: Part Two", confirm: true },
+      }),
+      { params: Promise.resolve({ name: "delete_plex_media" }) }
+    );
+    expect(confirmRes.status).toBe(200);
+    const confirmBody = await confirmRes.json();
+    expect(confirmBody.ok).toBe(true);
+    expect(confirmBody.result.deleted).toBe(true);
+    expect(confirmBody.result.fileDeleted).toBe(true);
+    expect(deleteCallsDispatched).toBeGreaterThanOrEqual(1);
+
+    // 4. Failure path returns deleted: false with error string
+    fetchSpy.mockImplementationOnce(async () => {
+      throw new Error("Plex connection refused");
+    });
+    const failRes = await individualToolPOST(
+      museReq("/api/muse/tool/delete_plex_media", {
+        token,
+        method: "POST",
+        body: { query: "Unknown Movie", confirm: true },
+      }),
+      { params: Promise.resolve({ name: "delete_plex_media" }) }
+    );
+    expect(failRes.status).toBe(200);
+    const failBody = await failRes.json();
+    expect(failBody.ok).toBe(false);
+    expect(failBody.deleted).toBe(false);
+    expect(typeof failBody.error).toBe("string");
+
+    fetchSpy.mockRestore();
   });
 });
 
