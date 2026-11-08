@@ -90,6 +90,7 @@ async function getQbittorrentCookie(): Promise<string | null> {
 
 interface PlexMediaDeleteParams {
   title?: string;
+  query?: string;
   mediaType?: "movie" | "show" | "episode" | "season" | string;
   ratingKey?: string;
   year?: number;
@@ -102,7 +103,7 @@ interface PlexMediaDeleteParams {
 
 async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<string> {
   const toolName = args.toolName || "delete_plex_media";
-  const title = String(args.title || "").trim();
+  const title = String(args.title || args.query || "").trim();
   const confirm = Boolean(args.confirm);
   const deleteFiles = args.deleteFiles !== false;
   let ratingKey = String(args.ratingKey || "").trim();
@@ -1491,7 +1492,11 @@ export const MEDIA_TOOLS: Tool[] = [
         properties: {
           title: {
             type: "string",
-            description: "Title of the movie, TV show, or episode to delete (e.g. 'Gladiator', 'Breaking Bad', 'Severance').",
+            description: "Title of the movie, TV show, or episode to delete (e.g. 'Gladiator', 'Breaking Bad', 'Dune: Part Two').",
+          },
+          query: {
+            type: "string",
+            description: "Search query or title alias (e.g. 'Dune: Part Two').",
           },
           confirm: {
             type: "boolean",
@@ -1540,7 +1545,11 @@ export const MEDIA_TOOLS: Tool[] = [
         properties: {
           title: {
             type: "string",
-            description: "Title of the movie to delete (e.g. 'Gladiator', 'Dune').",
+            description: "Title of the movie to delete (e.g. 'Gladiator', 'Dune: Part Two').",
+          },
+          query: {
+            type: "string",
+            description: "Search query or movie title alias (e.g. 'Dune: Part Two').",
           },
           confirm: {
             type: "boolean",

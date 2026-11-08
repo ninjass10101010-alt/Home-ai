@@ -689,6 +689,41 @@ describe("Rubio Media Tools", () => {
     expect(res.message).toContain("confirm: true");
   });
 
+  it("delete_plex_media supports query parameter as alias for title", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Dune: Part Two",
+                  year: 2024,
+                  type: "movie",
+                  ratingKey: "10934",
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    const raw = await tool!.handler({ query: "Dune: Part Two" });
+    const res = JSON.parse(raw);
+
+    expect(res.error).toBe("confirmation_required");
+    expect(res.target.title).toBe("Dune: Part Two");
+    expect(res.target.year).toBe(2024);
+    expect(res.target.ratingKey).toBe("10934");
+  });
+
+
   it("delete_plex_media deletes TV show from Plex and Sonarr when confirmed", async () => {
     const deleteCalls: string[] = [];
 
