@@ -940,6 +940,93 @@ describe("Rubio Media Tools", () => {
     expect(typeof rejectedRes.error).toBe("string");
   });
 
+  it("delete_plex_media rejects ambiguous multiple matches to delete exactly one item at a time", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                { title: "Ghostbusters", year: 1984, type: "movie", ratingKey: "101" },
+                { title: "Ghostbusters", year: 2016, type: "movie", ratingKey: "102" },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    // Call without year or ratingKey returns error asking for disambiguation
+    const raw = await tool!.handler({ title: "Ghostbusters" });
+    const res = JSON.parse(raw);
+
+    expect(res.ok).toBe(false);
+    expect(res.deleted).toBe(false);
+    expect(res.error).toContain("Multiple matching items found");
+    expect(res.error).toContain("Specify ratingKey or year to target exactly one item");
+  });
+
+  it("delete_plex_media enforces two-step: preview first, delete only on explicit second call", async () => {
+    let deleteCount = 0;
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        deleteCount++;
+        return { ok: true } as any;
+      }
+      if (url.includes("/search") || url.includes("/library/metadata/202")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Interstellar",
+                  year: 2014,
+                  type: "movie",
+                  ratingKey: "202",
+                  viewCount: 2,
+                  Media: [{ Part: [{ file: "/movies/Interstellar.mkv", size: 25000000000 }] }],
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    // Step 1: Preview first (confirm omitted)
+    const step1Raw = await tool!.handler({ title: "Interstellar" });
+    const step1 = JSON.parse(step1Raw);
+
+    expect(step1.ok).toBe(true);
+    expect(step1.needsConfirm).toBe(true);
+    expect(step1.deleted).toBe(false);
+    expect(step1.fileDeleted).toBe(false);
+    expect(step1.ratingKey).toBe("202");
+    expect(step1.viewCount).toBe(2);
+    expect(step1.filePath).toBe("/movies/Interstellar.mkv");
+    expect(deleteCount).toBe(0); // Nothing deleted
+
+    // Step 2: Delete only on an explicit second call with confirm: true and ratingKey
+    const step2Raw = await tool!.handler({ title: "Interstellar", ratingKey: step1.ratingKey, confirm: true });
+    const step2 = JSON.parse(step2Raw);
+
+    expect(step2.ok).toBe(true);
+    expect(step2.deleted).toBe(true);
+    expect(step2.fileDeleted).toBe(true);
+    expect(deleteCount).toBe(1); // Deleted on explicit second call
+  });
+
   it("mark_plex_media_watched toggles scrobble status", async () => {
     const endpointsCalled: string[] = [];
 

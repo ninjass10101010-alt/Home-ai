@@ -190,10 +190,42 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
               if (epMatch) candidates = [epMatch];
             }
 
-            const match =
-              candidates.find((m) => m.title.toLowerCase() === title.toLowerCase()) ||
-              candidates.find((m) => m.title.toLowerCase().includes(title.toLowerCase())) ||
-              candidates[0];
+            const exactMatches = candidates.filter((m) => m.title.toLowerCase() === title.toLowerCase());
+            let match: any;
+            if (exactMatches.length === 1) {
+              match = exactMatches[0];
+            } else if (exactMatches.length > 1) {
+              const yearMatch = requestedYear ? exactMatches.find((m) => m.year === requestedYear) : undefined;
+              if (yearMatch) {
+                match = yearMatch;
+              } else {
+                const list = exactMatches.map((m) => `'${m.title}' (${m.year || "unknown"}) [ratingKey: ${m.ratingKey}]`).join(", ");
+                return JSON.stringify({
+                  ok: false,
+                  deleted: false,
+                  fileDeleted: false,
+                  error: `Multiple matching items found for '${title}': ${list}. Specify ratingKey or year to target exactly one item.`,
+                });
+              }
+            } else {
+              const partialMatches = candidates.filter((m) => m.title.toLowerCase().includes(title.toLowerCase()));
+              if (partialMatches.length === 1) {
+                match = partialMatches[0];
+              } else if (partialMatches.length > 1) {
+                if (confirm && !ratingKey) {
+                  const list = partialMatches.slice(0, 5).map((m) => `'${m.title}' (${m.year || "unknown"}) [ratingKey: ${m.ratingKey}]`).join(", ");
+                  return JSON.stringify({
+                    ok: false,
+                    deleted: false,
+                    fileDeleted: false,
+                    error: `Multiple items match '${title}': ${list}. Ambiguous deletion rejected — specify exact ratingKey to delete exactly one item.`,
+                  });
+                }
+                match = partialMatches[0];
+              } else {
+                match = candidates[0];
+              }
+            }
 
             if (match) {
               ratingKey = String(match.ratingKey || match.key?.split("/").pop() || "");
@@ -1547,7 +1579,7 @@ export const MEDIA_TOOLS: Tool[] = [
     definition: {
       name: "delete_plex_media",
       description:
-        "Permanently delete a movie, TV show, or episode from Plex and disk storage (Radarr/Sonarr) with a confirm-first guard. When called without confirm: true, it searches and previews the exact target media (title, year, type, season/episode) and requires user confirmation. When confirmed with confirm: true, it purges media files from disk and removes the item from Plex.",
+        "Permanently delete exactly one movie, TV show, or episode from Plex and disk storage (Radarr/Sonarr). Two-step operation: Step 1 (preview) searches and returns target details (ratingKey, filePath, fileSizeBytes, viewCount) and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true (and preferably ratingKey) to permanently delete only that single item.",
       parameters: {
         type: "object",
         required: ["title"],
@@ -1600,7 +1632,7 @@ export const MEDIA_TOOLS: Tool[] = [
     definition: {
       name: "delete_plex_movie",
       description:
-        "Permanently delete a movie from the Plex library and Radarr, deleting media files from disk and stopping monitoring. To protect against accidental deletions, 'confirm: true' is strictly required.",
+        "Permanently delete exactly one movie from the Plex library and Radarr. Two-step operation: Step 1 (preview) returns target details and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true to permanently delete only that single movie.",
       parameters: {
         type: "object",
         required: ["title", "confirm"],
