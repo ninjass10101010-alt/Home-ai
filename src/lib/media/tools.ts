@@ -609,6 +609,7 @@ export const MEDIA_TOOLS: Tool[] = [
         const items: any[] = data.MediaContainer?.Metadata || [];
         const matches = items.slice(0, 10).map((item) => ({
           title: item.title,
+          ratingKey: String(item.ratingKey || item.key?.split("/").pop() || ""),
           library: item.librarySectionTitle?.trim() || "Unknown Library",
           year: item.year,
           type: item.type,
@@ -720,6 +721,7 @@ export const MEDIA_TOOLS: Tool[] = [
           return {
             title: displayTitle,
             originalTitle: item.title,
+            ratingKey: String(item.ratingKey || item.key?.split("/").pop() || ""),
             mediaType: item.type,
             year: item.year,
             viewedAt: viewedAtIso,
@@ -842,6 +844,7 @@ export const MEDIA_TOOLS: Tool[] = [
 
         const results = filtered.slice(0, limit).map((m) => ({
           title: m.title,
+          ratingKey: String(m.ratingKey || m.key?.split("/").pop() || ""),
           year: m.year,
           library: m.library,
           viewCount: m.viewCount || 1,
@@ -933,6 +936,450 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to get active Plex sessions",
+          details: err?.message || String(err),
+        });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "edit_plex_movie",
+      description:
+        "Modify and edit metadata, fields, tags, user rating, or watch status for a movie in the Plex library. Can identify the movie by title or ratingKey. Supports updating title, sort title, summary/overview, release year, studio, content rating, adding collections/genres, setting user rating (0-10), and marking as watched/unwatched.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Movie title to find and edit (e.g. 'Gladiator', 'Inception'). Required if ratingKey is omitted.",
+          },
+          ratingKey: {
+            type: "string",
+            description: "Plex ratingKey of the movie if known.",
+          },
+          newTitle: {
+            type: "string",
+            description: "New display title for the movie.",
+          },
+          newSortTitle: {
+            type: "string",
+            description: "New title for alphabetical sorting (e.g. 'Dark Knight, The').",
+          },
+          newSummary: {
+            type: "string",
+            description: "New plot summary / synopsis.",
+          },
+          newYear: {
+            type: "number",
+            description: "New release year.",
+          },
+          newStudio: {
+            type: "string",
+            description: "New studio name (e.g. 'Warner Bros.', 'Universal Pictures').",
+          },
+          newContentRating: {
+            type: "string",
+            description: "New content advisory rating (e.g. 'PG-13', 'R', 'TV-MA').",
+          },
+          userRating: {
+            type: "number",
+            description: "Personal or family rating from 0 to 10 (or -1 to clear).",
+          },
+          watched: {
+            type: "boolean",
+            description: "true to mark as watched (scrobble), false to mark as unwatched.",
+          },
+          collection: {
+            type: "string",
+            description: "Collection name/tag to assign to this movie.",
+          },
+          refreshMetadata: {
+            type: "boolean",
+            description: "Set to true to trigger a full metadata refresh from online providers.",
+          },
+        },
+      },
+    },
+    handler: async (args) => {
+      const searchTitle = String(args.title || "").trim();
+      let ratingKey = String(args.ratingKey || "").trim();
+
+      if (!searchTitle && !ratingKey) {
+        return JSON.stringify({ error: "Either title or ratingKey is required to identify the movie." });
+      }
+
+      const { url: plexBaseUrl, token } = await getPlexConfig();
+      if (!token) {
+        return JSON.stringify({ error: "PLEX_TOKEN is not configured" });
+      }
+
+      const base = plexBaseUrl.replace(/\/+$/, "");
+      let resolvedTitle = searchTitle;
+      let librarySectionID = "1";
+
+      try {
+        // 1. Resolve ratingKey if only title was provided
+        if (!ratingKey) {
+          const searchUrl = `${base}/search?query=${encodeURIComponent(searchTitle)}&X-Plex-Token=${token}`;
+          const searchRes = await fetch(searchUrl, {
+            headers: { Accept: "application/json", "X-Plex-Token": token },
+            signal: AbortSignal.timeout(8000),
+          });
+
+          if (!searchRes.ok) {
+            return JSON.stringify({ error: `Plex search failed with HTTP ${searchRes.status}` });
+          }
+
+          const searchData: any = await searchRes.json();
+          const items: any[] = searchData.MediaContainer?.Metadata || [];
+          const movieMatch = items.find((m) => m.type === "movie" && m.title.toLowerCase().includes(searchTitle.toLowerCase())) || items.find((m) => m.type === "movie");
+
+          if (!movieMatch) {
+            return JSON.stringify({ error: `Movie '${searchTitle}' not found in Plex library.` });
+          }
+
+          ratingKey = String(movieMatch.ratingKey || movieMatch.key?.split("/").pop() || "");
+          resolvedTitle = movieMatch.title;
+          if (movieMatch.librarySectionID) librarySectionID = String(movieMatch.librarySectionID);
+        }
+
+        const changes: Record<string, unknown> = {};
+
+        // 2. Metadata field edits
+        const metadataParams = new URLSearchParams();
+        metadataParams.set("type", "1");
+        metadataParams.set("id", ratingKey);
+
+        if (args.newTitle) {
+          metadataParams.set("title.value", String(args.newTitle).trim());
+          metadataParams.set("title.locked", "1");
+          changes.title = args.newTitle;
+        }
+        if (args.newSortTitle) {
+          metadataParams.set("titleSort.value", String(args.newSortTitle).trim());
+          metadataParams.set("titleSort.locked", "1");
+          changes.sortTitle = args.newSortTitle;
+        }
+        if (args.newSummary) {
+          metadataParams.set("summary.value", String(args.newSummary).trim());
+          metadataParams.set("summary.locked", "1");
+          changes.summary = args.newSummary;
+        }
+        if (args.newYear) {
+          metadataParams.set("year.value", String(args.newYear));
+          metadataParams.set("year.locked", "1");
+          changes.year = args.newYear;
+        }
+        if (args.newStudio) {
+          metadataParams.set("studio.value", String(args.newStudio).trim());
+          metadataParams.set("studio.locked", "1");
+          changes.studio = args.newStudio;
+        }
+        if (args.newContentRating) {
+          metadataParams.set("contentRating.value", String(args.newContentRating).trim());
+          metadataParams.set("contentRating.locked", "1");
+          changes.contentRating = args.newContentRating;
+        }
+        if (args.collection) {
+          metadataParams.set("collection[0].tag.tag", String(args.collection).trim());
+          metadataParams.set("collection.locked", "1");
+          changes.collection = args.collection;
+        }
+
+        if (metadataParams.toString().includes(".value")) {
+          metadataParams.set("X-Plex-Token", token);
+          const putUrl = `${base}/library/sections/${librarySectionID}/all?${metadataParams.toString()}`;
+          const putRes = await fetch(putUrl, {
+            method: "PUT",
+            headers: { Accept: "application/json", "X-Plex-Token": token },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!putRes.ok) {
+            await fetch(`${base}/library/metadata/${ratingKey}?${metadataParams.toString()}`, {
+              method: "PUT",
+              headers: { Accept: "application/json", "X-Plex-Token": token },
+              signal: AbortSignal.timeout(8000),
+            });
+          }
+        }
+
+        // 3. User rating edit
+        if (typeof args.userRating === "number") {
+          const ratingVal = Math.min(Math.max(args.userRating, -1), 10);
+          const rateUrl = `${base}/:/rate?key=${ratingKey}&identifier=com.plexapp.plugins.library&rating=${ratingVal}&X-Plex-Token=${token}`;
+          await fetch(rateUrl, {
+            headers: { Accept: "application/json", "X-Plex-Token": token },
+            signal: AbortSignal.timeout(6000),
+          });
+          changes.userRating = ratingVal;
+        }
+
+        // 4. Watched / unwatched status
+        if (typeof args.watched === "boolean") {
+          const scrobbleEndpoint = args.watched ? "/:/scrobble" : "/:/unscrobble";
+          const scrobbleUrl = `${base}${scrobbleEndpoint}?key=${ratingKey}&identifier=com.plexapp.plugins.library&X-Plex-Token=${token}`;
+          await fetch(scrobbleUrl, {
+            headers: { Accept: "application/json", "X-Plex-Token": token },
+            signal: AbortSignal.timeout(6000),
+          });
+          changes.watched = args.watched;
+        }
+
+        // 5. Metadata refresh
+        if (args.refreshMetadata) {
+          const refreshUrl = `${base}/library/metadata/${ratingKey}/refresh?X-Plex-Token=${token}`;
+          await fetch(refreshUrl, {
+            method: "PUT",
+            headers: { Accept: "application/json", "X-Plex-Token": token },
+            signal: AbortSignal.timeout(6000),
+          });
+          changes.refreshedMetadata = true;
+        }
+
+        return JSON.stringify({
+          ok: true,
+          updated: true,
+          title: args.newTitle || resolvedTitle,
+          ratingKey,
+          changesApplied: changes,
+          message: `Successfully updated '${args.newTitle || resolvedTitle}' in Plex library.`,
+        });
+      } catch (err: any) {
+        return JSON.stringify({
+          error: "Failed to edit Plex movie",
+          details: err?.message || String(err),
+        });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "delete_plex_movie",
+      description:
+        "Permanently delete a movie from the Plex library and Radarr, deleting media files from disk and stopping monitoring. To protect against accidental deletions, 'confirm: true' is strictly required.",
+      parameters: {
+        type: "object",
+        required: ["title", "confirm"],
+        properties: {
+          title: {
+            type: "string",
+            description: "Title of the movie to delete (e.g. 'Gladiator', 'Dune').",
+          },
+          confirm: {
+            type: "boolean",
+            description: "Must be set to true to confirm permanent deletion of the movie and files.",
+          },
+          ratingKey: {
+            type: "string",
+            description: "Optional Plex ratingKey if known to ensure exact match.",
+          },
+          deleteFiles: {
+            type: "boolean",
+            description: "Whether to delete the movie files from disk. Defaults to true.",
+          },
+        },
+      },
+    },
+    handler: async (args) => {
+      const title = String(args.title || "").trim();
+      const confirm = Boolean(args.confirm);
+      const deleteFiles = args.deleteFiles !== false;
+      let ratingKey = String(args.ratingKey || "").trim();
+
+      if (!title && !ratingKey) {
+        return JSON.stringify({ error: "Movie title or ratingKey is required." });
+      }
+
+      if (!confirm) {
+        return JSON.stringify({
+          error: "confirmation_required",
+          message: `Deleting '${title || ratingKey}' will permanently delete media files from disk. Call delete_plex_movie again with confirm: true to proceed.`,
+        });
+      }
+
+      const { url: plexBaseUrl, token: plexToken } = await getPlexConfig();
+      const { url: radarrBaseUrl, apiKey: radarrKey } = await getRadarrConfig();
+
+      let targetTitle = title;
+      let targetYear: number | undefined;
+      let deletedFromPlex = false;
+      let deletedFromRadarr = false;
+
+      try {
+        const pBase = plexBaseUrl.replace(/\/+$/, "");
+
+        // 1. Locate movie in Plex
+        if (plexToken) {
+          if (!ratingKey && title) {
+            const searchUrl = `${pBase}/search?query=${encodeURIComponent(title)}&X-Plex-Token=${plexToken}`;
+            const sRes = await fetch(searchUrl, {
+              headers: { Accept: "application/json", "X-Plex-Token": plexToken },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (sRes.ok) {
+              const sData: any = await sRes.json();
+              const items: any[] = sData.MediaContainer?.Metadata || [];
+              const match = items.find((m) => m.type === "movie" && m.title.toLowerCase().includes(title.toLowerCase())) || items.find((m) => m.type === "movie");
+              if (match) {
+                ratingKey = String(match.ratingKey || match.key?.split("/").pop() || "");
+                targetTitle = match.title;
+                targetYear = match.year;
+              }
+            }
+          }
+
+          // Delete from Plex
+          if (ratingKey) {
+            const delUrl = `${pBase}/library/metadata/${ratingKey}?X-Plex-Token=${plexToken}`;
+            const pDelRes = await fetch(delUrl, {
+              method: "DELETE",
+              headers: { "X-Plex-Token": plexToken },
+              signal: AbortSignal.timeout(8000),
+            });
+            deletedFromPlex = pDelRes.ok || pDelRes.status === 200 || pDelRes.status === 204;
+          }
+        }
+
+        // 2. Locate and delete from Radarr (to purge disk files and stop re-downloading)
+        if (radarrKey && radarrBaseUrl) {
+          const rBase = radarrBaseUrl.replace(/\/+$/, "");
+          const lookupUrl = `${rBase}/api/v3/movie`;
+          const rListRes = await fetch(lookupUrl, {
+            headers: { "X-Api-Key": radarrKey, Accept: "application/json" },
+            signal: AbortSignal.timeout(8000),
+          });
+
+          if (rListRes.ok) {
+            const movies: any[] = await rListRes.json();
+            const rMatch = movies.find((m) => {
+              const matchesTitle = m.title.toLowerCase() === targetTitle.toLowerCase();
+              const matchesYear = targetYear ? m.year === targetYear : true;
+              return matchesTitle && matchesYear;
+            }) || movies.find((m) => m.title.toLowerCase().includes(targetTitle.toLowerCase()));
+
+            if (rMatch && rMatch.id) {
+              const delRadarrUrl = `${rBase}/api/v3/movie/${rMatch.id}?deleteFiles=${deleteFiles}&addImportExclusion=false`;
+              const rDelRes = await fetch(delRadarrUrl, {
+                method: "DELETE",
+                headers: { "X-Api-Key": radarrKey },
+                signal: AbortSignal.timeout(8000),
+              });
+              deletedFromRadarr = rDelRes.ok || rDelRes.status === 200 || rDelRes.status === 204;
+            }
+          }
+        }
+
+        if (!deletedFromPlex && !deletedFromRadarr) {
+          return JSON.stringify({
+            error: `Could not delete '${targetTitle}'. Movie not found in Plex or Radarr, or deletion rejected.`,
+          });
+        }
+
+        return JSON.stringify({
+          ok: true,
+          deleted: true,
+          title: targetTitle,
+          year: targetYear,
+          ratingKey: ratingKey || undefined,
+          deletedFromPlex,
+          deletedFromRadarr,
+          filesDeleted: deleteFiles,
+          message: `Successfully deleted '${targetTitle}' from media library and disk.`,
+        });
+      } catch (err: any) {
+        return JSON.stringify({
+          error: "Failed to delete movie from Plex/Radarr",
+          details: err?.message || String(err),
+        });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "mark_plex_media_watched",
+      description:
+        "Quickly mark a movie or episode as watched (or unwatched) in Plex. Updates view count and watch history.",
+      parameters: {
+        type: "object",
+        required: ["title"],
+        properties: {
+          title: {
+            type: "string",
+            description: "Movie or episode title to update in Plex (e.g. 'Gladiator', 'Dune').",
+          },
+          watched: {
+            type: "boolean",
+            description: "true to mark as watched (default), false to mark as unwatched.",
+          },
+          mediaType: {
+            type: "string",
+            enum: ["movie", "episode"],
+            description: "Type of media ('movie' or 'episode'). Defaults to 'movie'.",
+          },
+          ratingKey: {
+            type: "string",
+            description: "Optional Plex ratingKey if known.",
+          },
+        },
+      },
+    },
+    handler: async (args) => {
+      const title = String(args.title || "").trim();
+      const watched = args.watched !== false;
+      const mediaType = String(args.mediaType || "movie").toLowerCase();
+      let ratingKey = String(args.ratingKey || "").trim();
+
+      if (!title && !ratingKey) {
+        return JSON.stringify({ error: "Title or ratingKey is required." });
+      }
+
+      const { url: plexBaseUrl, token } = await getPlexConfig();
+      if (!token) {
+        return JSON.stringify({ error: "PLEX_TOKEN is not configured" });
+      }
+
+      const base = plexBaseUrl.replace(/\/+$/, "");
+
+      try {
+        if (!ratingKey) {
+          const searchUrl = `${base}/search?query=${encodeURIComponent(title)}&X-Plex-Token=${token}`;
+          const searchRes = await fetch(searchUrl, {
+            headers: { Accept: "application/json", "X-Plex-Token": token },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!searchRes.ok) {
+            return JSON.stringify({ error: `Plex search returned HTTP ${searchRes.status}` });
+          }
+          const data: any = await searchRes.json();
+          const items: any[] = data.MediaContainer?.Metadata || [];
+          const match = items.find((m) => m.type === mediaType && m.title.toLowerCase().includes(title.toLowerCase())) || items.find((m) => m.type === mediaType);
+          if (!match) {
+            return JSON.stringify({ error: `Media '${title}' (${mediaType}) not found in Plex.` });
+          }
+          ratingKey = String(match.ratingKey || match.key?.split("/").pop() || "");
+        }
+
+        const endpoint = watched ? "/:/scrobble" : "/:/unscrobble";
+        const url = `${base}${endpoint}?key=${ratingKey}&identifier=com.plexapp.plugins.library&X-Plex-Token=${token}`;
+        const res = await fetch(url, {
+          headers: { Accept: "application/json", "X-Plex-Token": token },
+          signal: AbortSignal.timeout(6000),
+        });
+
+        if (!res.ok) {
+          return JSON.stringify({ error: `Plex returned HTTP ${res.status} when updating watch status.` });
+        }
+
+        return JSON.stringify({
+          ok: true,
+          title,
+          ratingKey,
+          watched,
+          message: `Successfully marked '${title}' as ${watched ? "watched" : "unwatched"} in Plex.`,
+        });
+      } catch (err: any) {
+        return JSON.stringify({
+          error: "Failed to update Plex watch status",
           details: err?.message || String(err),
         });
       }

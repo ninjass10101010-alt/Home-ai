@@ -516,6 +516,184 @@ describe("Rubio Media Tools", () => {
     expect(res.sessions[0].state).toBe("playing");
   });
 
+  it("edit_plex_movie updates metadata, rating, and watch status", async () => {
+    const putCalls: string[] = [];
+    const getCalls: string[] = [];
+
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "PUT") {
+        putCalls.push(url);
+        return { ok: true } as any;
+      }
+      getCalls.push(url);
+
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Gladiator",
+                  type: "movie",
+                  ratingKey: "401",
+                  librarySectionID: "1",
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      if (url.includes("/:/rate") || url.includes("/:/scrobble") || url.includes("/:/unscrobble")) {
+        return { ok: true } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("edit_plex_movie");
+    expect(tool).toBeDefined();
+
+    const raw = await tool!.handler({
+      title: "Gladiator",
+      newTitle: "Gladiator (Extended)",
+      newSummary: "Maximus returns in high definition.",
+      userRating: 9.5,
+      watched: true,
+      refreshMetadata: true,
+    });
+    const res = JSON.parse(raw);
+
+    expect(res.ok).toBe(true);
+    expect(res.updated).toBe(true);
+    expect(res.ratingKey).toBe("401");
+    expect(res.changesApplied.title).toBe("Gladiator (Extended)");
+    expect(res.changesApplied.summary).toBe("Maximus returns in high definition.");
+    expect(res.changesApplied.userRating).toBe(9.5);
+    expect(res.changesApplied.watched).toBe(true);
+    expect(res.changesApplied.refreshedMetadata).toBe(true);
+
+    expect(putCalls.some((c) => c.includes("/library/sections/1/all") && c.includes("title.value=Gladiator"))).toBe(true);
+    expect(putCalls.some((c) => c.includes("/library/metadata/401/refresh"))).toBe(true);
+    expect(getCalls.some((c) => c.includes("/:/rate") && c.includes("rating=9.5"))).toBe(true);
+    expect(getCalls.some((c) => c.includes("/:/scrobble") && c.includes("key=401"))).toBe(true);
+  });
+
+  it("delete_plex_movie requires confirm: true before deleting", async () => {
+    const tool = getTool("delete_plex_movie");
+    expect(tool).toBeDefined();
+
+    const rawNoConfirm = await tool!.handler({ title: "Gladiator" });
+    const resNoConfirm = JSON.parse(rawNoConfirm);
+
+    expect(resNoConfirm.error).toBe("confirmation_required");
+    expect(resNoConfirm.message).toContain("confirm: true");
+  });
+
+  it("delete_plex_movie deletes from Plex and Radarr when confirmed", async () => {
+    const deleteCalls: string[] = [];
+
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        deleteCalls.push(url);
+        return { ok: true, status: 200 } as any;
+      }
+
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Gladiator",
+                  year: 2000,
+                  type: "movie",
+                  ratingKey: "401",
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+
+      if (url.includes("/api/v3/movie")) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 55,
+              title: "Gladiator",
+              year: 2000,
+            },
+          ],
+        } as any;
+      }
+
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_movie");
+    expect(tool).toBeDefined();
+
+    const raw = await tool!.handler({ title: "Gladiator", confirm: true });
+    const res = JSON.parse(raw);
+
+    expect(res.ok).toBe(true);
+    expect(res.deleted).toBe(true);
+    expect(res.deletedFromPlex).toBe(true);
+    expect(res.deletedFromRadarr).toBe(true);
+    expect(res.filesDeleted).toBe(true);
+
+    // Verify Plex DELETE endpoint called
+    expect(deleteCalls.some((c) => c.includes("/library/metadata/401"))).toBe(true);
+    // Verify Radarr DELETE endpoint called with deleteFiles=true
+    expect(deleteCalls.some((c) => c.includes("/api/v3/movie/55?deleteFiles=true"))).toBe(true);
+  });
+
+  it("mark_plex_media_watched toggles scrobble status", async () => {
+    const endpointsCalled: string[] = [];
+
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      endpointsCalled.push(url);
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Dune",
+                  type: "movie",
+                  ratingKey: "505",
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: true } as any;
+    });
+
+    const tool = getTool("mark_plex_media_watched");
+    expect(tool).toBeDefined();
+
+    // Mark watched
+    const rawWatched = await tool!.handler({ title: "Dune", watched: true });
+    const resWatched = JSON.parse(rawWatched);
+    expect(resWatched.ok).toBe(true);
+    expect(resWatched.watched).toBe(true);
+    expect(endpointsCalled.some((c) => c.includes("/:/scrobble?key=505"))).toBe(true);
+
+    // Mark unwatched
+    const rawUnwatched = await tool!.handler({ ratingKey: "505", watched: false });
+    const resUnwatched = JSON.parse(rawUnwatched);
+    expect(resUnwatched.ok).toBe(true);
+    expect(resUnwatched.watched).toBe(false);
+    expect(endpointsCalled.some((c) => c.includes("/:/unscrobble?key=505"))).toBe(true);
+  });
+
   it("get_media_stack_health reports statuses across services", async () => {
     global.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("radarr") || url.includes("7878")) {
