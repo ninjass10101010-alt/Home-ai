@@ -134,6 +134,9 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
   let radarrId: number | undefined;
   let sonarrId: number | undefined;
   let episodeFileId: number | undefined;
+  let filePath: string | undefined;
+  let fileSizeBytes: number | undefined;
+  let viewCount: number = 0;
 
   try {
     // 1. Locate in Plex
@@ -156,6 +159,10 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
               seriesTitle = item.grandparentTitle || item.parentTitle;
               parentIndex = item.parentIndex ?? parentIndex;
               episodeIndex = item.index ?? episodeIndex;
+              viewCount = typeof item.viewCount === "number" ? item.viewCount : 0;
+              const part = item.Media?.[0]?.Part?.[0];
+              if (part?.file) filePath = part.file;
+              if (typeof part?.size === "number") fileSizeBytes = part.size;
             }
           }
         } catch {
@@ -197,6 +204,32 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
               seriesTitle = match.grandparentTitle || match.parentTitle;
               parentIndex = match.parentIndex ?? parentIndex;
               episodeIndex = match.index ?? episodeIndex;
+              viewCount = typeof match.viewCount === "number" ? match.viewCount : 0;
+              const part = match.Media?.[0]?.Part?.[0];
+              if (part?.file) filePath = part.file;
+              if (typeof part?.size === "number") fileSizeBytes = part.size;
+
+              // If match is missing full Part details, fetch full metadata
+              if (ratingKey && (!filePath || fileSizeBytes === undefined)) {
+                try {
+                  const mRes = await fetch(`${pBase}/library/metadata/${ratingKey}?X-Plex-Token=${plexToken}`, {
+                    headers: { Accept: "application/json", "X-Plex-Token": plexToken },
+                    signal: AbortSignal.timeout(4000),
+                  });
+                  if (mRes.ok) {
+                    const mData: any = await mRes.json();
+                    const fullItem = mData.MediaContainer?.Metadata?.[0];
+                    if (fullItem) {
+                      if (typeof fullItem.viewCount === "number") viewCount = fullItem.viewCount;
+                      const fPart = fullItem.Media?.[0]?.Part?.[0];
+                      if (fPart?.file) filePath = fPart.file;
+                      if (typeof fPart?.size === "number") fileSizeBytes = fPart.size;
+                    }
+                  }
+                } catch {
+                  // continue
+                }
+              }
             }
           }
         } catch {
@@ -225,6 +258,10 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
             if (!targetTitle) targetTitle = rMatch.title;
             if (!targetYear) targetYear = rMatch.year;
             resolvedType = "movie";
+            if (!filePath && rMatch.movieFile?.path) filePath = rMatch.movieFile.path;
+            if (fileSizeBytes === undefined && typeof rMatch.movieFile?.size === "number") {
+              fileSizeBytes = rMatch.movieFile.size;
+            }
           }
         }
       } catch {
@@ -282,19 +319,26 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         deleted: false,
         fileDeleted: false,
         filesDeleted: false,
-        query: targetTitle,
-        error: "confirmation_required",
-        status: "confirmation_required",
+        needsConfirm: true,
         confirmationRequired: true,
+        status: "confirmation_required",
+        error: "confirmation_required",
+        query: title,
         title: targetTitle,
         year: targetYear,
         mediaType: resolvedType,
         ratingKey: ratingKey || undefined,
+        filePath: filePath || undefined,
+        fileSizeBytes: fileSizeBytes ?? undefined,
+        viewCount,
         target: {
           title: targetTitle,
           mediaType: resolvedType,
           year: targetYear,
           ratingKey: ratingKey || undefined,
+          filePath: filePath || undefined,
+          fileSizeBytes: fileSizeBytes ?? undefined,
+          viewCount,
           series: seriesTitle || undefined,
           season: parentIndex || undefined,
           episode: episodeIndex || undefined,

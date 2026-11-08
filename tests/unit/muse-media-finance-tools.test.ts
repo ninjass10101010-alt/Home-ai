@@ -653,8 +653,14 @@ describe("Rubio Media Tools", () => {
   });
 
   it("delete_plex_media previews movie target and requires confirm: true", async () => {
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes("/search")) {
+    let deleteCallsCount = 0;
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        deleteCallsCount++;
+        return { ok: true } as any;
+      }
+      if (url.includes("/search") || url.includes("/library/metadata/808")) {
         return {
           ok: true,
           json: async () => ({
@@ -665,6 +671,17 @@ describe("Rubio Media Tools", () => {
                   year: 2010,
                   type: "movie",
                   ratingKey: "808",
+                  viewCount: 3,
+                  Media: [
+                    {
+                      Part: [
+                        {
+                          file: "/movies/Inception (2010)/Inception.mkv",
+                          size: 10737418240,
+                        },
+                      ],
+                    },
+                  ],
                 },
               ],
             },
@@ -680,13 +697,22 @@ describe("Rubio Media Tools", () => {
     const raw = await tool!.handler({ title: "Inception" });
     const res = JSON.parse(raw);
 
-    expect(res.error).toBe("confirmation_required");
+    expect(res.ok).toBe(true);
     expect(res.status).toBe("confirmation_required");
-    expect(res.target.title).toBe("Inception");
-    expect(res.target.year).toBe(2010);
-    expect(res.target.mediaType).toBe("movie");
-    expect(res.target.ratingKey).toBe("808");
+    expect(res.needsConfirm).toBe(true);
+    expect(res.deleted).toBe(false);
+    expect(res.fileDeleted).toBe(false);
+    expect(res.ratingKey).toBe("808");
+    expect(res.filePath).toBe("/movies/Inception (2010)/Inception.mkv");
+    expect(res.fileSizeBytes).toBe(10737418240);
+    expect(res.viewCount).toBe(3);
+    expect(res.title).toBe("Inception");
+    expect(res.year).toBe(2010);
+    expect(res.mediaType).toBe("movie");
     expect(res.message).toContain("confirm: true");
+
+    // Item was previewed only — zero DELETE requests dispatched (item remains intact in Plex)
+    expect(deleteCallsCount).toBe(0);
   });
 
   it("delete_plex_media supports query parameter as alias for title", async () => {
