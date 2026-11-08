@@ -279,6 +279,10 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         : "";
       return JSON.stringify({
         ok: true,
+        deleted: false,
+        fileDeleted: false,
+        filesDeleted: false,
+        query: targetTitle,
         error: "confirmation_required",
         status: "confirmation_required",
         confirmationRequired: true,
@@ -406,6 +410,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
     return JSON.stringify({
       ok: true,
       deleted: true,
+      fileDeleted: deleteFiles,
+      filesDeleted: deleteFiles,
       mediaType: resolvedType,
       title: targetTitle,
       year: targetYear,
@@ -414,13 +420,14 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       deletedFromArr: deletedFromRadarr || deletedFromSonarr,
       deletedFromRadarr: deletedFromRadarr || undefined,
       deletedFromSonarr: deletedFromSonarr || undefined,
-      filesDeleted: deleteFiles,
       message: `Successfully deleted ${typeLabel} '${targetTitle}' from media library and disk.`,
     });
   } catch (err: any) {
     return JSON.stringify({
       ok: false,
       deleted: false,
+      fileDeleted: false,
+      filesDeleted: false,
       error: "Failed to delete media from Plex/Arr stack",
       details: err?.message || String(err),
     });
