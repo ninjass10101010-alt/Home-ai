@@ -278,6 +278,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         ? ` (S${parentIndex}E${episodeIndex}${seriesTitle ? ` of '${seriesTitle}'` : ""})`
         : "";
       return JSON.stringify({
+        ok: true,
         error: "confirmation_required",
         status: "confirmation_required",
         confirmationRequired: true,

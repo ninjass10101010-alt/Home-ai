@@ -491,6 +491,33 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
   });
+
+  it("delete_plex_media appears in openapi and returns ok: true with Bearer token", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+
+    // 1. Verify OpenAPI spec carries the path
+    const { generateMuseOpenApi } = await import("@/lib/muse/openapi");
+    const spec = generateMuseOpenApi("http://nas.local:3000");
+    expect(spec.paths["/api/muse/tool/delete_plex_media"]).toBeDefined();
+    expect(spec.paths["/api/muse/tool/delete_plex_media"].post.operationId).toBe("delete_plex_media");
+
+    // 2. Execute via individual tool routing
+    const res = await individualToolPOST(
+      museReq("/api/muse/tool/delete_plex_media", {
+        token,
+        method: "POST",
+        body: { query: "Dune: Part Two" },
+      }),
+      { params: Promise.resolve({ name: "delete_plex_media" }) }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.result.status).toBe("confirmation_required");
+    expect(body.result.confirmationRequired).toBe(true);
+    expect(body.result.title).toBe("Dune: Part Two");
+  });
 });
 
 // Fold-in (Task 8 review): the middleware exempts the whole `/api/muse/`
