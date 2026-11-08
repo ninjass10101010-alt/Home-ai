@@ -113,7 +113,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
   const episodeNum = typeof args.episodeNumber === "number" ? args.episodeNumber : undefined;
 
   if (!title && !ratingKey) {
-    return JSON.stringify({ error: "Movie or show title, or ratingKey, is required." });
+    return JSON.stringify({ ok: false, deleted: false, error: "Movie or show title, or ratingKey, is required." });
   }
 
   const { url: plexBaseUrl, token: plexToken } = await getPlexConfig();
@@ -304,6 +304,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
     // If confirm is true but item could not be found anywhere
     if (!ratingKey && !radarrId && !sonarrId && !episodeFileId) {
       return JSON.stringify({
+        ok: false,
+        deleted: false,
         error: `Could not delete '${targetTitle}'. Media not found in Plex, Radarr, or Sonarr, or deletion rejected.`,
       });
     }
@@ -394,6 +396,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
 
     if (!deletedFromPlex && !deletedFromRadarr && !deletedFromSonarr) {
       return JSON.stringify({
+        ok: false,
+        deleted: false,
         error: `Could not delete '${targetTitle}'. Media not found in Plex or Arr services, or deletion rejected.`,
       });
     }
@@ -415,6 +419,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
     });
   } catch (err: any) {
     return JSON.stringify({
+      ok: false,
+      deleted: false,
       error: "Failed to delete media from Plex/Arr stack",
       details: err?.message || String(err),
     });

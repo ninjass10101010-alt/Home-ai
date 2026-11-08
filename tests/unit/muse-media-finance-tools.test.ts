@@ -863,6 +863,57 @@ describe("Rubio Media Tools", () => {
     expect(deleteCalls.some((c) => c.includes("/api/v3/episodefile/777"))).toBe(true);
   });
 
+  it("delete_plex_media returns deleted: false with error string on any failure", async () => {
+    // 1. Failure when item not found in Plex or Arr
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ MediaContainer: { Metadata: [] } }),
+    } as any);
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    const notFoundRaw = await tool!.handler({
+      title: "Nonexistent Movie 12345",
+      confirm: true,
+    });
+    const notFoundRes = JSON.parse(notFoundRaw);
+
+    expect(notFoundRes.ok).toBe(false);
+    expect(notFoundRes.deleted).toBe(false);
+    expect(typeof notFoundRes.error).toBe("string");
+    expect(notFoundRes.error).toContain("Could not delete");
+
+    // 2. Failure when Plex rejection occurs
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        return { ok: false, status: 403 } as any;
+      }
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [{ title: "Protected Movie", type: "movie", ratingKey: "999" }],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const rejectedRaw = await tool!.handler({
+      title: "Protected Movie",
+      confirm: true,
+    });
+    const rejectedRes = JSON.parse(rejectedRaw);
+
+    expect(rejectedRes.ok).toBe(false);
+    expect(rejectedRes.deleted).toBe(false);
+    expect(typeof rejectedRes.error).toBe("string");
+  });
+
   it("mark_plex_media_watched toggles scrobble status", async () => {
     const endpointsCalled: string[] = [];
 
