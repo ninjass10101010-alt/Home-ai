@@ -652,6 +652,182 @@ describe("Rubio Media Tools", () => {
     expect(deleteCalls.some((c) => c.includes("/api/v3/movie/55?deleteFiles=true"))).toBe(true);
   });
 
+  it("delete_plex_media previews movie target and requires confirm: true", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Inception",
+                  year: 2010,
+                  type: "movie",
+                  ratingKey: "808",
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    const raw = await tool!.handler({ title: "Inception" });
+    const res = JSON.parse(raw);
+
+    expect(res.error).toBe("confirmation_required");
+    expect(res.status).toBe("confirmation_required");
+    expect(res.target.title).toBe("Inception");
+    expect(res.target.year).toBe(2010);
+    expect(res.target.mediaType).toBe("movie");
+    expect(res.target.ratingKey).toBe("808");
+    expect(res.message).toContain("confirm: true");
+  });
+
+  it("delete_plex_media deletes TV show from Plex and Sonarr when confirmed", async () => {
+    const deleteCalls: string[] = [];
+
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        deleteCalls.push(url);
+        return { ok: true, status: 200 } as any;
+      }
+
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Breaking Bad",
+                  year: 2008,
+                  type: "show",
+                  ratingKey: "909",
+                  librarySectionID: "2",
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+
+      if (url.includes("/api/v3/series")) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 12,
+              title: "Breaking Bad",
+              year: 2008,
+            },
+          ],
+        } as any;
+      }
+
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    const raw = await tool!.handler({ title: "Breaking Bad", confirm: true });
+    const res = JSON.parse(raw);
+
+    expect(res.ok).toBe(true);
+    expect(res.deleted).toBe(true);
+    expect(res.mediaType).toBe("show");
+    expect(res.deletedFromPlex).toBe(true);
+    expect(res.deletedFromArr).toBe(true);
+    expect(res.deletedFromSonarr).toBe(true);
+    expect(res.filesDeleted).toBe(true);
+
+    expect(deleteCalls.some((c) => c.includes("/library/metadata/909"))).toBe(true);
+    expect(deleteCalls.some((c) => c.includes("/api/v3/series/12?deleteFiles=true"))).toBe(true);
+  });
+
+  it("delete_plex_media deletes episode file from Sonarr and Plex when confirmed", async () => {
+    const deleteCalls: string[] = [];
+
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        deleteCalls.push(url);
+        return { ok: true, status: 200 } as any;
+      }
+
+      if (url.includes("/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Ozymandias",
+                  type: "episode",
+                  grandparentTitle: "Breaking Bad",
+                  parentIndex: 5,
+                  index: 14,
+                  ratingKey: "914",
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+
+      if (url.includes("/api/v3/series")) {
+        return {
+          ok: true,
+          json: async () => [{ id: 12, title: "Breaking Bad" }],
+        } as any;
+      }
+
+      if (url.includes("/api/v3/episode?seriesId=12")) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 101,
+              seasonNumber: 5,
+              episodeNumber: 14,
+              episodeFileId: 777,
+            },
+          ],
+        } as any;
+      }
+
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    const raw = await tool!.handler({
+      title: "Ozymandias",
+      mediaType: "episode",
+      seasonNumber: 5,
+      episodeNumber: 14,
+      confirm: true,
+    });
+    const res = JSON.parse(raw);
+
+    expect(res.ok).toBe(true);
+    expect(res.deleted).toBe(true);
+    expect(res.mediaType).toBe("episode");
+    expect(res.deletedFromPlex).toBe(true);
+    expect(res.deletedFromSonarr).toBe(true);
+
+    expect(deleteCalls.some((c) => c.includes("/library/metadata/914"))).toBe(true);
+    expect(deleteCalls.some((c) => c.includes("/api/v3/episodefile/777"))).toBe(true);
+  });
+
   it("mark_plex_media_watched toggles scrobble status", async () => {
     const endpointsCalled: string[] = [];
 

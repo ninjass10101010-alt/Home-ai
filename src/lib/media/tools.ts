@@ -88,6 +88,333 @@ async function getQbittorrentCookie(): Promise<string | null> {
   }
 }
 
+interface PlexMediaDeleteParams {
+  title?: string;
+  mediaType?: "movie" | "show" | "episode" | "season" | string;
+  ratingKey?: string;
+  year?: number;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  deleteFiles?: boolean;
+  confirm?: boolean;
+  toolName?: string;
+}
+
+async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<string> {
+  const toolName = args.toolName || "delete_plex_media";
+  const title = String(args.title || "").trim();
+  const confirm = Boolean(args.confirm);
+  const deleteFiles = args.deleteFiles !== false;
+  let ratingKey = String(args.ratingKey || "").trim();
+  let requestedType = args.mediaType ? String(args.mediaType).toLowerCase() : undefined;
+  const requestedYear = typeof args.year === "number" ? args.year : undefined;
+  const seasonNum = typeof args.seasonNumber === "number" ? args.seasonNumber : undefined;
+  const episodeNum = typeof args.episodeNumber === "number" ? args.episodeNumber : undefined;
+
+  if (!title && !ratingKey) {
+    return JSON.stringify({ error: "Movie or show title, or ratingKey, is required." });
+  }
+
+  const { url: plexBaseUrl, token: plexToken } = await getPlexConfig();
+  const { url: radarrBaseUrl, apiKey: radarrKey } = await getRadarrConfig();
+  const { url: sonarrBaseUrl, apiKey: sonarrKey } = await getSonarrConfig();
+
+  const pBase = plexBaseUrl.replace(/\/+$/, "");
+  const rBase = radarrBaseUrl ? radarrBaseUrl.replace(/\/+$/, "") : "";
+  const sBase = sonarrBaseUrl ? sonarrBaseUrl.replace(/\/+$/, "") : "";
+
+  let targetTitle = title;
+  let targetYear: number | undefined = requestedYear;
+  let resolvedType: string = requestedType || "movie";
+  let librarySectionID: string | undefined;
+  let seriesTitle: string | undefined;
+  let parentIndex: number | undefined = seasonNum;
+  let episodeIndex: number | undefined = episodeNum;
+  let radarrId: number | undefined;
+  let sonarrId: number | undefined;
+  let episodeFileId: number | undefined;
+
+  try {
+    // 1. Locate in Plex
+    if (plexToken) {
+      if (ratingKey) {
+        try {
+          const metaUrl = `${pBase}/library/metadata/${ratingKey}?X-Plex-Token=${plexToken}`;
+          const mRes = await fetch(metaUrl, {
+            headers: { Accept: "application/json", "X-Plex-Token": plexToken },
+            signal: AbortSignal.timeout(6000),
+          });
+          if (mRes.ok) {
+            const mData: any = await mRes.json();
+            const item = mData.MediaContainer?.Metadata?.[0];
+            if (item) {
+              targetTitle = item.title;
+              resolvedType = item.type || resolvedType;
+              targetYear = item.year || targetYear;
+              librarySectionID = item.librarySectionID ? String(item.librarySectionID) : undefined;
+              seriesTitle = item.grandparentTitle || item.parentTitle;
+              parentIndex = item.parentIndex ?? parentIndex;
+              episodeIndex = item.index ?? episodeIndex;
+            }
+          }
+        } catch {
+          // fallback
+        }
+      } else if (title) {
+        try {
+          const searchUrl = `${pBase}/search?query=${encodeURIComponent(title)}&X-Plex-Token=${plexToken}`;
+          const sRes = await fetch(searchUrl, {
+            headers: { Accept: "application/json", "X-Plex-Token": plexToken },
+            signal: AbortSignal.timeout(6000),
+          });
+          if (sRes.ok) {
+            const sData: any = await sRes.json();
+            const items: any[] = sData.MediaContainer?.Metadata || [];
+            let candidates = items;
+            if (requestedType) {
+              candidates = candidates.filter((m) => m.type === requestedType);
+            }
+            if (requestedYear) {
+              candidates = candidates.filter((m) => m.year === requestedYear);
+            }
+            if (seasonNum !== undefined && episodeNum !== undefined) {
+              const epMatch = candidates.find((m) => m.type === "episode" && m.parentIndex === seasonNum && m.index === episodeNum);
+              if (epMatch) candidates = [epMatch];
+            }
+
+            const match =
+              candidates.find((m) => m.title.toLowerCase() === title.toLowerCase()) ||
+              candidates.find((m) => m.title.toLowerCase().includes(title.toLowerCase())) ||
+              candidates[0];
+
+            if (match) {
+              ratingKey = String(match.ratingKey || match.key?.split("/").pop() || "");
+              targetTitle = match.title;
+              targetYear = match.year || targetYear;
+              resolvedType = match.type || resolvedType;
+              librarySectionID = match.librarySectionID ? String(match.librarySectionID) : undefined;
+              seriesTitle = match.grandparentTitle || match.parentTitle;
+              parentIndex = match.parentIndex ?? parentIndex;
+              episodeIndex = match.index ?? episodeIndex;
+            }
+          }
+        } catch {
+          // fallback
+        }
+      }
+    }
+
+    // 2. Locate in Radarr / Sonarr
+    if ((resolvedType === "movie" || !requestedType) && radarrKey && rBase) {
+      try {
+        const lookupUrl = `${rBase}/api/v3/movie`;
+        const rListRes = await fetch(lookupUrl, {
+          headers: { "X-Api-Key": radarrKey, Accept: "application/json" },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (rListRes.ok) {
+          const movies: any[] = await rListRes.json();
+          const rMatch = movies.find((m) => {
+            const matchesTitle = m.title.toLowerCase() === targetTitle.toLowerCase();
+            const matchesYear = targetYear ? m.year === targetYear : true;
+            return matchesTitle && matchesYear;
+          }) || movies.find((m) => m.title.toLowerCase().includes(targetTitle.toLowerCase()));
+          if (rMatch && rMatch.id) {
+            radarrId = rMatch.id;
+            if (!targetTitle) targetTitle = rMatch.title;
+            if (!targetYear) targetYear = rMatch.year;
+            resolvedType = "movie";
+          }
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    if ((resolvedType === "show" || resolvedType === "episode" || (!radarrId && !ratingKey)) && sonarrKey && sBase) {
+      try {
+        const lookupUrl = `${sBase}/api/v3/series`;
+        const sListRes = await fetch(lookupUrl, {
+          headers: { "X-Api-Key": sonarrKey, Accept: "application/json" },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (sListRes.ok) {
+          const seriesList: any[] = await sListRes.json();
+          const showSearch = seriesTitle || targetTitle;
+          const sMatch = seriesList.find((s) => s.title.toLowerCase() === showSearch.toLowerCase()) ||
+            seriesList.find((s) => s.title.toLowerCase().includes(showSearch.toLowerCase()));
+          if (sMatch && sMatch.id) {
+            sonarrId = sMatch.id;
+            if (resolvedType === "show" || !requestedType) {
+              resolvedType = "show";
+              targetTitle = sMatch.title;
+              targetYear = sMatch.year;
+            } else if (resolvedType === "episode" && parentIndex !== undefined && episodeIndex !== undefined) {
+              const epUrl = `${sBase}/api/v3/episode?seriesId=${sMatch.id}&seasonNumber=${parentIndex}`;
+              const epRes = await fetch(epUrl, {
+                headers: { "X-Api-Key": sonarrKey, Accept: "application/json" },
+                signal: AbortSignal.timeout(6000),
+              });
+              if (epRes.ok) {
+                const episodes: any[] = await epRes.json();
+                const epMatch = episodes.find((e) => e.episodeNumber === episodeIndex);
+                if (epMatch && epMatch.episodeFileId) {
+                  episodeFileId = epMatch.episodeFileId;
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // 3. Confirm-first Guard
+    if (!confirm) {
+      const typeLabel = resolvedType === "show" ? "TV show" : resolvedType === "episode" ? "episode" : "movie";
+      const episodeDetail = resolvedType === "episode"
+        ? ` (S${parentIndex}E${episodeIndex}${seriesTitle ? ` of '${seriesTitle}'` : ""})`
+        : "";
+      return JSON.stringify({
+        error: "confirmation_required",
+        status: "confirmation_required",
+        confirmationRequired: true,
+        target: {
+          title: targetTitle,
+          mediaType: resolvedType,
+          year: targetYear,
+          ratingKey: ratingKey || undefined,
+          series: seriesTitle || undefined,
+          season: parentIndex || undefined,
+          episode: episodeIndex || undefined,
+          inPlex: Boolean(ratingKey),
+          inArr: Boolean(radarrId || sonarrId),
+        },
+        message: `Deleting '${targetTitle}' will permanently delete media files from disk. Call ${toolName} again with confirm: true to proceed. Found ${typeLabel} '${targetTitle}'${episodeDetail}${targetYear ? ` (${targetYear})` : ""}.`,
+      });
+    }
+
+    // If confirm is true but item could not be found anywhere
+    if (!ratingKey && !radarrId && !sonarrId && !episodeFileId) {
+      return JSON.stringify({
+        error: `Could not delete '${targetTitle}'. Media not found in Plex, Radarr, or Sonarr, or deletion rejected.`,
+      });
+    }
+
+    // 4. Execution (confirm: true)
+    let deletedFromPlex = false;
+    let deletedFromRadarr = false;
+    let deletedFromSonarr = false;
+
+    // Delete from Plex
+    if (plexToken && ratingKey) {
+      try {
+        const delUrl = `${pBase}/library/metadata/${ratingKey}?X-Plex-Token=${plexToken}`;
+        const pDelRes = await fetch(delUrl, {
+          method: "DELETE",
+          headers: { "X-Plex-Token": plexToken },
+          signal: AbortSignal.timeout(8000),
+        });
+        deletedFromPlex = pDelRes.ok || pDelRes.status === 200 || pDelRes.status === 204;
+        if (librarySectionID) {
+          fetch(`${pBase}/library/sections/${librarySectionID}/emptyTrash?X-Plex-Token=${plexToken}`, {
+            method: "PUT",
+            headers: { "X-Plex-Token": plexToken },
+          }).catch(() => {});
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // Delete from Radarr (movie)
+    if (resolvedType === "movie" && radarrKey && rBase) {
+      try {
+        if (!radarrId) {
+          const lookupUrl = `${rBase}/api/v3/movie`;
+          const rListRes = await fetch(lookupUrl, {
+            headers: { "X-Api-Key": radarrKey, Accept: "application/json" },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (rListRes.ok) {
+            const movies: any[] = await rListRes.json();
+            const rMatch = movies.find((m) => {
+              const matchesTitle = m.title.toLowerCase() === targetTitle.toLowerCase();
+              const matchesYear = targetYear ? m.year === targetYear : true;
+              return matchesTitle && matchesYear;
+            }) || movies.find((m) => m.title.toLowerCase().includes(targetTitle.toLowerCase()));
+            if (rMatch) radarrId = rMatch.id;
+          }
+        }
+        if (radarrId) {
+          const delRadarrUrl = `${rBase}/api/v3/movie/${radarrId}?deleteFiles=${deleteFiles}&addImportExclusion=false`;
+          const rDelRes = await fetch(delRadarrUrl, {
+            method: "DELETE",
+            headers: { "X-Api-Key": radarrKey },
+            signal: AbortSignal.timeout(8000),
+          });
+          deletedFromRadarr = rDelRes.ok || rDelRes.status === 200 || rDelRes.status === 204;
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // Delete from Sonarr (show or episode)
+    if ((resolvedType === "show" || resolvedType === "episode") && sonarrKey && sBase) {
+      try {
+        if (resolvedType === "show" && sonarrId) {
+          const delSonarrUrl = `${sBase}/api/v3/series/${sonarrId}?deleteFiles=${deleteFiles}&addImportExclusion=false`;
+          const sDelRes = await fetch(delSonarrUrl, {
+            method: "DELETE",
+            headers: { "X-Api-Key": sonarrKey },
+            signal: AbortSignal.timeout(8000),
+          });
+          deletedFromSonarr = sDelRes.ok || sDelRes.status === 200 || sDelRes.status === 204;
+        } else if (resolvedType === "episode" && episodeFileId) {
+          const delEpUrl = `${sBase}/api/v3/episodefile/${episodeFileId}`;
+          const epDelRes = await fetch(delEpUrl, {
+            method: "DELETE",
+            headers: { "X-Api-Key": sonarrKey },
+            signal: AbortSignal.timeout(8000),
+          });
+          deletedFromSonarr = epDelRes.ok || epDelRes.status === 200 || epDelRes.status === 204;
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    if (!deletedFromPlex && !deletedFromRadarr && !deletedFromSonarr) {
+      return JSON.stringify({
+        error: `Could not delete '${targetTitle}'. Media not found in Plex or Arr services, or deletion rejected.`,
+      });
+    }
+
+    const typeLabel = resolvedType === "show" ? "TV show" : resolvedType === "episode" ? "episode" : "movie";
+    return JSON.stringify({
+      ok: true,
+      deleted: true,
+      mediaType: resolvedType,
+      title: targetTitle,
+      year: targetYear,
+      ratingKey: ratingKey || undefined,
+      deletedFromPlex,
+      deletedFromArr: deletedFromRadarr || deletedFromSonarr,
+      deletedFromRadarr: deletedFromRadarr || undefined,
+      deletedFromSonarr: deletedFromSonarr || undefined,
+      filesDeleted: deleteFiles,
+      message: `Successfully deleted ${typeLabel} '${targetTitle}' from media library and disk.`,
+    });
+  } catch (err: any) {
+    return JSON.stringify({
+      error: "Failed to delete media from Plex/Arr stack",
+      details: err?.message || String(err),
+    });
+  }
+}
+
 export const MEDIA_TOOLS: Tool[] = [
   {
     definition: {
@@ -1152,6 +1479,56 @@ export const MEDIA_TOOLS: Tool[] = [
       }
     },
   },
+
+  {
+    definition: {
+      name: "delete_plex_media",
+      description:
+        "Permanently delete a movie, TV show, or episode from Plex and disk storage (Radarr/Sonarr) with a confirm-first guard. When called without confirm: true, it searches and previews the exact target media (title, year, type, season/episode) and requires user confirmation. When confirmed with confirm: true, it purges media files from disk and removes the item from Plex.",
+      parameters: {
+        type: "object",
+        required: ["title"],
+        properties: {
+          title: {
+            type: "string",
+            description: "Title of the movie, TV show, or episode to delete (e.g. 'Gladiator', 'Breaking Bad', 'Severance').",
+          },
+          confirm: {
+            type: "boolean",
+            description: "Must be set to true to confirm permanent deletion of the media and disk files. If false or omitted, the tool previews the target and returns a confirmation request.",
+          },
+          mediaType: {
+            type: "string",
+            enum: ["movie", "show", "episode"],
+            description: "Type of media ('movie', 'show', or 'episode'). If omitted, automatically detected from Plex and Arr libraries.",
+          },
+          ratingKey: {
+            type: "string",
+            description: "Optional Plex ratingKey if known to ensure exact match.",
+          },
+          year: {
+            type: "number",
+            description: "Optional release year to disambiguate identically named titles.",
+          },
+          seasonNumber: {
+            type: "number",
+            description: "Optional season number if deleting a specific TV episode.",
+          },
+          episodeNumber: {
+            type: "number",
+            description: "Optional episode number if deleting a specific TV episode.",
+          },
+          deleteFiles: {
+            type: "boolean",
+            description: "Whether to delete physical media files from disk. Defaults to true.",
+          },
+        },
+      },
+    },
+    handler: async (args) => {
+      return executePlexMediaDelete({ ...args, toolName: "delete_plex_media" });
+    },
+  },
   {
     definition: {
       name: "delete_plex_movie",
@@ -1181,117 +1558,7 @@ export const MEDIA_TOOLS: Tool[] = [
       },
     },
     handler: async (args) => {
-      const title = String(args.title || "").trim();
-      const confirm = Boolean(args.confirm);
-      const deleteFiles = args.deleteFiles !== false;
-      let ratingKey = String(args.ratingKey || "").trim();
-
-      if (!title && !ratingKey) {
-        return JSON.stringify({ error: "Movie title or ratingKey is required." });
-      }
-
-      if (!confirm) {
-        return JSON.stringify({
-          error: "confirmation_required",
-          message: `Deleting '${title || ratingKey}' will permanently delete media files from disk. Call delete_plex_movie again with confirm: true to proceed.`,
-        });
-      }
-
-      const { url: plexBaseUrl, token: plexToken } = await getPlexConfig();
-      const { url: radarrBaseUrl, apiKey: radarrKey } = await getRadarrConfig();
-
-      let targetTitle = title;
-      let targetYear: number | undefined;
-      let deletedFromPlex = false;
-      let deletedFromRadarr = false;
-
-      try {
-        const pBase = plexBaseUrl.replace(/\/+$/, "");
-
-        // 1. Locate movie in Plex
-        if (plexToken) {
-          if (!ratingKey && title) {
-            const searchUrl = `${pBase}/search?query=${encodeURIComponent(title)}&X-Plex-Token=${plexToken}`;
-            const sRes = await fetch(searchUrl, {
-              headers: { Accept: "application/json", "X-Plex-Token": plexToken },
-              signal: AbortSignal.timeout(8000),
-            });
-            if (sRes.ok) {
-              const sData: any = await sRes.json();
-              const items: any[] = sData.MediaContainer?.Metadata || [];
-              const match = items.find((m) => m.type === "movie" && m.title.toLowerCase().includes(title.toLowerCase())) || items.find((m) => m.type === "movie");
-              if (match) {
-                ratingKey = String(match.ratingKey || match.key?.split("/").pop() || "");
-                targetTitle = match.title;
-                targetYear = match.year;
-              }
-            }
-          }
-
-          // Delete from Plex
-          if (ratingKey) {
-            const delUrl = `${pBase}/library/metadata/${ratingKey}?X-Plex-Token=${plexToken}`;
-            const pDelRes = await fetch(delUrl, {
-              method: "DELETE",
-              headers: { "X-Plex-Token": plexToken },
-              signal: AbortSignal.timeout(8000),
-            });
-            deletedFromPlex = pDelRes.ok || pDelRes.status === 200 || pDelRes.status === 204;
-          }
-        }
-
-        // 2. Locate and delete from Radarr (to purge disk files and stop re-downloading)
-        if (radarrKey && radarrBaseUrl) {
-          const rBase = radarrBaseUrl.replace(/\/+$/, "");
-          const lookupUrl = `${rBase}/api/v3/movie`;
-          const rListRes = await fetch(lookupUrl, {
-            headers: { "X-Api-Key": radarrKey, Accept: "application/json" },
-            signal: AbortSignal.timeout(8000),
-          });
-
-          if (rListRes.ok) {
-            const movies: any[] = await rListRes.json();
-            const rMatch = movies.find((m) => {
-              const matchesTitle = m.title.toLowerCase() === targetTitle.toLowerCase();
-              const matchesYear = targetYear ? m.year === targetYear : true;
-              return matchesTitle && matchesYear;
-            }) || movies.find((m) => m.title.toLowerCase().includes(targetTitle.toLowerCase()));
-
-            if (rMatch && rMatch.id) {
-              const delRadarrUrl = `${rBase}/api/v3/movie/${rMatch.id}?deleteFiles=${deleteFiles}&addImportExclusion=false`;
-              const rDelRes = await fetch(delRadarrUrl, {
-                method: "DELETE",
-                headers: { "X-Api-Key": radarrKey },
-                signal: AbortSignal.timeout(8000),
-              });
-              deletedFromRadarr = rDelRes.ok || rDelRes.status === 200 || rDelRes.status === 204;
-            }
-          }
-        }
-
-        if (!deletedFromPlex && !deletedFromRadarr) {
-          return JSON.stringify({
-            error: `Could not delete '${targetTitle}'. Movie not found in Plex or Radarr, or deletion rejected.`,
-          });
-        }
-
-        return JSON.stringify({
-          ok: true,
-          deleted: true,
-          title: targetTitle,
-          year: targetYear,
-          ratingKey: ratingKey || undefined,
-          deletedFromPlex,
-          deletedFromRadarr,
-          filesDeleted: deleteFiles,
-          message: `Successfully deleted '${targetTitle}' from media library and disk.`,
-        });
-      } catch (err: any) {
-        return JSON.stringify({
-          error: "Failed to delete movie from Plex/Radarr",
-          details: err?.message || String(err),
-        });
-      }
+      return executePlexMediaDelete({ ...args, mediaType: "movie", toolName: "delete_plex_movie" });
     },
   },
   {
