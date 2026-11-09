@@ -1102,6 +1102,70 @@ describe("Rubio Media Tools", () => {
     expect(deleteCount).toBe(1); // Deleted on explicit second call
   });
 
+  it("delete_plex_media rejects title or year mismatch when ratingKey is provided, deleting nothing", async () => {
+    let deleteCalls = 0;
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        deleteCalls++;
+        return { ok: true } as any;
+      }
+      if (url.includes("/library/metadata/202")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Interstellar",
+                  year: 2014,
+                  type: "movie",
+                  ratingKey: "202",
+                  Media: [{ Part: [{ file: "/movies/Interstellar.mkv", size: 25000000000 }] }],
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    // 1. Title mismatch with confirm: true deletes nothing
+    const mismatchRaw = await tool!.handler({
+      title: "The Matrix",
+      ratingKey: "202",
+      confirm: true,
+    });
+    const mismatchRes = JSON.parse(mismatchRaw);
+    expect(mismatchRes.ok).toBe(false);
+    expect(mismatchRes.deleted).toBe(false);
+    expect(mismatchRes.fileDeleted).toBe(false);
+    expect(mismatchRes.removedFromLibrary).toBe(false);
+    expect(mismatchRes.error).toContain("Title mismatch");
+    expect(mismatchRes.error).toContain("The Matrix");
+    expect(mismatchRes.error).toContain("Interstellar");
+    expect(deleteCalls).toBe(0);
+
+    // 2. Year mismatch with confirm: true deletes nothing
+    const yearMismatchRaw = await tool!.handler({
+      title: "Interstellar",
+      year: 1999,
+      ratingKey: "202",
+      confirm: true,
+    });
+    const yearMismatchRes = JSON.parse(yearMismatchRaw);
+    expect(yearMismatchRes.ok).toBe(false);
+    expect(yearMismatchRes.deleted).toBe(false);
+    expect(yearMismatchRes.fileDeleted).toBe(false);
+    expect(yearMismatchRes.removedFromLibrary).toBe(false);
+    expect(yearMismatchRes.error).toContain("Year mismatch");
+    expect(deleteCalls).toBe(0);
+  });
+
   it("mark_plex_media_watched toggles scrobble status", async () => {
     const endpointsCalled: string[] = [];
 

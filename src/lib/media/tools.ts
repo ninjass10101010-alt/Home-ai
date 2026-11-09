@@ -153,6 +153,38 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
             const mData: any = await mRes.json();
             const item = mData.MediaContainer?.Metadata?.[0];
             if (item) {
+              if (title && item.title) {
+                const normInput = title.toLowerCase().replace(/[^a-z0-9]/g, "");
+                const normItem = item.title.toLowerCase().replace(/[^a-z0-9]/g, "");
+                if (normInput && normItem && !normItem.includes(normInput) && !normInput.includes(normItem)) {
+                  return JSON.stringify({
+                    ok: false,
+                    count: 0,
+                    deleted: false,
+                    fileDeleted: false,
+                    filesDeleted: false,
+                    deleteFile: false,
+                    deleteFiles: false,
+                    removedFromLibrary: false,
+                    matches: [],
+                    error: `Title mismatch: provided title '${title}' does not match Plex item '${item.title}' (ratingKey: ${ratingKey}). Deletion rejected.`,
+                  });
+                }
+              }
+              if (requestedYear && item.year && Math.abs(requestedYear - item.year) > 1) {
+                return JSON.stringify({
+                  ok: false,
+                  count: 0,
+                  deleted: false,
+                  fileDeleted: false,
+                  filesDeleted: false,
+                  deleteFile: false,
+                  deleteFiles: false,
+                  removedFromLibrary: false,
+                  matches: [],
+                  error: `Year mismatch: provided year ${requestedYear} does not match Plex item '${item.title}' (${item.year}) [ratingKey: ${ratingKey}]. Deletion rejected.`,
+                });
+              }
               targetTitle = item.title;
               resolvedType = item.type || resolvedType;
               targetYear = item.year || targetYear;
