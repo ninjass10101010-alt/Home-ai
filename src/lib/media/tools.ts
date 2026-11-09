@@ -92,10 +92,12 @@ interface PlexMediaDeleteParams {
   title?: string;
   query?: string;
   mediaType?: "movie" | "show" | "episode" | "season" | string;
+  type?: string;
   ratingKey?: string;
   year?: number;
   seasonNumber?: number;
   episodeNumber?: number;
+  library?: string;
   deleteFiles?: boolean;
   deleteFile?: boolean;
   confirm?: boolean;
@@ -108,10 +110,11 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
   const confirm = Boolean(args.confirm);
   const deleteFiles = args.deleteFiles !== false && args.deleteFile !== false;
   let ratingKey = String(args.ratingKey || "").trim();
-  let requestedType = args.mediaType ? String(args.mediaType).toLowerCase() : undefined;
+  let requestedType = (args.mediaType || args.type) ? String(args.mediaType || args.type).toLowerCase() : undefined;
   const requestedYear = typeof args.year === "number" ? args.year : undefined;
   const seasonNum = typeof args.seasonNumber === "number" ? args.seasonNumber : undefined;
   const episodeNum = typeof args.episodeNumber === "number" ? args.episodeNumber : undefined;
+  const requestedLibrary = args.library ? String(args.library).trim() : undefined;
 
   if (!title && !ratingKey) {
     return JSON.stringify({ ok: false, deleted: false, fileDeleted: false, removedFromLibrary: false, error: "Movie or show title, or ratingKey, is required." });
@@ -129,6 +132,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
   let targetYear: number | undefined = requestedYear;
   let resolvedType: string = requestedType || "movie";
   let librarySectionID: string | undefined;
+  let libraryTitle: string | undefined = requestedLibrary;
   let seriesTitle: string | undefined;
   let parentIndex: number | undefined = seasonNum;
   let episodeIndex: number | undefined = episodeNum;
@@ -189,6 +193,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
               resolvedType = item.type || resolvedType;
               targetYear = item.year || targetYear;
               librarySectionID = item.librarySectionID ? String(item.librarySectionID) : undefined;
+              if (item.librarySectionTitle) libraryTitle = String(item.librarySectionTitle);
               seriesTitle = item.grandparentTitle || item.parentTitle;
               parentIndex = item.parentIndex ?? parentIndex;
               episodeIndex = item.index ?? episodeIndex;
@@ -212,6 +217,13 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
             const sData: any = await sRes.json();
             const items: any[] = sData.MediaContainer?.Metadata || [];
             let candidates = items;
+            if (requestedLibrary) {
+              candidates = candidates.filter(
+                (m) =>
+                  String(m.librarySectionTitle || "").toLowerCase() === requestedLibrary.toLowerCase() ||
+                  String(m.librarySectionID || "") === requestedLibrary
+              );
+            }
             if (requestedType) {
               candidates = candidates.filter((m) => m.type === requestedType);
             }
@@ -289,6 +301,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
               targetYear = match.year || targetYear;
               resolvedType = match.type || resolvedType;
               librarySectionID = match.librarySectionID ? String(match.librarySectionID) : undefined;
+              if (match.librarySectionTitle) libraryTitle = String(match.librarySectionTitle);
               seriesTitle = match.grandparentTitle || match.parentTitle;
               parentIndex = match.parentIndex ?? parentIndex;
               episodeIndex = match.index ?? episodeIndex;
@@ -308,6 +321,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
                     const mData: any = await mRes.json();
                     const fullItem = mData.MediaContainer?.Metadata?.[0];
                     if (fullItem) {
+                      if (fullItem.librarySectionTitle) libraryTitle = String(fullItem.librarySectionTitle);
                       if (typeof fullItem.viewCount === "number") viewCount = fullItem.viewCount;
                       const fPart = fullItem.Media?.[0]?.Part?.[0];
                       if (fPart?.file) filePath = fPart.file;
@@ -423,8 +437,10 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         : "";
       const targetObj = {
         title: targetTitle,
+        type: resolvedType,
         mediaType: resolvedType,
         year: targetYear,
+        library: libraryTitle || librarySectionID || undefined,
         ratingKey: ratingKey || undefined,
         filePath: filePath || undefined,
         fileSizeBytes: fileSizeBytes ?? undefined,
@@ -454,7 +470,9 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         query: title,
         title: targetTitle,
         year: targetYear,
+        type: resolvedType,
         mediaType: resolvedType,
+        library: libraryTitle || librarySectionID || undefined,
         ratingKey: ratingKey || undefined,
         filePath: filePath || undefined,
         fileSizeBytes: fileSizeBytes ?? undefined,
@@ -585,6 +603,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       deleteFile: deleteFiles,
       deleteFiles: deleteFiles,
       mediaType: resolvedType,
+      type: resolvedType,
+      library: libraryTitle || librarySectionID || undefined,
       title: targetTitle,
       year: targetYear,
       ratingKey: ratingKey || undefined,
@@ -595,8 +615,10 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       matches: [
         {
           title: targetTitle,
+          type: resolvedType,
           mediaType: resolvedType,
           year: targetYear,
+          library: libraryTitle || librarySectionID || undefined,
           ratingKey: ratingKey || undefined,
           deleted: true,
           removedFromLibrary: true,
@@ -1716,9 +1738,25 @@ export const MEDIA_TOOLS: Tool[] = [
             enum: ["movie", "show", "episode"],
             description: "Type of media ('movie', 'show', or 'episode'). If omitted, automatically detected from Plex and Arr libraries.",
           },
+          type: {
+            type: "string",
+            description: "Alias for mediaType ('movie', 'show', or 'episode').",
+          },
+          library: {
+            type: "string",
+            description: "Optional Plex library section title (e.g. 'Movies', 'TV Shows') to restrict search scope.",
+          },
           ratingKey: {
             type: "string",
             description: "Optional Plex ratingKey if known to ensure exact match.",
+          },
+          year: {
+            type: "number",
+            description: "Optional release year to disambiguate identically named titles.",
+          },
+          library: {
+            type: "string",
+            description: "Optional Plex library section title (e.g. 'Movies') to restrict search scope.",
           },
           year: {
             type: "number",
@@ -1772,9 +1810,25 @@ export const MEDIA_TOOLS: Tool[] = [
             enum: ["movie", "show", "episode"],
             description: "Type of media ('movie', 'show', or 'episode'). If omitted, automatically detected from Plex and Arr libraries.",
           },
+          type: {
+            type: "string",
+            description: "Alias for mediaType ('movie', 'show', or 'episode').",
+          },
+          library: {
+            type: "string",
+            description: "Optional Plex library section title (e.g. 'Movies', 'TV Shows') to restrict search scope.",
+          },
           ratingKey: {
             type: "string",
             description: "Optional Plex ratingKey if known to ensure exact match.",
+          },
+          year: {
+            type: "number",
+            description: "Optional release year to disambiguate identically named titles.",
+          },
+          library: {
+            type: "string",
+            description: "Optional Plex library section title (e.g. 'Movies') to restrict search scope.",
           },
           year: {
             type: "number",
@@ -1826,6 +1880,14 @@ export const MEDIA_TOOLS: Tool[] = [
           ratingKey: {
             type: "string",
             description: "Optional Plex ratingKey if known to ensure exact match.",
+          },
+          year: {
+            type: "number",
+            description: "Optional release year to disambiguate identically named titles.",
+          },
+          library: {
+            type: "string",
+            description: "Optional Plex library section title (e.g. 'Movies') to restrict search scope.",
           },
           deleteFiles: {
             type: "boolean",
