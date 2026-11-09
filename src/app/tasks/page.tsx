@@ -80,6 +80,7 @@ import StreakSaverBanner from "@/components/leaderboard/StreakSaverBanner";
 import CatchUpNudge from "@/components/leaderboard/CatchUpNudge";
 import TreasurePath from "@/components/leaderboard/TreasurePath";
 import FamilyGoal from "@/components/leaderboard/FamilyGoal";
+import KidsGoalsCard from "@/components/leaderboard/KidsGoalsCard";
 import AchievementWall from "@/components/leaderboard/AchievementWall";
 import HallOfFame from "@/components/leaderboard/HallOfFame";
 import TrophyCase from "@/components/leaderboard/TrophyCase";
@@ -3732,6 +3733,11 @@ export default function TasksPage() {
               entries={dynamicLeaderboard}
               daysUntilReset={daysUntilReset}
               myName={raceName}
+            />
+
+            <KidsGoalsCard
+              isParent={isLoggedIn && currentUser?.role === "parent"}
+              currentUserName={currentUser?.name}
             />
 
             {isLoggedIn && currentUser && (() => {

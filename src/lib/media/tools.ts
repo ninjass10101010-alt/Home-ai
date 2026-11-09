@@ -1763,14 +1763,6 @@ export const MEDIA_TOOLS: Tool[] = [
             type: "number",
             description: "Optional release year to disambiguate identically named titles.",
           },
-          library: {
-            type: "string",
-            description: "Optional Plex library section title (e.g. 'Movies') to restrict search scope.",
-          },
-          year: {
-            type: "number",
-            description: "Optional release year to disambiguate identically named titles.",
-          },
           seasonNumber: {
             type: "number",
             description: "Optional season number if deleting a specific TV episode.",
@@ -1830,14 +1822,6 @@ export const MEDIA_TOOLS: Tool[] = [
           ratingKey: {
             type: "string",
             description: "Optional Plex ratingKey if known to ensure exact match.",
-          },
-          year: {
-            type: "number",
-            description: "Optional release year to disambiguate identically named titles.",
-          },
-          library: {
-            type: "string",
-            description: "Optional Plex library section title (e.g. 'Movies') to restrict search scope.",
           },
           year: {
             type: "number",

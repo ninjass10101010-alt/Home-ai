@@ -73,6 +73,7 @@ import { ledgerKey, pointsFor, currentWeekPoints, unreachableCopy, verifyPinRemo
 import SpotifyWidget from "@/components/integrations/SpotifyWidget";
 import AllowanceWidget from "@/components/integrations/AllowanceWidget";
 import LearningWidget from "@/components/integrations/LearningWidget";
+import KidsGoalsCard from "@/components/leaderboard/KidsGoalsCard";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
 
@@ -1250,6 +1251,9 @@ export default function KidHome() {
 
           {/* Leaderboard */}
           <KidLeaderboard members={members} />
+
+          {/* 2-Week Goals */}
+          <KidsGoalsCard currentUserName={currentUser?.name} />
 
           {/* Spotify Music Widget */}
           <SpotifyWidget />

@@ -43,6 +43,7 @@ import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 import { FINANCE_TOOLS } from "@/lib/finance/tools";
 import { MEDIA_TOOLS } from "@/lib/media/tools";
+import { listActiveKidGoals, setKidGoal } from "@/lib/goals";
 // Live readers + shared helpers were extracted to ./consuela/live-reads
 // (Task 8, 2026-09-14). Imported here for the tool handlers below and
 // re-exported for back-compat — same functions, zero logic forked.
@@ -1737,6 +1738,64 @@ const TOOLS: Tool[] = [
         leaderboard: entries,
         champion: leader ? { name: leader.name, points: leader.points } : null,
       });
+    },
+  },
+  {
+    definition: {
+      name: "get_goals",
+      description: "Get the current 2-week cycle goals for the kids. Shows individual target points, dynamically derived current points, progress, status, and days remaining. Scales goals to age and custody schedules.",
+      parameters: {
+        type: "object",
+        properties: {
+          member: { type: "string", description: "Optional: filter by child's name (e.g. 'Emily', 'Bailey')" },
+        },
+      },
+    },
+    handler: async (args: any) => {
+      const goals = await listActiveKidGoals();
+      const filtered = args?.member
+        ? goals.filter((g) => g.member.toLowerCase().includes(String(args.member).toLowerCase()) || g.displayName.toLowerCase().includes(String(args.member).toLowerCase()))
+        : goals;
+      return summarize({
+        cycle_start: goals[0]?.cycleStart || "2026-11-09",
+        cycle_end: goals[0]?.cycleEnd || "2026-11-22",
+        days_remaining: goals[0]?.daysRemaining ?? 13,
+        note: "2-week cycle goals scaled to age and custody schedules. Points are derived live from completed tasks.",
+        goals: filtered.map((g) => ({
+          member: g.member,
+          target_points: g.targetPoints,
+          current_points: g.currentPoints,
+          progress_percent: g.progress,
+          status: g.status,
+          completed_at: g.completedAt,
+          bonus_points: g.bonusPoints,
+        })),
+      });
+    },
+  },
+  {
+    definition: {
+      name: "set_goal",
+      description: "Set or update a child's point target for the current 2-week goal cycle (Parent only).",
+      parameters: {
+        type: "object",
+        properties: {
+          member: { type: "string", description: "Child's name (e.g. 'Emily Garcia', 'Bailey')" },
+          target_points: { type: "number", description: "Target points for the 2-week cycle" },
+          reward: { type: "string", description: "Optional reward description" },
+        },
+        required: ["member", "target_points"],
+      },
+    },
+    handler: async (args: any) => {
+      const member = String(args.member || "").trim();
+      const targetPoints = Number(args.target_points);
+      if (!member || isNaN(targetPoints) || targetPoints < 1) {
+        return summarize({ ok: false, error: "A valid member name and target_points (>0) are required" });
+      }
+      const updated = await setKidGoal(member, targetPoints, { reward: args.reward });
+      if (!updated) return summarize({ ok: false, error: "Failed to update goal" });
+      return summarize({ ok: true, member, target_points: targetPoints, cycle_start: updated.cycleStart, cycle_end: updated.cycleEnd });
     },
   },
   {
@@ -3609,4 +3668,5 @@ const KID_TOOL_NAMES: ReadonlySet<string> = new Set([
   "get_hall_of_fame",
   "get_skill_tree",
   "get_time_capsules",
+  "get_goals",
 ]);

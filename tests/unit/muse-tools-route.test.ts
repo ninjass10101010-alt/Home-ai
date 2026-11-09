@@ -743,6 +743,35 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
 
     fetchSpy.mockRestore();
   });
+
+  it("get_goals and set_goal appear in openapi and execute properly via POST /api/muse/tool/[name]", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+
+    // 1. Verify OpenAPI spec carries the path and operationId
+    const { generateMuseOpenApi } = await import("@/lib/muse/openapi");
+    const spec = generateMuseOpenApi("http://nas.local:3000");
+    expect(spec.paths["/api/muse/tool/get_goals"]).toBeDefined();
+    expect(spec.paths["/api/muse/tool/get_goals"].post.operationId).toBe("get_goals");
+    expect(spec.paths["/api/muse/tool/set_goal"]).toBeDefined();
+    expect(spec.paths["/api/muse/tool/set_goal"].post.operationId).toBe("set_goal");
+
+    // 2. Call get_goals via Muse individual tool router
+    const res = await individualToolPOST(
+      museReq("/api/muse/tool/get_goals", {
+        token,
+        method: "POST",
+        body: {},
+      }),
+      { params: Promise.resolve({ name: "get_goals" }) }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.result.cycle_start).toBeDefined();
+    expect(body.result.cycle_end).toBeDefined();
+    expect(Array.isArray(body.result.goals)).toBe(true);
+  });
 });
 
 // Fold-in (Task 8 review): the middleware exempts the whole `/api/muse/`

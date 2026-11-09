@@ -52,6 +52,9 @@ const API_EXEMPT = [
   // ledger), /api/tasks/approve, /api/tasks/ledger and every points command
   // still need a live session or the member/parent PIN.
   "/api/tasks/family",
+  // 2-week individual kid goals: family-visible read surface on the leaderboard.
+  // The POST path gates writes internally to parent capability.
+  "/api/goals",
   // PIN-gated task actions. All routes self-authenticate: the member PIN is
   // the credential (verified server-side against PB, throttled against brute
   // force) — the same trust model as /api/auth/login. Without the exemption a

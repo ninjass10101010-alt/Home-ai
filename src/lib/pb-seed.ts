@@ -377,6 +377,20 @@ export const COLLECTIONS = [
     ],
   },
   {
+    name: "goals",
+    schema: [
+      { name: "member", type: "text", required: true },
+      { name: "cycleStart", type: "text", required: true },
+      { name: "cycleEnd", type: "text", required: true },
+      { name: "targetPoints", type: "number", required: true },
+      { name: "status", type: "text", required: false },
+      { name: "completedAt", type: "text", required: false },
+      { name: "bonusPoints", type: "number", required: false },
+      { name: "reward", type: "text", required: false },
+    ],
+    indexes: [],
+  },
+  {
     name: "hall_of_fame",
     schema: [
       { name: "member", type: "text", required: true },
