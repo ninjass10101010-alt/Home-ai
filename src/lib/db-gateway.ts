@@ -37,7 +37,7 @@ export function isCredentialKey(key: string): boolean {
     /pincode/i.test(key) ||
     /pin$/i.test(key) ||
     /(?:^|[_-])pin(?:$|[_-])/.test(key) ||
-    /secret|password|token/i.test(key)
+    /secret|password|token|apikey|api_key/i.test(key)
   );
 }
 

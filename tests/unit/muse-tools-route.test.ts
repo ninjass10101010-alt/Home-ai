@@ -432,6 +432,54 @@ describe("POST /api/muse/tool — deep redaction + truthful audit + scrub (revie
     expect(JSON.stringify(body)).not.toContain("hermes-agent-2");
   });
 
+  it("scrubs Plex tokens, API keys, and passwords from tool responses and audit logs", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    mocks.getTool.mockImplementationOnce(() => ({
+      definition: { name: "delete_plex_media", description: "", parameters: { type: "object", properties: {} } },
+      handler: async () => JSON.stringify({
+        ok: true,
+        result: {
+          message: "Request sent to http://192.168.0.28:32400/library/metadata/10934?X-Plex-Token=super-secret-plex-token-xyz with X-Api-Key=radarr-secret-key-123 and Authorization Bearer jwt-bearer-token-abc",
+        },
+      }),
+    }));
+
+    const res = await toolPOST(
+      museReq("/api/muse/tool", {
+        token,
+        method: "POST",
+        body: {
+          name: "delete_plex_media",
+          args: {
+            title: "Dune: Part Two",
+            apiKey: "radarr-secret-key-123",
+            plexToken: "super-secret-plex-token-xyz",
+            password: "super-secret-password-456",
+          },
+        },
+      })
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const bodyText = JSON.stringify(body);
+
+    // No credentials in response body
+    expect(bodyText).not.toContain("super-secret-plex-token-xyz");
+    expect(bodyText).not.toContain("radarr-secret-key-123");
+    expect(bodyText).not.toContain("jwt-bearer-token-abc");
+    expect(bodyText).toContain("X-Plex-Token=[redacted]");
+    expect(bodyText).toContain("Bearer [redacted]");
+
+    // No credentials in audit log
+    const logged = JSON.stringify(mocks.writeMuseLog.mock.calls);
+    expect(logged).not.toContain("radarr-secret-key-123");
+    expect(logged).not.toContain("super-secret-plex-token-xyz");
+    expect(logged).not.toContain("super-secret-password-456");
+    expect(logged).toContain("[redacted]");
+  });
+
   it("console.warns on auth + validation rejections without writing PocketBase (Task 8 rule)", async () => {
     makeRow();
     // auth-time rejection (no bearer)

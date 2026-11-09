@@ -40,6 +40,26 @@ export function scrubInternal(text: string): string {
   if (!text) return text;
   let out = text;
 
+  // Redact any active environment secrets if present in the text
+  const envSecrets = [
+    process.env.PLEX_TOKEN,
+    process.env.RADARR_API_KEY,
+    process.env.SONARR_API_KEY,
+    process.env.SESSION_SECRET,
+    process.env.ADMIN_SECRET,
+    process.env.CRON_SECRET,
+    process.env.POCKETBASE_ADMIN_PASSWORD,
+  ].filter((s): s is string => typeof s === "string" && s.trim().length >= 4);
+
+  for (const secret of envSecrets) {
+    out = out.replace(new RegExp(escapeRegExp(secret), "gi"), "[redacted]");
+  }
+
+  // Redact URL parameters and header credential patterns
+  out = out.replace(/\b(X-Plex-Token|X-Api-Key|apiKey|api_key|token|secret|password)=[^&\s"']+/gi, "$1=[redacted]");
+  out = out.replace(/(X-Plex-Token|X-Api-Key)\s*:\s*[^&\s,"']+/gi, "$1: [redacted]");
+  out = out.replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]");
+
   const literals = new Set(INTERNAL_HOST_LITERALS);
   const pbUrl = process.env.NEXT_PUBLIC_PB_URL;
   if (pbUrl) {
