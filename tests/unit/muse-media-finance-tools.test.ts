@@ -815,6 +815,102 @@ describe("Rubio Media Tools", () => {
     expect(res.target.ratingKey).toBe("10934");
   });
 
+  it("confirmed call with deleteFile: false removes from library and preserves file on disk; deleteFile: true removes file too", async () => {
+    const deleteCalls: string[] = [];
+
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      const method = (opts?.method || "GET").toUpperCase();
+      if (method === "DELETE") {
+        deleteCalls.push(url);
+        return { ok: true, status: 200 } as any;
+      }
+
+      if (url.includes("/library/metadata/10934")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Dune: Part Two",
+                  year: 2024,
+                  type: "movie",
+                  ratingKey: "10934",
+                  librarySectionID: "1",
+                  Media: [{ Part: [{ file: "/movies/Dune Part Two.mkv", size: 31418992412 }] }],
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+
+      if (url.includes("/api/v3/movie")) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 55,
+              title: "Dune: Part Two",
+              year: 2024,
+              movieFile: { path: "/movies/Dune Part Two.mkv", size: 31418992412 },
+            },
+          ],
+        } as any;
+      }
+
+      return { ok: false } as any;
+    });
+
+    const tool = getTool("delete_plex_media");
+    expect(tool).toBeDefined();
+
+    // 1. Confirmed call with deleteFile: false
+    const preserveRaw = await tool!.handler({
+      title: "Dune: Part Two",
+      ratingKey: "10934",
+      confirm: true,
+      deleteFile: false,
+    });
+    const preserveRes = JSON.parse(preserveRaw);
+
+    expect(preserveRes.ok).toBe(true);
+    expect(preserveRes.deleted).toBe(true);
+    expect(preserveRes.removedFromLibrary).toBe(true);
+    expect(preserveRes.fileDeleted).toBe(false);
+    expect(preserveRes.filesDeleted).toBe(false);
+    expect(preserveRes.deleteFile).toBe(false);
+    expect(preserveRes.deleteFiles).toBe(false);
+    expect(preserveRes.matches[0].fileDeleted).toBe(false);
+    expect(preserveRes.matches[0].removedFromLibrary).toBe(true);
+    expect(preserveRes.message).toContain("media files preserved on disk");
+    expect(deleteCalls.some((c) => c.includes("/library/metadata/10934"))).toBe(true);
+    expect(deleteCalls.some((c) => c.includes("/api/v3/movie/55?deleteFiles=false"))).toBe(true);
+
+    // 2. Confirmed call with deleteFile: true
+    deleteCalls.length = 0;
+    const purgeRaw = await tool!.handler({
+      title: "Dune: Part Two",
+      ratingKey: "10934",
+      confirm: true,
+      deleteFile: true,
+    });
+    const purgeRes = JSON.parse(purgeRaw);
+
+    expect(purgeRes.ok).toBe(true);
+    expect(purgeRes.deleted).toBe(true);
+    expect(purgeRes.removedFromLibrary).toBe(true);
+    expect(purgeRes.fileDeleted).toBe(true);
+    expect(purgeRes.filesDeleted).toBe(true);
+    expect(purgeRes.deleteFile).toBe(true);
+    expect(purgeRes.deleteFiles).toBe(true);
+    expect(purgeRes.matches[0].fileDeleted).toBe(true);
+    expect(purgeRes.matches[0].removedFromLibrary).toBe(true);
+    expect(purgeRes.message).toContain("from media library and disk");
+    expect(deleteCalls.some((c) => c.includes("/library/metadata/10934"))).toBe(true);
+    expect(deleteCalls.some((c) => c.includes("/api/v3/movie/55?deleteFiles=true"))).toBe(true);
+  });
+
 
   it("delete_plex_media deletes TV show from Plex and Sonarr when confirmed", async () => {
     const deleteCalls: string[] = [];

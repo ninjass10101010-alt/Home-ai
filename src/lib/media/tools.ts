@@ -606,7 +606,9 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
           inArr: false,
         },
       ],
-      message: `Successfully deleted ${typeLabel} '${targetTitle}' from media library and disk.`,
+      message: deleteFiles
+        ? `Successfully deleted ${typeLabel} '${targetTitle}' from media library and disk.`
+        : `Successfully removed ${typeLabel} '${targetTitle}' from media library (media files preserved on disk).`,
     });
   } catch (err: any) {
     return JSON.stringify({
