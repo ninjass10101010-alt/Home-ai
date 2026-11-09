@@ -328,6 +328,20 @@ These hold regardless of what the tool catalog appears to allow:
 - **Memory tools share the family memory bank.** Reads and writes go to the
   same PocketBase-backed memory the family sees. MUSE has no private memory
   store.
+- **Destructive operations require mandatory confirmation (Rubio / Media rule).**
+  Destructive by design, so the confirm-first guard is mandatory, not optional.
+  Muse's rule (Rubio skill): no destructive operations without confirmation,
+  especially deleting media. Tools that delete media (`delete_plex_media`,
+  `delete_plex_movie`) operate as strict two-step workflows:
+  - Step 1 (Preview): Any call without `confirm: true` returns target details
+    (`title`, `year`, `ratingKey`, `filePath`, `fileSizeBytes`, `viewCount`,
+    `deleted: false`, `fileDeleted: false`, `needsConfirm: true`), sending zero
+    delete requests to Plex or Radarr.
+  - Step 2 (Explicit Deletion): Physical deletion occurs only on an explicit
+    second call passing `confirm: true` and the target `ratingKey`.
+  - Exactly one item at a time: Single item deletion is strictly enforced. Ambiguous
+    or multi-candidate matches fail closed (`ok: false, deleted: false`) and reject
+    execution until disambiguated by exact `ratingKey` or `year`.
 - **Admin tools require the live settings toggle.** The admin tools are
   available only while the operator's MUSE admin toggle is **on**. The toggle
   is evaluated per request against the live row, so it applies immediately to

@@ -1618,7 +1618,7 @@ export const MEDIA_TOOLS: Tool[] = [
     definition: {
       name: "delete_plex_media",
       description:
-        "Permanently delete exactly one movie, TV show, or episode from Plex and disk storage (Radarr/Sonarr). Two-step operation: Step 1 (preview) searches and returns target details (ratingKey, filePath, fileSizeBytes, viewCount) and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true (and preferably ratingKey) to permanently delete only that single item.",
+        "Permanently delete exactly one movie, TV show, or episode from Plex and disk storage (Radarr/Sonarr). Destructive by design, so the confirm-first guard is mandatory, not optional. Muse's rule (Rubio skill): no destructive operations without confirmation, especially deleting media. Two-step operation: Step 1 (preview) searches and returns target details (ratingKey, filePath, fileSizeBytes, viewCount) and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true (and preferably ratingKey) to permanently delete only that single item.",
       parameters: {
         type: "object",
         required: ["title"],
@@ -1675,7 +1675,7 @@ export const MEDIA_TOOLS: Tool[] = [
     definition: {
       name: "delete_plex_movie",
       description:
-        "Permanently delete exactly one movie from the Plex library and Radarr. Two-step operation: Step 1 (preview) returns target details and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true to permanently delete only that single movie.",
+        "Permanently delete exactly one movie from the Plex library and Radarr. Destructive by design, so the confirm-first guard is mandatory, not optional. Muse's rule (Rubio skill): no destructive operations without confirmation, especially deleting media. Two-step operation: Step 1 (preview) returns target details and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true to permanently delete only that single movie.",
       parameters: {
         type: "object",
         required: ["title", "confirm"],
