@@ -201,11 +201,19 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
                 match = yearMatch;
               } else {
                 const list = exactMatches.map((m) => `'${m.title}' (${m.year || "unknown"}) [ratingKey: ${m.ratingKey}]`).join(", ");
+                const matchItems = exactMatches.map((m) => ({
+                  title: m.title,
+                  year: m.year,
+                  mediaType: m.type,
+                  ratingKey: String(m.ratingKey || m.key?.split("/").pop() || ""),
+                }));
                 return JSON.stringify({
                   ok: false,
+                  count: exactMatches.length,
                   deleted: false,
                   fileDeleted: false,
                   removedFromLibrary: false,
+                  matches: matchItems,
                   error: `Multiple matching items found for '${title}': ${list}. Specify ratingKey or year to target exactly one item.`,
                 });
               }
@@ -216,11 +224,19 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
               } else if (partialMatches.length > 1) {
                 if (confirm && !ratingKey) {
                   const list = partialMatches.slice(0, 5).map((m) => `'${m.title}' (${m.year || "unknown"}) [ratingKey: ${m.ratingKey}]`).join(", ");
+                  const matchItems = partialMatches.slice(0, 5).map((m) => ({
+                    title: m.title,
+                    year: m.year,
+                    mediaType: m.type,
+                    ratingKey: String(m.ratingKey || m.key?.split("/").pop() || ""),
+                  }));
                   return JSON.stringify({
                     ok: false,
+                    count: partialMatches.length,
                     deleted: false,
                     fileDeleted: false,
                     removedFromLibrary: false,
+                    matches: matchItems,
                     error: `Multiple items match '${title}': ${list}. Ambiguous deletion rejected — specify exact ratingKey to delete exactly one item.`,
                   });
                 }
@@ -354,6 +370,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         return JSON.stringify({
           ok: true,
           count: 0,
+          matches: [],
           deleted: false,
           fileDeleted: false,
           filesDeleted: false,
@@ -372,6 +389,23 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       const episodeDetail = resolvedType === "episode"
         ? ` (S${parentIndex}E${episodeIndex}${seriesTitle ? ` of '${seriesTitle}'` : ""})`
         : "";
+      const targetObj = {
+        title: targetTitle,
+        mediaType: resolvedType,
+        year: targetYear,
+        ratingKey: ratingKey || undefined,
+        filePath: filePath || undefined,
+        fileSizeBytes: fileSizeBytes ?? undefined,
+        viewCount,
+        deleteFile: false,
+        deleteFiles: false,
+        removedFromLibrary: false,
+        series: seriesTitle || undefined,
+        season: parentIndex || undefined,
+        episode: episodeIndex || undefined,
+        inPlex: Boolean(ratingKey),
+        inArr: Boolean(radarrId || sonarrId),
+      };
       return JSON.stringify({
         ok: true,
         count: 1,
@@ -393,23 +427,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         filePath: filePath || undefined,
         fileSizeBytes: fileSizeBytes ?? undefined,
         viewCount,
-        target: {
-          title: targetTitle,
-          mediaType: resolvedType,
-          year: targetYear,
-          ratingKey: ratingKey || undefined,
-          filePath: filePath || undefined,
-          fileSizeBytes: fileSizeBytes ?? undefined,
-          viewCount,
-          deleteFile: false,
-          deleteFiles: false,
-          removedFromLibrary: false,
-          series: seriesTitle || undefined,
-          season: parentIndex || undefined,
-          episode: episodeIndex || undefined,
-          inPlex: Boolean(ratingKey),
-          inArr: Boolean(radarrId || sonarrId),
-        },
+        matches: [targetObj],
+        target: targetObj,
         message: `Deleting '${targetTitle}' will permanently delete media files from disk. Call ${toolName} again with confirm: true to proceed. Found ${typeLabel} '${targetTitle}'${episodeDetail}${targetYear ? ` (${targetYear})` : ""}.`,
       });
     }
@@ -541,6 +560,20 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       deletedFromArr: deletedFromRadarr || deletedFromSonarr,
       deletedFromRadarr: deletedFromRadarr || undefined,
       deletedFromSonarr: deletedFromSonarr || undefined,
+      matches: [
+        {
+          title: targetTitle,
+          mediaType: resolvedType,
+          year: targetYear,
+          ratingKey: ratingKey || undefined,
+          deleted: true,
+          removedFromLibrary: true,
+          fileDeleted: deleteFiles,
+          deleteFile: deleteFiles,
+          inPlex: false,
+          inArr: false,
+        },
+      ],
       message: `Successfully deleted ${typeLabel} '${targetTitle}' from media library and disk.`,
     });
   } catch (err: any) {

@@ -109,6 +109,9 @@ export async function dispatchMuseTool(
       payload.deleteFile = false;
       payload.deleteFiles = false;
       payload.removedFromLibrary = false;
+      if (Array.isArray(resultValue.matches)) {
+        payload.matches = resultValue.matches;
+      }
     }
     return NextResponse.json(payload, { status: 200 });
   }

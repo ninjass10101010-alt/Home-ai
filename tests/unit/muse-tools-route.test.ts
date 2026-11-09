@@ -621,6 +621,9 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     expect(previewBody.result.deleteFile).toBe(false);
     expect(previewBody.result.deleteFiles).toBe(false);
     expect(previewBody.result.removedFromLibrary).toBe(false);
+    expect(Array.isArray(previewBody.result.matches)).toBe(true);
+    expect(previewBody.result.matches).toHaveLength(1);
+    expect(previewBody.result.matches[0].title).toBe("Dune: Part Two");
     expect(previewBody.result.ratingKey).toBe("10934");
     expect(previewBody.result.title).toBe("Dune: Part Two");
     expect(previewBody.result.viewCount).toBe(1);
@@ -649,6 +652,8 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     expect(notInPlexBody.result.deleteFile).toBe(false);
     expect(notInPlexBody.result.deleteFiles).toBe(false);
     expect(notInPlexBody.result.removedFromLibrary).toBe(false);
+    expect(Array.isArray(notInPlexBody.result.matches)).toBe(true);
+    expect(notInPlexBody.result.matches).toHaveLength(0);
     expect(notInPlexBody.result.needsConfirm).toBe(false);
     expect(deleteCallsDispatched).toBe(0);
 

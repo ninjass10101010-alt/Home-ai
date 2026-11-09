@@ -765,6 +765,9 @@ describe("Rubio Media Tools", () => {
     expect(res.deleteFile).toBe(false);
     expect(res.deleteFiles).toBe(false);
     expect(res.removedFromLibrary).toBe(false);
+    expect(Array.isArray(res.matches)).toBe(true);
+    expect(res.matches).toHaveLength(1);
+    expect(res.matches[0].title).toBe("Inception");
     expect(res.ratingKey).toBe("808");
     expect(res.filePath).toBe("/movies/Inception (2010)/Inception.mkv");
     expect(res.fileSizeBytes).toBe(10737418240);
@@ -1035,6 +1038,8 @@ describe("Rubio Media Tools", () => {
     expect(res.ok).toBe(false);
     expect(res.deleted).toBe(false);
     expect(res.removedFromLibrary).toBe(false);
+    expect(Array.isArray(res.matches)).toBe(true);
+    expect(res.matches).toHaveLength(2);
     expect(res.error).toContain("Multiple matching items found");
     expect(res.error).toContain("Specify ratingKey or year to target exactly one item");
   });
