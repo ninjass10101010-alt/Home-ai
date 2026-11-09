@@ -479,6 +479,9 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         fileSizeBytes: fileSizeBytes ?? undefined,
         viewCount,
         watched: Boolean(viewCount > 0),
+        confirmHint: ratingKey
+          ? `Re-call with ratingKey "${ratingKey}", title "${targetTitle}", confirm: true${deleteFiles ? ", deleteFile: true" : ""}`
+          : `Re-call with title "${targetTitle}", confirm: true${deleteFiles ? ", deleteFile: true" : ""}`,
         matches: [targetObj],
         target: targetObj,
         message: `Deleting '${targetTitle}' will permanently delete media files from disk. Call ${toolName} again with confirm: true to proceed. Found ${typeLabel} '${targetTitle}'${episodeDetail}${targetYear ? ` (${targetYear})` : ""}.`,

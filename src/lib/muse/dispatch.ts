@@ -109,6 +109,9 @@ export async function dispatchMuseTool(
       payload.deleteFile = false;
       payload.deleteFiles = false;
       payload.removedFromLibrary = false;
+      if (typeof resultValue.confirmHint === "string") {
+        payload.confirmHint = resultValue.confirmHint;
+      }
       if (Array.isArray(resultValue.matches)) {
         payload.matches = resultValue.matches;
       }

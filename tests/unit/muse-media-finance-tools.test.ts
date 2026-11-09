@@ -775,6 +775,8 @@ describe("Rubio Media Tools", () => {
     expect(res.title).toBe("Inception");
     expect(res.year).toBe(2010);
     expect(res.mediaType).toBe("movie");
+    expect(res.confirmHint).toContain("808");
+    expect(res.confirmHint).toContain("Inception");
     expect(res.message).toContain("confirm: true");
 
     // Item was previewed only — zero DELETE requests dispatched (item remains intact in Plex)
