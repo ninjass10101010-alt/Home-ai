@@ -97,6 +97,7 @@ interface PlexMediaDeleteParams {
   seasonNumber?: number;
   episodeNumber?: number;
   deleteFiles?: boolean;
+  deleteFile?: boolean;
   confirm?: boolean;
   toolName?: string;
 }
@@ -105,7 +106,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
   const toolName = args.toolName || "delete_plex_media";
   const title = String(args.title || args.query || "").trim();
   const confirm = Boolean(args.confirm);
-  const deleteFiles = args.deleteFiles !== false;
+  const deleteFiles = args.deleteFiles !== false && args.deleteFile !== false;
   let ratingKey = String(args.ratingKey || "").trim();
   let requestedType = args.mediaType ? String(args.mediaType).toLowerCase() : undefined;
   const requestedYear = typeof args.year === "number" ? args.year : undefined;
@@ -354,6 +355,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
           deleted: false,
           fileDeleted: false,
           filesDeleted: false,
+          deleteFile: false,
+          deleteFiles: false,
           needsConfirm: false,
           confirmationRequired: false,
           query: title,
@@ -372,6 +375,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         deleted: false,
         fileDeleted: false,
         filesDeleted: false,
+        deleteFile: false,
+        deleteFiles: false,
         needsConfirm: true,
         confirmationRequired: true,
         status: "confirmation_required",
@@ -392,6 +397,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
           filePath: filePath || undefined,
           fileSizeBytes: fileSizeBytes ?? undefined,
           viewCount,
+          deleteFile: false,
+          deleteFiles: false,
           series: seriesTitle || undefined,
           season: parentIndex || undefined,
           episode: episodeIndex || undefined,
@@ -410,6 +417,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         deleted: false,
         fileDeleted: false,
         filesDeleted: false,
+        deleteFile: false,
+        deleteFiles: false,
         error: `Could not delete '${targetTitle}'. Media not found in Plex, Radarr, or Sonarr, or deletion rejected.`,
       });
     }
@@ -513,6 +522,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       deleted: true,
       fileDeleted: deleteFiles,
       filesDeleted: deleteFiles,
+      deleteFile: deleteFiles,
+      deleteFiles: deleteFiles,
       mediaType: resolvedType,
       title: targetTitle,
       year: targetYear,
@@ -530,6 +541,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       deleted: false,
       fileDeleted: false,
       filesDeleted: false,
+      deleteFile: false,
+      deleteFiles: false,
       error: "Failed to delete media from Plex/Arr stack",
       details: err?.message || String(err),
     });
@@ -1647,6 +1660,10 @@ export const MEDIA_TOOLS: Tool[] = [
             type: "boolean",
             description: "Whether to delete physical media files from disk. Defaults to true.",
           },
+          deleteFile: {
+            type: "boolean",
+            description: "Whether to delete physical media files from disk. Defaults to true.",
+          },
         },
       },
     },
@@ -1680,6 +1697,10 @@ export const MEDIA_TOOLS: Tool[] = [
             description: "Optional Plex ratingKey if known to ensure exact match.",
           },
           deleteFiles: {
+            type: "boolean",
+            description: "Whether to delete the movie files from disk. Defaults to true.",
+          },
+          deleteFile: {
             type: "boolean",
             description: "Whether to delete the movie files from disk. Defaults to true.",
           },

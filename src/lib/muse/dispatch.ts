@@ -105,6 +105,9 @@ export async function dispatchMuseTool(
     const payload: Record<string, unknown> = { ok: false, error: errorStr };
     if (resultValue.deleted === false) {
       payload.deleted = false;
+      payload.fileDeleted = false;
+      payload.deleteFile = false;
+      payload.deleteFiles = false;
     }
     return NextResponse.json(payload, { status: 200 });
   }

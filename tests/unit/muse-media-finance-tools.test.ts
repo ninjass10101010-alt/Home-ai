@@ -761,6 +761,8 @@ describe("Rubio Media Tools", () => {
     expect(res.needsConfirm).toBe(true);
     expect(res.deleted).toBe(false);
     expect(res.fileDeleted).toBe(false);
+    expect(res.deleteFile).toBe(false);
+    expect(res.deleteFiles).toBe(false);
     expect(res.ratingKey).toBe("808");
     expect(res.filePath).toBe("/movies/Inception (2010)/Inception.mkv");
     expect(res.fileSizeBytes).toBe(10737418240);
