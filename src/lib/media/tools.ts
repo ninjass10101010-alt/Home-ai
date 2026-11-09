@@ -1626,6 +1626,62 @@ export const MEDIA_TOOLS: Tool[] = [
 
   {
     definition: {
+      name: "delete_media",
+      description:
+        "Permanently delete exactly one movie, TV show, or episode from Plex and disk storage (Radarr/Sonarr). Destructive by design, so the confirm-first guard is mandatory, not optional. Muse's rule (Rubio skill): no destructive operations without confirmation, especially deleting media. Two-step operation: Step 1 (preview) searches and returns target details (ratingKey, filePath, fileSizeBytes, viewCount) and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true (and preferably ratingKey) to permanently delete only that single item.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Title of the movie, TV show, or episode to delete (e.g. 'Gladiator', 'Breaking Bad', 'Dune: Part Two'). Accepts query as alias.",
+          },
+          query: {
+            type: "string",
+            description: "Search query or title alias as given by the user (e.g. 'Dune: Part Two').",
+          },
+          confirm: {
+            type: "boolean",
+            description: "Must be set to true on explicit second call to confirm permanent deletion. If omitted or false, previews the target without deleting.",
+          },
+          mediaType: {
+            type: "string",
+            enum: ["movie", "show", "episode"],
+            description: "Type of media ('movie', 'show', or 'episode'). If omitted, automatically detected from Plex and Arr libraries.",
+          },
+          ratingKey: {
+            type: "string",
+            description: "Optional Plex ratingKey if known to ensure exact match.",
+          },
+          year: {
+            type: "number",
+            description: "Optional release year to disambiguate identically named titles.",
+          },
+          seasonNumber: {
+            type: "number",
+            description: "Optional season number if deleting a specific TV episode.",
+          },
+          episodeNumber: {
+            type: "number",
+            description: "Optional episode number if deleting a specific TV episode.",
+          },
+          deleteFiles: {
+            type: "boolean",
+            description: "Whether to delete physical media files from disk. Defaults to true.",
+          },
+          deleteFile: {
+            type: "boolean",
+            description: "Whether to delete physical media files from disk. Defaults to true.",
+          },
+        },
+      },
+    },
+    handler: async (args) => {
+      return executePlexMediaDelete({ ...args, toolName: "delete_media" });
+    },
+  },
+  {
+    definition: {
       name: "delete_plex_media",
       description:
         "Permanently delete exactly one movie, TV show, or episode from Plex and disk storage (Radarr/Sonarr). Destructive by design, so the confirm-first guard is mandatory, not optional. Muse's rule (Rubio skill): no destructive operations without confirmation, especially deleting media. Two-step operation: Step 1 (preview) searches and returns target details (ratingKey, filePath, fileSizeBytes, viewCount) and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true (and preferably ratingKey) to permanently delete only that single item.",

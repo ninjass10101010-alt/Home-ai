@@ -500,6 +500,8 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     // 1. Verify OpenAPI spec carries the path and operationId
     const { generateMuseOpenApi } = await import("@/lib/muse/openapi");
     const spec = generateMuseOpenApi("http://nas.local:3000");
+    expect(spec.paths["/api/muse/tool/delete_media"]).toBeDefined();
+    expect(spec.paths["/api/muse/tool/delete_media"].post.operationId).toBe("delete_media");
     expect(spec.paths["/api/muse/tool/delete_plex_media"]).toBeDefined();
     expect(spec.paths["/api/muse/tool/delete_plex_media"].post.operationId).toBe("delete_plex_media");
     expect(spec.paths["/api/muse/tool/delete_plex_movie"]).toBeDefined();
