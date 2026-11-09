@@ -1631,19 +1631,18 @@ export const MEDIA_TOOLS: Tool[] = [
         "Permanently delete exactly one movie, TV show, or episode from Plex and disk storage (Radarr/Sonarr). Destructive by design, so the confirm-first guard is mandatory, not optional. Muse's rule (Rubio skill): no destructive operations without confirmation, especially deleting media. Two-step operation: Step 1 (preview) searches and returns target details (ratingKey, filePath, fileSizeBytes, viewCount) and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true (and preferably ratingKey) to permanently delete only that single item.",
       parameters: {
         type: "object",
-        required: ["title"],
         properties: {
           title: {
             type: "string",
-            description: "Title of the movie, TV show, or episode to delete (e.g. 'Gladiator', 'Breaking Bad', 'Dune: Part Two').",
+            description: "Title of the movie, TV show, or episode to delete (e.g. 'Gladiator', 'Breaking Bad', 'Dune: Part Two'). Accepts query as alias.",
           },
           query: {
             type: "string",
-            description: "Search query or title alias (e.g. 'Dune: Part Two').",
+            description: "Search query or title alias as given by the user (e.g. 'Dune: Part Two').",
           },
           confirm: {
             type: "boolean",
-            description: "Must be set to true to confirm permanent deletion of the media and disk files. If false or omitted, the tool previews the target and returns a confirmation request.",
+            description: "Must be set to true on explicit second call to confirm permanent deletion. If omitted or false, previews the target without deleting.",
           },
           mediaType: {
             type: "string",
@@ -1688,19 +1687,18 @@ export const MEDIA_TOOLS: Tool[] = [
         "Permanently delete exactly one movie from the Plex library and Radarr. Destructive by design, so the confirm-first guard is mandatory, not optional. Muse's rule (Rubio skill): no destructive operations without confirmation, especially deleting media. Two-step operation: Step 1 (preview) returns target details and needsConfirm: true without deleting anything. Step 2 requires an explicit second call with confirm: true to permanently delete only that single movie.",
       parameters: {
         type: "object",
-        required: ["title", "confirm"],
         properties: {
           title: {
             type: "string",
-            description: "Title of the movie to delete (e.g. 'Gladiator', 'Dune: Part Two').",
+            description: "Title of the movie to delete (e.g. 'Gladiator', 'Dune: Part Two'). Accepts query as alias.",
           },
           query: {
             type: "string",
-            description: "Search query or movie title alias (e.g. 'Dune: Part Two').",
+            description: "Search query or movie title alias as given by the user (e.g. 'Dune: Part Two').",
           },
           confirm: {
             type: "boolean",
-            description: "Must be set to true to confirm permanent deletion of the movie and files.",
+            description: "Must be set to true on explicit second call to confirm permanent deletion. If omitted or false, previews the target without deleting.",
           },
           ratingKey: {
             type: "string",
