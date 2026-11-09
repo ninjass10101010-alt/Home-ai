@@ -114,7 +114,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
   const episodeNum = typeof args.episodeNumber === "number" ? args.episodeNumber : undefined;
 
   if (!title && !ratingKey) {
-    return JSON.stringify({ ok: false, deleted: false, error: "Movie or show title, or ratingKey, is required." });
+    return JSON.stringify({ ok: false, deleted: false, fileDeleted: false, removedFromLibrary: false, error: "Movie or show title, or ratingKey, is required." });
   }
 
   const { url: plexBaseUrl, token: plexToken } = await getPlexConfig();
@@ -205,6 +205,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
                   ok: false,
                   deleted: false,
                   fileDeleted: false,
+                  removedFromLibrary: false,
                   error: `Multiple matching items found for '${title}': ${list}. Specify ratingKey or year to target exactly one item.`,
                 });
               }
@@ -219,6 +220,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
                     ok: false,
                     deleted: false,
                     fileDeleted: false,
+                    removedFromLibrary: false,
                     error: `Multiple items match '${title}': ${list}. Ambiguous deletion rejected — specify exact ratingKey to delete exactly one item.`,
                   });
                 }
@@ -357,6 +359,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
           filesDeleted: false,
           deleteFile: false,
           deleteFiles: false,
+          removedFromLibrary: false,
           needsConfirm: false,
           confirmationRequired: false,
           query: title,
@@ -377,6 +380,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         filesDeleted: false,
         deleteFile: false,
         deleteFiles: false,
+        removedFromLibrary: false,
         needsConfirm: true,
         confirmationRequired: true,
         status: "confirmation_required",
@@ -399,6 +403,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
           viewCount,
           deleteFile: false,
           deleteFiles: false,
+          removedFromLibrary: false,
           series: seriesTitle || undefined,
           season: parentIndex || undefined,
           episode: episodeIndex || undefined,
@@ -419,6 +424,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
         filesDeleted: false,
         deleteFile: false,
         deleteFiles: false,
+        removedFromLibrary: false,
         error: `Could not delete '${targetTitle}'. Media not found in Plex, Radarr, or Sonarr, or deletion rejected.`,
       });
     }
@@ -511,6 +517,8 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       return JSON.stringify({
         ok: false,
         deleted: false,
+        fileDeleted: false,
+        removedFromLibrary: false,
         error: `Could not delete '${targetTitle}'. Media not found in Plex or Arr services, or deletion rejected.`,
       });
     }
@@ -520,6 +528,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       ok: true,
       count: 1,
       deleted: true,
+      removedFromLibrary: true,
       fileDeleted: deleteFiles,
       filesDeleted: deleteFiles,
       deleteFile: deleteFiles,
@@ -543,6 +552,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       filesDeleted: false,
       deleteFile: false,
       deleteFiles: false,
+      removedFromLibrary: false,
       error: "Failed to delete media from Plex/Arr stack",
       details: err?.message || String(err),
     });

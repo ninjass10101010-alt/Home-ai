@@ -108,6 +108,7 @@ export async function dispatchMuseTool(
       payload.fileDeleted = false;
       payload.deleteFile = false;
       payload.deleteFiles = false;
+      payload.removedFromLibrary = false;
     }
     return NextResponse.json(payload, { status: 200 });
   }

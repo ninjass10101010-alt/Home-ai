@@ -701,6 +701,7 @@ describe("Rubio Media Tools", () => {
 
     expect(res.ok).toBe(true);
     expect(res.deleted).toBe(true);
+    expect(res.removedFromLibrary).toBe(true);
     expect(res.deletedFromPlex).toBe(true);
     expect(res.deletedFromRadarr).toBe(true);
     expect(res.filesDeleted).toBe(true);
@@ -763,6 +764,7 @@ describe("Rubio Media Tools", () => {
     expect(res.fileDeleted).toBe(false);
     expect(res.deleteFile).toBe(false);
     expect(res.deleteFiles).toBe(false);
+    expect(res.removedFromLibrary).toBe(false);
     expect(res.ratingKey).toBe("808");
     expect(res.filePath).toBe("/movies/Inception (2010)/Inception.mkv");
     expect(res.fileSizeBytes).toBe(10737418240);
@@ -864,6 +866,7 @@ describe("Rubio Media Tools", () => {
 
     expect(res.ok).toBe(true);
     expect(res.deleted).toBe(true);
+    expect(res.removedFromLibrary).toBe(true);
     expect(res.mediaType).toBe("show");
     expect(res.deletedFromPlex).toBe(true);
     expect(res.deletedFromArr).toBe(true);
@@ -942,6 +945,7 @@ describe("Rubio Media Tools", () => {
 
     expect(res.ok).toBe(true);
     expect(res.deleted).toBe(true);
+    expect(res.removedFromLibrary).toBe(true);
     expect(res.mediaType).toBe("episode");
     expect(res.deletedFromPlex).toBe(true);
     expect(res.deletedFromSonarr).toBe(true);
@@ -968,6 +972,7 @@ describe("Rubio Media Tools", () => {
 
     expect(notFoundRes.ok).toBe(false);
     expect(notFoundRes.deleted).toBe(false);
+    expect(notFoundRes.removedFromLibrary).toBe(false);
     expect(typeof notFoundRes.error).toBe("string");
     expect(notFoundRes.error).toContain("Could not delete");
 
@@ -998,6 +1003,7 @@ describe("Rubio Media Tools", () => {
 
     expect(rejectedRes.ok).toBe(false);
     expect(rejectedRes.deleted).toBe(false);
+    expect(rejectedRes.removedFromLibrary).toBe(false);
     expect(typeof rejectedRes.error).toBe("string");
   });
 
@@ -1028,6 +1034,7 @@ describe("Rubio Media Tools", () => {
 
     expect(res.ok).toBe(false);
     expect(res.deleted).toBe(false);
+    expect(res.removedFromLibrary).toBe(false);
     expect(res.error).toContain("Multiple matching items found");
     expect(res.error).toContain("Specify ratingKey or year to target exactly one item");
   });
@@ -1073,6 +1080,7 @@ describe("Rubio Media Tools", () => {
     expect(step1.needsConfirm).toBe(true);
     expect(step1.deleted).toBe(false);
     expect(step1.fileDeleted).toBe(false);
+    expect(step1.removedFromLibrary).toBe(false);
     expect(step1.ratingKey).toBe("202");
     expect(step1.viewCount).toBe(2);
     expect(step1.filePath).toBe("/movies/Interstellar.mkv");
@@ -1084,6 +1092,7 @@ describe("Rubio Media Tools", () => {
 
     expect(step2.ok).toBe(true);
     expect(step2.deleted).toBe(true);
+    expect(step2.removedFromLibrary).toBe(true);
     expect(step2.fileDeleted).toBe(true);
     expect(deleteCount).toBe(1); // Deleted on explicit second call
   });

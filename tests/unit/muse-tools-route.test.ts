@@ -616,6 +616,7 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     expect(previewBody.result.fileDeleted).toBe(false);
     expect(previewBody.result.deleteFile).toBe(false);
     expect(previewBody.result.deleteFiles).toBe(false);
+    expect(previewBody.result.removedFromLibrary).toBe(false);
     expect(previewBody.result.ratingKey).toBe("10934");
     expect(previewBody.result.title).toBe("Dune: Part Two");
     expect(previewBody.result.viewCount).toBe(1);
@@ -643,6 +644,7 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     expect(notInPlexBody.result.fileDeleted).toBe(false);
     expect(notInPlexBody.result.deleteFile).toBe(false);
     expect(notInPlexBody.result.deleteFiles).toBe(false);
+    expect(notInPlexBody.result.removedFromLibrary).toBe(false);
     expect(notInPlexBody.result.needsConfirm).toBe(false);
     expect(deleteCallsDispatched).toBe(0);
 
@@ -659,6 +661,7 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     const confirmBody = await confirmRes.json();
     expect(confirmBody.ok).toBe(true);
     expect(confirmBody.result.deleted).toBe(true);
+    expect(confirmBody.result.removedFromLibrary).toBe(true);
     expect(confirmBody.result.fileDeleted).toBe(true);
     expect(deleteCallsDispatched).toBeGreaterThanOrEqual(1);
 
@@ -678,6 +681,7 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     const failBody = await failRes.json();
     expect(failBody.ok).toBe(false);
     expect(failBody.deleted).toBe(false);
+    expect(failBody.removedFromLibrary).toBe(false);
     expect(typeof failBody.error).toBe("string");
 
     fetchSpy.mockRestore();
