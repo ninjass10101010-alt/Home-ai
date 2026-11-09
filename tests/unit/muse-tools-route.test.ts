@@ -497,11 +497,13 @@ describe("individual tool routing (POST /api/muse/tool/[name])", () => {
     vi.stubEnv("PLEX_TOKEN", "test-plex-token");
     const { token } = signMuseToken({ ver: 1, adm: false });
 
-    // 1. Verify OpenAPI spec carries the path
+    // 1. Verify OpenAPI spec carries the path and operationId
     const { generateMuseOpenApi } = await import("@/lib/muse/openapi");
     const spec = generateMuseOpenApi("http://nas.local:3000");
     expect(spec.paths["/api/muse/tool/delete_plex_media"]).toBeDefined();
     expect(spec.paths["/api/muse/tool/delete_plex_media"].post.operationId).toBe("delete_plex_media");
+    expect(spec.paths["/api/muse/tool/delete_plex_movie"]).toBeDefined();
+    expect(spec.paths["/api/muse/tool/delete_plex_movie"].post.operationId).toBe("delete_plex_movie");
 
     let deleteCallsDispatched = 0;
     const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async (url: any, opts?: any) => {
