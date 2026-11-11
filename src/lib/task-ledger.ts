@@ -28,6 +28,10 @@ export const LEDGER_OPERATION_SOURCES = [
   "task-undo",
   "task-penalty",
   "manual-adjust",
+  "routine-complete",
+  "routine-undo",
+  "routine-penalty",
+  "routine-penalty-excuse",
   "legacy-migration",
 ] as const satisfies readonly LedgerOperationSource[];
 

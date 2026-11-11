@@ -59,6 +59,8 @@ import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import { useAllTimeTotals } from "@/hooks/useAllTimeTotals";
 import { kidRaceLine } from "./quest-labels";
 import KidCrewBoard from "./KidCrewBoard";
+import RoutinesTodaySection from "@/components/routines/RoutinesTodaySection";
+import type { RoutineRosterMember } from "@/lib/routine-rules";
 import { splitKidBoard } from "./kid-board";
 import { useWeeklyPrizes } from "@/components/leaderboard/hooks/useWeeklyPrizes";
 import AllTimeValue from "@/components/leaderboard/AllTimeValue";
@@ -996,6 +998,18 @@ export default function KidHome() {
 
         {/* ── Content ── */}
         <div className="px-4 space-y-5 relative z-10 pb-8">
+          <RoutinesTodaySection
+            title="Today's Routines"
+            memberName={boardMemberName || firstName}
+            memberRole={user?.role === "pet" ? "pet" : "child"}
+            rosterMembers={db.selectMembersDetailed().map((m: any): RoutineRosterMember => ({
+              id: m.pbId,
+              name: m.name?.split(" ")[0] || m.name,
+              fullName: m.name,
+              role: String(m.role || "").toLowerCase(),
+              emoji: m.emoji || "😊",
+            }))}
+          />
           <KidCrewBoard
             crews={board.crews}
             open={board.open}

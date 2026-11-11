@@ -1,24 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import SectionCard from "@/components/patterns/SectionCard";
+import { useMemo, useState } from "react";
 import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
-import Modal from "@/components/ui/Modal";
-import TextField from "@/components/ui/TextField";
 import EmptyState from "@/components/ui/EmptyState";
-import { localTodayISO } from "@/lib/local-date";
+import { db } from "@/db";
+import { useAuth } from "@/hooks/useAuth";
+import { useRoutines } from "@/hooks/useRoutines";
 import {
-  DEFAULT_ROUTINES,
+  ParentPinPromptModal,
+  RoutineComposerModal,
+  RoutineFocusTimerModal,
+  RoutineSettingsModal,
+} from "@/components/routines/RoutineModals";
+import {
   ROUTINE_SLOT_META,
-  type DailyRoutineProgress,
   type FamilyRoutine,
+  type RoutineSettings,
   type RoutineSlot,
-  type RoutineStep,
 } from "@/types/routines";
+import {
+  formatRoutineDaysLabel,
+  formatRoutineTargetsLabel,
+  getMemberCheckedSteps,
+  getMemberCompletionMeta,
+  isRoutineScheduledForDate,
+  isSingleMemberRoutine,
+  memberKey,
+  resolveRoutineTargets,
+  routineAppliesToMember,
+  type RoutineRosterMember,
+} from "@/lib/routine-rules";
 
 const SLOTS: RoutineSlot[] = ["morning", "afternoon", "evening", "weekend"];
-const POINT_OPTIONS = [10, 15, 20, 30];
 
 interface RoutinesPanelProps {
   filterMember?: string;
@@ -26,606 +40,803 @@ interface RoutinesPanelProps {
   canManage?: boolean;
 }
 
+type PendingParentOp =
+  | { kind: "upsert_routine"; routine: FamilyRoutine }
+  | { kind: "delete_routine"; routineId: string }
+  | { kind: "update_settings"; settings: RoutineSettings }
+  | { kind: "excuse_missed"; entryId: string }
+  | { kind: "approve_routine"; routineId: string; memberName: string }
+  | { kind: "send_back_routine"; routineId: string; memberName: string };
+
 export default function RoutinesPanel({
   filterMember = "All",
   allMembers = [],
-  canManage = true,
+  canManage = false,
 }: RoutinesPanelProps) {
-  const todayISO = useMemo(() => localTodayISO(), []);
-  const [routines, setRoutines] = useState<FamilyRoutine[]>(DEFAULT_ROUTINES);
-  const [progress, setProgress] = useState<DailyRoutineProgress>({
-    checkedSteps: {},
-    completedRoutines: {},
-  });
-  const [slotFilter, setSlotFilter] = useState<"all" | RoutineSlot>("all");
-  const [loading, setLoading] = useState(true);
+  const { currentUser, isLoggedIn } = useAuth();
+  const {
+    todayISO,
+    yesterdayISO,
+    routines,
+    settings,
+    progress,
+    accountability,
+    loading,
+    busyIds,
+    toggleStep,
+    completeRoutine,
+    uncompleteRoutine,
+    approveRoutine,
+    sendBackRoutine,
+    excuseMissed,
+    upsertRoutine,
+    deleteRoutine,
+    updateSettings,
+  } = useRoutines();
 
-  // Composer / Editor modal state
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draftTitle, setDraftTitle] = useState("");
-  const [draftEmoji, setDraftEmoji] = useState("☀️");
-  const [draftSlot, setDraftSlot] = useState<RoutineSlot>("morning");
-  const [draftTime, setDraftTime] = useState("07:30");
-  const [draftAssignee, setDraftAssignee] = useState("All");
-  const [draftPoints, setDraftPoints] = useState<number>(15);
-  const [draftSteps, setDraftSteps] = useState<Array<{ id: string; title: string; emoji: string }>>([]);
-  const [saving, setSaving] = useState(false);
+  const detailedRoster = db.selectMembers();
+  const rosterMembers: RoutineRosterMember[] =
+    detailedRoster.length > 0
+      ? detailedRoster.map((m: any) => ({
+          id: m.pbId,
+          name: m.name,
+          fullName: m.fullName || m.name,
+          role: m.role,
+          emoji: m.emoji,
+        }))
+      : allMembers
+          .filter((n) => n && n !== "All")
+          .map((n) => ({ name: n, fullName: n }));
 
-  // Load routines and progress from server
-  const loadData = useCallback(async () => {
-    try {
-      const [routinesRes, progressRes] = await Promise.all([
-        fetch("/api/routines").then((r) => r.json()).catch(() => null),
-        fetch(`/api/routines/progress?date=${todayISO}`).then((r) => r.json()).catch(() => null),
-      ]);
+  const isParentSession =
+    canManage || (isLoggedIn && currentUser?.role?.toLowerCase() === "parent");
+  const isChildSession =
+    isLoggedIn && !!currentUser && currentUser.role?.toLowerCase() !== "parent";
 
-      if (routinesRes?.ok && Array.isArray(routinesRes.routines)) {
-        setRoutines(routinesRes.routines);
-      }
-      if (progressRes?.ok && progressRes.progress) {
-        setProgress(progressRes.progress);
-      }
-    } finally {
-      setLoading(false);
+  const [slotFilter, setSlotFilter] = useState<RoutineSlot | "all">("all");
+  const [scheduleScope, setScheduleScope] = useState<"today" | "week">("today");
+  const [selectedCardActor, setSelectedCardActor] = useState<Record<string, string>>({});
+  const [banner, setBanner] = useState<string | null>(null);
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
+
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [editingRoutine, setEditingRoutine] = useState<FamilyRoutine | null>(null);
+  const [composerError, setComposerError] = useState<string | null>(null);
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  const [focusRoutine, setFocusRoutine] = useState<FamilyRoutine | null>(null);
+
+  const [pendingOp, setPendingOp] = useState<PendingParentOp | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinSubmitting, setPinSubmitting] = useState(false);
+
+  const showToast = (msg: string) => {
+    setErrorBanner(null);
+    setBanner(msg);
+    setTimeout(() => {
+      setBanner((prev) => (prev === msg ? null : prev));
+    }, 3500);
+  };
+
+  const specificFilterMember = useMemo(() => {
+    const f = (filterMember || "All").trim();
+    if (
+      f === "All" ||
+      f === "Open" ||
+      f === "My Tasks" ||
+      f === "Kids" ||
+      f === "Adults"
+    ) {
+      if (f === "My Tasks" && currentUser?.name) return currentUser.name;
+      return null;
     }
-  }, [todayISO]);
+    return f;
+  }, [filterMember, currentUser]);
 
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  // Filter routines by slot and assignee
   const filteredRoutines = useMemo(() => {
     return routines.filter((r) => {
       if (slotFilter !== "all" && r.slot !== slotFilter) return false;
-      if (
-        filterMember &&
-        filterMember !== "All" &&
-        filterMember !== "Open" &&
-        filterMember !== "My Tasks" &&
-        r.assignee !== "All" &&
-        r.assignee.toLowerCase() !== filterMember.toLowerCase()
-      ) {
+      if (scheduleScope === "today" && !isRoutineScheduledForDate(r, todayISO)) {
         return false;
+      }
+      if (specificFilterMember) {
+        return routineAppliesToMember(r, specificFilterMember, rosterMembers);
+      }
+      if (filterMember === "Kids") {
+        const targets = resolveRoutineTargets(r, rosterMembers);
+        return targets.some((t) => t.role === "child");
+      }
+      if (filterMember === "Adults") {
+        const targets = resolveRoutineTargets(r, rosterMembers);
+        return targets.some((t) => t.role === "parent");
       }
       return true;
     });
-  }, [routines, slotFilter, filterMember]);
+  }, [
+    routines,
+    slotFilter,
+    scheduleScope,
+    todayISO,
+    specificFilterMember,
+    filterMember,
+    rosterMembers,
+  ]);
 
-  // Toggle a step's completed status
-  const handleToggleStep = useCallback(
-    async (routine: FamilyRoutine, stepId: string) => {
-      const current = progress.checkedSteps[routine.id] ?? [];
-      const exists = current.includes(stepId);
-      const nextSteps = exists ? current.filter((id) => id !== stepId) : [...current, stepId];
-      const allDone = routine.steps.length > 0 && nextSteps.length >= routine.steps.length;
-
-      const nextProgress: DailyRoutineProgress = {
-        checkedSteps: {
-          ...progress.checkedSteps,
-          [routine.id]: nextSteps,
-        },
-        completedRoutines: {
-          ...progress.completedRoutines,
-          [routine.id]: allDone,
-        },
-      };
-
-      // Optimistic update
-      setProgress(nextProgress);
-
-      // Persist to server
-      try {
-        await fetch("/api/routines/progress", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date: todayISO, progress: nextProgress }),
-        });
-      } catch (err) {
-        console.error("Failed to save routine progress", err);
+  const unexcusedMissed = useMemo(() => {
+    return accountability.missedEntries.filter((e) => {
+      if (e.excused) return false;
+      if (e.date < yesterdayISO) return false;
+      if (specificFilterMember) {
+        return e.memberKey === memberKey(specificFilterMember);
       }
-    },
-    [progress, todayISO]
-  );
+      return true;
+    });
+  }, [accountability.missedEntries, yesterdayISO, specificFilterMember]);
 
-  // Open modal to add a new routine
-  const handleOpenAdd = useCallback(() => {
-    setEditingId(null);
-    setDraftTitle("");
-    setDraftEmoji("☀️");
-    setDraftSlot("morning");
-    setDraftTime("07:30");
-    setDraftAssignee(filterMember !== "All" && filterMember !== "Open" && filterMember !== "My Tasks" ? filterMember : "All");
-    setDraftPoints(15);
-    setDraftSteps([
-      { id: `step-${Date.now()}-1`, title: "First habit step", emoji: "✨" },
-      { id: `step-${Date.now()}-2`, title: "Second habit step", emoji: "✨" },
-    ]);
-    setModalOpen(true);
-  }, [filterMember]);
-
-  // Open modal to edit an existing routine
-  const handleOpenEdit = useCallback((routine: FamilyRoutine) => {
-    setEditingId(routine.id);
-    setDraftTitle(routine.title);
-    setDraftEmoji(routine.emoji);
-    setDraftSlot(routine.slot);
-    setDraftTime(routine.time);
-    setDraftAssignee(routine.assignee);
-    setDraftPoints(routine.points);
-    setDraftSteps(
-      routine.steps.map((s) => ({
-        id: s.id,
-        title: s.title,
-        emoji: s.emoji || "✨",
-      }))
-    );
-    setModalOpen(true);
-  }, []);
-
-  // Save routine changes to server
-  const handleSaveRoutine = useCallback(async () => {
-    if (!draftTitle.trim()) return;
-    setSaving(true);
-
-    const validSteps: RoutineStep[] = draftSteps
-      .filter((s) => s.title.trim().length > 0)
-      .map((s, idx) => ({
-        id: s.id || `s-${idx}-${Date.now()}`,
-        title: s.title.trim(),
-        emoji: s.emoji.trim() || "✨",
-      }));
-
-    const cleanSteps =
-      validSteps.length > 0
-        ? validSteps
-        : [{ id: `s-1-${Date.now()}`, title: "Complete routine", emoji: "✓" }];
-
-    const routineToSave: FamilyRoutine = {
-      id: editingId || `rt-${Date.now()}`,
-      title: draftTitle.trim(),
-      emoji: draftEmoji.trim() || "⏰",
-      slot: draftSlot,
-      time: draftTime.trim() || "08:00",
-      assignee: draftAssignee,
-      points: Number(draftPoints) || 15,
-      steps: cleanSteps,
-    };
-
-    const nextRoutines = editingId
-      ? routines.map((r) => (r.id === editingId ? routineToSave : r))
-      : [...routines, routineToSave];
-
-    setRoutines(nextRoutines);
-    setModalOpen(false);
-
-    try {
-      await fetch("/api/routines", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ routines: nextRoutines }),
-      });
-    } catch (err) {
-      console.error("Failed to save routines", err);
-    } finally {
-      setSaving(false);
+  const pendingApprovals = useMemo(() => {
+    const list: Array<{ key: string; routine: FamilyRoutine; memberName: string }> = [];
+    for (const [key, meta] of Object.entries(progress.memberCompleted ?? {})) {
+      if (meta.status !== "pending_approval") continue;
+      const [routineId] = key.split("::");
+      const rt = routines.find((r) => r.id === routineId);
+      if (!rt) continue;
+      if (
+        specificFilterMember &&
+        memberKey(meta.by) !== memberKey(specificFilterMember)
+      ) {
+        continue;
+      }
+      list.push({ key, routine: rt, memberName: meta.by });
     }
-  }, [draftTitle, draftSteps, draftEmoji, draftSlot, draftTime, draftAssignee, draftPoints, editingId, routines]);
+    return list;
+  }, [progress.memberCompleted, routines, specificFilterMember]);
 
-  // Delete an existing routine
-  const handleDeleteRoutine = useCallback(async () => {
-    if (!editingId) return;
-    setSaving(true);
-    const nextRoutines = routines.filter((r) => r.id !== editingId);
-    setRoutines(nextRoutines);
-    setModalOpen(false);
-
-    try {
-      await fetch("/api/routines", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ routines: nextRoutines }),
-      });
-    } catch (err) {
-      console.error("Failed to delete routine", err);
-    } finally {
-      setSaving(false);
+  const resolveActiveActorForCard = (routine: FamilyRoutine): string => {
+    if (isChildSession && currentUser?.name) return currentUser.name;
+    if (specificFilterMember) return specificFilterMember;
+    const explicit = selectedCardActor[routine.id];
+    if (explicit) return explicit;
+    const targets = resolveRoutineTargets(routine, rosterMembers);
+    if (currentUser?.name) {
+      const signedMatch = targets.find(
+        (t) =>
+          memberKey(t.fullName || t.name) === memberKey(currentUser.name) ||
+          (t.name &&
+            t.name.toLowerCase() === currentUser.name.split(" ")[0]?.toLowerCase()),
+      );
+      if (signedMatch) return signedMatch.fullName || signedMatch.name;
     }
-  }, [editingId, routines]);
+    return targets[0]?.fullName || targets[0]?.name || rosterMembers[0]?.name || "";
+  };
 
-  const memberOptions = useMemo(() => {
-    const custom = allMembers.filter(
-      (m) => m !== "All" && m !== "Open" && m !== "My Tasks"
-    );
-    return ["All", ...custom];
-  }, [allMembers]);
+  const executeParentOp = async (op: PendingParentOp, pin?: string) => {
+    if (op.kind === "upsert_routine") {
+      const res = await upsertRoutine(op.routine, pin);
+      if (!res.ok) return res;
+      setComposerOpen(false);
+      setEditingRoutine(null);
+      showToast(`Saved routine "${op.routine.title}".`);
+      return res;
+    }
+    if (op.kind === "delete_routine") {
+      const res = await deleteRoutine(op.routineId, pin);
+      if (!res.ok) return res;
+      showToast("Routine removed.");
+      return res;
+    }
+    if (op.kind === "update_settings") {
+      const res = await updateSettings(op.settings, pin);
+      if (!res.ok) return res;
+      setSettingsOpen(false);
+      showToast("Routine point rules & accountability updated.");
+      return res;
+    }
+    if (op.kind === "excuse_missed") {
+      const res = await excuseMissed(op.entryId, pin);
+      if (!res.ok) return res;
+      showToast("Missed routine excused & points refunded if applicable.");
+      return res;
+    }
+    if (op.kind === "approve_routine") {
+      const res = await approveRoutine(op.routineId, op.memberName, pin);
+      if (!res.ok) return res;
+      showToast(
+        `Approved ${op.memberName} (+${res.pointsDelta ?? 0} pts added to leaderboard)!`,
+      );
+      return res;
+    }
+    const res = await sendBackRoutine(op.routineId, op.memberName, pin);
+    if (!res.ok) return res;
+    showToast(`Sent routine back to ${op.memberName}.`);
+    return res;
+  };
+
+  const runWithParentAuth = async (op: PendingParentOp) => {
+    if (isParentSession) {
+      const res = await executeParentOp(op);
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          setPinError(null);
+          setPendingOp(op);
+          return;
+        }
+        setErrorBanner(res.error || "Action failed.");
+      }
+      return;
+    }
+    setPinError(null);
+    setPendingOp(op);
+  };
+
+  const handlePinConfirm = async (pin: string) => {
+    if (!pendingOp) return;
+    setPinSubmitting(true);
+    setPinError(null);
+    try {
+      const res = await executeParentOp(pendingOp, pin);
+      if (!res.ok) {
+        setPinError(
+          res.error === "adult_only"
+            ? "A parent PIN is required."
+            : res.error === "invalid_pin" || res.status === 401
+              ? "Incorrect PIN. Try again."
+              : res.error || "Could not complete action.",
+        );
+        return;
+      }
+      setPendingOp(null);
+    } finally {
+      setPinSubmitting(false);
+    }
+  };
 
   return (
-    <div id="tasks-routines-panel" role="tabpanel" aria-labelledby="tasks-view-switch" className="space-y-6">
-      {/* Header and Controls */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-5" data-testid="routines-panel">
+      {/* Header & Controls */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-text-primary">
-            Family Routine Checklists
+          <h2 className="text-lg font-bold tracking-tight text-text-primary">
+            Daily & Weekly Routines
           </h2>
-          <p className="text-sm text-text-secondary">
-            Time-of-day habit checklists for the family wall and devices
+          <p className="text-xs text-text-secondary">
+            Scheduled per member & day · Completes credit real weekly points ·{" "}
+            {settings.accountabilityEnabled
+              ? `Auto-penalty -${settings.defaultMissedPenalty} pts at midnight`
+              : "Auto-penalties paused"}
           </p>
         </div>
 
-        {canManage && (
-          <SoftButton
-            variant="primary"
-            onClick={handleOpenAdd}
-            className="self-start sm:self-auto"
-          >
-            + Add Routine
-          </SoftButton>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-full border border-border bg-[var(--color-surface-2)] p-0.5">
+            <button
+              type="button"
+              onClick={() => setScheduleScope("today")}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                scheduleScope === "today"
+                  ? "bg-[var(--color-accent-selected)] text-white"
+                  : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Scheduled Today
+            </button>
+            <button
+              type="button"
+              onClick={() => setScheduleScope("week")}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                scheduleScope === "week"
+                  ? "bg-[var(--color-accent-selected)] text-white"
+                  : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Full Schedule ({routines.length})
+            </button>
+          </div>
+
+          {!isChildSession && (
+            <>
+              <SoftButton
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setSettingsError(null);
+                  setSettingsOpen(true);
+                }}
+              >
+                ⚙️ Point Rules
+              </SoftButton>
+              <SoftButton
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  setComposerError(null);
+                  setEditingRoutine(null);
+                  setComposerOpen(true);
+                }}
+              >
+                + Add Routine
+              </SoftButton>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Time Slot Filters */}
-      <div className="flex flex-wrap items-center gap-2">
+      {banner && (
+        <div
+          role="status"
+          className="rounded-2xl border border-[var(--color-accent-mint)]/35 bg-[var(--color-accent-mint)]/15 px-4 py-2.5 text-sm font-medium text-[var(--color-accent-ink-mint)]"
+        >
+          {banner}
+        </div>
+      )}
+
+      {errorBanner && (
+        <div
+          role="alert"
+          className="rounded-2xl border border-[var(--color-accent-rose)]/35 bg-[var(--color-accent-rose)]/10 px-4 py-2.5 text-sm font-medium text-[var(--color-accent-ink-rose)]"
+        >
+          {errorBanner}
+        </div>
+      )}
+
+      {/* Accountability Banner */}
+      {unexcusedMissed.length > 0 && (
+        <Surface
+          variant="glass-subtle"
+          padding="md"
+          data-testid="panel-missed-accountability"
+          className="border border-[var(--color-accent-rose)]/35 bg-[var(--color-accent-rose)]/10"
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold text-[var(--color-accent-ink-rose)]">
+              ⚠️ Missed Yesterday · Accountability Log
+            </span>
+            <span className="text-xs text-text-secondary">
+              {unexcusedMissed.length} unexcused
+            </span>
+          </div>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            {unexcusedMissed.map((entry) => (
+              <div
+                key={entry.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-[var(--color-surface-1)]/85 px-3 py-2"
+              >
+                <div>
+                  <div className="text-sm font-medium text-text-primary">
+                    {entry.routineEmoji} {entry.routineTitle} · {entry.memberName}
+                  </div>
+                  <div className="text-xs text-text-secondary">
+                    {entry.date} · Streak reset
+                    {entry.deductedPoints > 0
+                      ? ` · -${entry.deductedPoints} pts deducted`
+                      : " · 0 pts deducted"}
+                  </div>
+                </div>
+                {!isChildSession && (
+                  <SoftButton
+                    variant="secondary"
+                    size="sm"
+                    loading={!!busyIds[`excuse:${entry.id}`]}
+                    onClick={() =>
+                      runWithParentAuth({ kind: "excuse_missed", entryId: entry.id })
+                    }
+                  >
+                    Excuse{entry.deductedPoints > 0 ? ` +${entry.deductedPoints}` : ""}
+                  </SoftButton>
+                )}
+              </div>
+            ))}
+          </div>
+        </Surface>
+      )}
+
+      {/* Pending Approvals Queue */}
+      {!isChildSession && pendingApprovals.length > 0 && (
+        <Surface
+          variant="glass-subtle"
+          padding="md"
+          data-testid="panel-pending-approvals"
+          className="border border-[var(--color-accent-amber)]/35 bg-[var(--color-accent-amber)]/10"
+        >
+          <div className="mb-2 text-sm font-semibold text-[var(--color-accent-ink-amber)]">
+            ⏳ Routines Waiting Parent Approval ({pendingApprovals.length})
+          </div>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            {pendingApprovals.map((item) => (
+              <div
+                key={item.key}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-[var(--color-surface-1)]/85 px-3 py-2"
+              >
+                <div>
+                  <div className="text-sm font-medium text-text-primary">
+                    {item.routine.emoji} {item.routine.title} · {item.memberName}
+                  </div>
+                  <div className="text-xs text-text-secondary">
+                    +{item.routine.points} pts upon approval
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <SoftButton
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      runWithParentAuth({
+                        kind: "send_back_routine",
+                        routineId: item.routine.id,
+                        memberName: item.memberName,
+                      })
+                    }
+                  >
+                    Send Back
+                  </SoftButton>
+                  <SoftButton
+                    variant="primary"
+                    size="sm"
+                    onClick={() =>
+                      runWithParentAuth({
+                        kind: "approve_routine",
+                        routineId: item.routine.id,
+                        memberName: item.memberName,
+                      })
+                    }
+                  >
+                    Approve +{item.routine.points}
+                  </SoftButton>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Surface>
+      )}
+
+      {/* Slot Filter Pills */}
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => setSlotFilter("all")}
-          className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all ${
+          className={`hit-44 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
             slotFilter === "all"
-              ? "bg-[var(--color-accent-selected)] text-white shadow-sm"
+              ? "bg-[var(--color-accent-selected)] text-white"
               : "border border-border bg-[var(--color-surface-2)] text-text-secondary hover:text-text-primary"
           }`}
         >
-          All ({routines.length})
+          All Slots
         </button>
         {SLOTS.map((slot) => {
           const meta = ROUTINE_SLOT_META[slot];
-          const count = routines.filter((r) => r.slot === slot).length;
           const active = slotFilter === slot;
           return (
             <button
               key={slot}
               type="button"
               onClick={() => setSlotFilter(slot)}
-              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all ${
+              className={`hit-44 flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
                 active
-                  ? "bg-[var(--color-accent-selected)] text-white shadow-sm"
+                  ? "bg-[var(--color-accent-selected)] text-white"
                   : "border border-border bg-[var(--color-surface-2)] text-text-secondary hover:text-text-primary"
               }`}
             >
               <span>{meta.emoji}</span>
               <span>{meta.label}</span>
-              <span className="opacity-75">({count})</span>
             </button>
           );
         })}
       </div>
 
       {/* Routines Grid */}
-      {filteredRoutines.length === 0 ? (
+      {loading && routines.length === 0 ? (
+        <div className="py-10 text-center text-sm text-text-secondary">Loading routines...</div>
+      ) : filteredRoutines.length === 0 ? (
         <EmptyState
-          title="No routines found"
+          title="No routines match this filter"
           description={
-            slotFilter !== "all"
-              ? `No routines found for the ${ROUTINE_SLOT_META[slotFilter].label} slot.`
-              : "No routines configured. Click '+ Add Routine' to create your first family habit checklist."
+            scheduleScope === "today"
+              ? "Switch to 'Full Schedule' to view routines scheduled for other days (e.g., Sunday trash)."
+              : "Create a routine using '+ Add Routine'."
           }
           icon="⏰"
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {filteredRoutines.map((routine) => {
-            const slotMeta = ROUTINE_SLOT_META[routine.slot] || ROUTINE_SLOT_META.morning;
-            const checked = progress.checkedSteps[routine.id] ?? [];
+            const slotMeta = ROUTINE_SLOT_META[routine.slot] ?? ROUTINE_SLOT_META.morning;
+            const targets = resolveRoutineTargets(routine, rosterMembers);
+            const activeActor = resolveActiveActorForCard(routine);
+            const allowLegacy = isSingleMemberRoutine(routine, rosterMembers);
+            const checked = getMemberCheckedSteps(
+              progress,
+              routine.id,
+              activeActor || undefined,
+              allowLegacy,
+            );
+            const completion = getMemberCompletionMeta(
+              progress,
+              routine.id,
+              activeActor || undefined,
+              allowLegacy,
+            );
+            const isComplete =
+              completion?.status === "completed" || completion?.status === "approved";
+            const isPending = completion?.status === "pending_approval";
             const totalSteps = routine.steps.length;
-            const completedCount = checked.length;
-            const pct = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
-            const isAllDone = totalSteps > 0 && completedCount >= totalSteps;
+            const pct =
+              totalSteps > 0
+                ? Math.min(100, Math.round((checked.length / totalSteps) * 100))
+                : isComplete
+                  ? 100
+                  : 0;
+            const actorStreak = activeActor
+              ? accountability.streaks[memberKey(activeActor)]?.current ?? 0
+              : 0;
+            const effectivePenalty =
+              routine.missedPenalty !== undefined
+                ? routine.missedPenalty
+                : settings.accountabilityEnabled
+                  ? settings.defaultMissedPenalty
+                  : 0;
 
             return (
               <Surface
                 key={routine.id}
-                className="flex flex-col justify-between overflow-hidden rounded-3xl border border-border bg-[var(--color-surface-1)] p-5 transition-all hover:border-[var(--color-accent-selected)]/40 shadow-sm"
+                variant="glass-subtle"
+                padding="md"
+                data-testid={`routine-card-${routine.id}`}
+                className={`flex flex-col gap-3 transition ${
+                  isComplete
+                    ? "border-[var(--color-accent-mint)]/35 bg-[var(--color-accent-mint)]/10"
+                    : isPending
+                      ? "border-[var(--color-accent-amber)]/35 bg-[var(--color-accent-amber)]/10"
+                      : ""
+                }`}
               >
-                <div>
-                  {/* Routine Top Row */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[var(--color-surface-2)] text-2xl shadow-inner">
-                        {routine.emoji || slotMeta.emoji}
-                      </div>
-                      <div>
-                        <h3 className="text-base font-bold text-text-primary">
-                          {routine.title}
-                        </h3>
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
-                          <span className="rounded-md bg-[var(--color-surface-2)] px-2 py-0.5 font-medium text-text-secondary">
-                            ⏰ {routine.time}
-                          </span>
-                          <span className="rounded-md bg-[var(--color-surface-2)] px-2 py-0.5 font-medium text-text-secondary">
-                            👤 {routine.assignee}
-                          </span>
-                          <span className="rounded-md bg-[var(--color-accent-amber)]/15 px-2 py-0.5 font-semibold text-[var(--color-accent-amber)]">
-                            +{routine.points} pts
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {canManage && (
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEdit(routine)}
-                        className="rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-[var(--color-surface-2)] hover:text-text-primary"
-                        aria-label={`Edit ${routine.title}`}
-                        title="Edit routine"
-                      >
-                        ✏️
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div className="mt-4">
-                    <div className="flex justify-between text-xs font-medium text-text-secondary">
-                      <span>
-                        {completedCount} of {totalSteps} completed
-                      </span>
-                      <span>{pct}%</span>
-                    </div>
-                    <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-[var(--color-surface-2)]">
-                      <div
-                        className={`h-full transition-all duration-300 ${
-                          isAllDone
-                            ? "bg-[var(--color-accent-emerald)]"
-                            : "bg-[var(--color-accent-selected)]"
-                        }`}
-                        style={{ width: `${pct}%` }}
-                      />
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="text-2xl">{routine.emoji}</span>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-base font-semibold text-text-primary">
+                        {routine.title}
+                      </h3>
+                      <p className="text-xs text-text-secondary">
+                        {slotMeta.label} · {routine.time} ·{" "}
+                        {formatRoutineDaysLabel(routine.daysOfWeek, routine.slot)}
+                      </p>
                     </div>
                   </div>
-
-                  {/* Checklist Steps */}
-                  <div className="mt-4 space-y-2">
-                    {routine.steps.map((step) => {
-                      const isStepDone = checked.includes(step.id);
-                      return (
-                        <button
-                          key={step.id}
-                          type="button"
-                          onClick={() => handleToggleStep(routine, step.id)}
-                          className={`flex w-full items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left text-sm transition-all ${
-                            isStepDone
-                              ? "border-[var(--color-accent-emerald)]/30 bg-[var(--color-accent-emerald)]/10 text-text-secondary"
-                              : "border-border bg-[var(--color-surface-2)] text-text-primary hover:border-border/80"
-                          }`}
-                        >
-                          <span
-                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs transition-colors ${
-                              isStepDone
-                                ? "border-[var(--color-accent-emerald)] bg-[var(--color-accent-emerald)] text-white"
-                                : "border-border bg-[var(--color-surface-1)]"
-                            }`}
-                          >
-                            {isStepDone ? "✓" : ""}
-                          </span>
-                          <span className="text-base">{step.emoji || "✨"}</span>
-                          <span
-                            className={`flex-1 font-medium ${
-                              isStepDone ? "line-through opacity-75" : ""
-                            }`}
-                          >
-                            {step.title}
-                          </span>
-                        </button>
-                      );
-                    })}
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                        isComplete
+                          ? "bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-ink-mint)]"
+                          : isPending
+                            ? "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-ink-amber)]"
+                            : "bg-[var(--color-surface-2)] text-text-secondary"
+                      }`}
+                    >
+                      {isComplete
+                        ? `✓ +${completion?.pointsAwarded ?? routine.points} pts`
+                        : isPending
+                          ? "⏳ Pending"
+                          : `+${routine.points} pts`}
+                    </span>
+                    <span className="text-xs text-text-secondary">
+                      {formatRoutineTargetsLabel(routine)}
+                      {effectivePenalty > 0 && settings.accountabilityEnabled
+                        ? ` · -${effectivePenalty} if missed`
+                        : ""}
+                    </span>
                   </div>
                 </div>
 
-                {/* All Done Celebration Badge */}
-                {isAllDone && (
-                  <div className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-[var(--color-accent-emerald)]/15 py-2 text-xs font-bold text-[var(--color-accent-emerald)]">
-                    <span>🎉</span>
-                    <span>All steps completed! +{routine.points} pts earned</span>
+                {/* Member switcher when viewing a group routine in "All" */}
+                {!specificFilterMember && !isChildSession && targets.length > 1 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-medium text-text-secondary">
+                      Checking for:
+                    </span>
+                    {targets.map((t) => {
+                      const tName = t.fullName || t.name;
+                      const active = memberKey(tName) === memberKey(activeActor);
+                      const tMeta = getMemberCompletionMeta(progress, routine.id, tName, false);
+                      const tDone = tMeta?.status === "completed" || tMeta?.status === "approved";
+                      return (
+                        <button
+                          key={tName}
+                          type="button"
+                          onClick={() =>
+                            setSelectedCardActor((prev) => ({ ...prev, [routine.id]: tName }))
+                          }
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                            active
+                              ? "bg-[var(--color-accent-selected)] text-white"
+                              : "border border-border bg-[var(--color-surface-2)] text-text-secondary hover:text-text-primary"
+                          }`}
+                        >
+                          {tDone ? "✓ " : ""}
+                          {t.emoji ? `${t.emoji} ` : ""}
+                          {tName.split(" ")[0]}
+                        </button>
+                      );
+                    })}
+                    {actorStreak > 0 && (
+                      <span className="ml-auto text-xs font-semibold text-[var(--color-accent-ink-amber)]">
+                        🔥 {actorStreak}d
+                      </span>
+                    )}
                   </div>
                 )}
+
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-2)]">
+                  <div
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{
+                      width: `${pct}%`,
+                      background: isComplete
+                        ? "var(--color-accent-mint)"
+                        : "var(--color-accent-selected)",
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  {routine.steps.map((step) => {
+                    const stepDone = checked.includes(step.id);
+                    return (
+                      <button
+                        key={step.id}
+                        type="button"
+                        disabled={!activeActor || !!busyIds[`step:${routine.id}:${activeActor}`]}
+                        onClick={async () => {
+                          if (!activeActor) return;
+                          const res = await toggleStep(routine.id, step.id, activeActor);
+                          if (!res.ok) {
+                            setErrorBanner(res.error || "Could not update step.");
+                            return;
+                          }
+                          if (res.completion?.status === "pending_approval") {
+                            showToast(`${routine.title} sent for parent approval!`);
+                          } else if (res.pointsDelta && res.pointsDelta > 0) {
+                            showToast(
+                              `🎉 ${activeActor.split(" ")[0]} finished ${routine.title}! +${res.pointsDelta} pts posted to leaderboard`,
+                            );
+                          }
+                        }}
+                        className={`hit-44 flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
+                          stepDone
+                            ? "bg-[var(--color-surface-2)]/60 text-text-secondary line-through"
+                            : "bg-[var(--color-surface-2)] text-text-primary hover:bg-[var(--color-surface-1)]"
+                        }`}
+                      >
+                        <span
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-xs font-bold ${
+                            stepDone
+                              ? "border-[var(--color-accent-mint)] bg-[var(--color-accent-mint)] text-white"
+                              : "border-border bg-[var(--color-surface-1)]"
+                          }`}
+                        >
+                          {stepDone ? "✓" : ""}
+                        </span>
+                        <span className="text-base">{step.emoji}</span>
+                        <span className="flex-1 text-sm font-medium">{step.title}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex items-center gap-1.5">
+                    <SoftButton
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setFocusRoutine(routine)}
+                    >
+                      ⏱ Timer
+                    </SoftButton>
+                    {!isChildSession && (
+                      <>
+                        <SoftButton
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setComposerError(null);
+                            setEditingRoutine(routine);
+                            setComposerOpen(true);
+                          }}
+                        >
+                          ✏️ Edit
+                        </SoftButton>
+                        <SoftButton
+                          variant="ghost"
+                          size="sm"
+                          className="text-[var(--color-accent-ink-rose)]"
+                          onClick={() =>
+                            runWithParentAuth({
+                              kind: "delete_routine",
+                              routineId: routine.id,
+                            })
+                          }
+                        >
+                          🗑
+                        </SoftButton>
+                      </>
+                    )}
+                  </div>
+
+                  {activeActor && (
+                    <SoftButton
+                      variant={isComplete || isPending ? "secondary" : "primary"}
+                      size="sm"
+                      loading={!!busyIds[`routine:${routine.id}:${activeActor}`]}
+                      onClick={async () => {
+                        const res =
+                          isComplete || isPending
+                            ? await uncompleteRoutine(routine.id, activeActor)
+                            : await completeRoutine(routine.id, activeActor);
+                        if (!res.ok) {
+                          setErrorBanner(res.error || "Could not update routine.");
+                          return;
+                        }
+                        if (res.completion?.status === "pending_approval") {
+                          showToast(`${routine.title} sent for parent approval!`);
+                        } else if (!isComplete && res.pointsDelta && res.pointsDelta > 0) {
+                          showToast(
+                            `🎉 ${activeActor.split(" ")[0]} earned +${res.pointsDelta} pts!`,
+                          );
+                        }
+                      }}
+                    >
+                      {isComplete
+                        ? "Undo"
+                        : isPending
+                          ? "Cancel"
+                          : `Complete (+${routine.points})`}
+                    </SoftButton>
+                  )}
+                </div>
               </Surface>
             );
           })}
         </div>
       )}
 
-      {/* Routine Add / Edit Modal */}
-      <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={editingId ? "Edit Routine" : "Add Routine"}
-        description="Configure checklist habits for the family wall and dashboard"
-        footer={
-          <div className="flex w-full items-center justify-between gap-3">
-            {editingId ? (
-              <SoftButton
-                variant="danger"
-                onClick={handleDeleteRoutine}
-                disabled={saving}
-              >
-                Delete
-              </SoftButton>
-            ) : (
-              <div />
-            )}
-            <div className="flex gap-2">
-              <SoftButton
-                variant="secondary"
-                onClick={() => setModalOpen(false)}
-                disabled={saving}
-              >
-                Cancel
-              </SoftButton>
-              <SoftButton
-                variant="primary"
-                onClick={handleSaveRoutine}
-                disabled={saving || !draftTitle.trim()}
-              >
-                {saving ? "Saving..." : "Save Routine"}
-              </SoftButton>
-            </div>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          {/* Title & Emoji */}
-          <div className="grid grid-cols-[3rem_1fr] gap-3">
-            <TextField
-              label="Icon"
-              value={draftEmoji}
-              onChange={(e) => setDraftEmoji(e.target.value)}
-              placeholder="☀️"
-              maxLength={4}
-            />
-            <TextField
-              label="Routine Title"
-              value={draftTitle}
-              onChange={(e) => setDraftTitle(e.target.value)}
-              placeholder="e.g. Morning Launchpad"
-              autoFocus
-            />
-          </div>
+      <RoutineComposerModal
+        open={composerOpen}
+        onClose={() => {
+          setComposerOpen(false);
+          setEditingRoutine(null);
+        }}
+        editingRoutine={editingRoutine}
+        rosterMembers={rosterMembers}
+        settings={settings}
+        error={composerError}
+        onSave={async (routine) => {
+          await runWithParentAuth({ kind: "upsert_routine", routine });
+        }}
+      />
 
-          {/* Slot & Time */}
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
-                Time Slot
-              </span>
-              <select
-                value={draftSlot}
-                onChange={(e) => setDraftSlot(e.target.value as RoutineSlot)}
-                className="w-full rounded-2xl border border-border bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none"
-              >
-                {SLOTS.map((slot) => (
-                  <option key={slot} value={slot}>
-                    {ROUTINE_SLOT_META[slot].emoji} {ROUTINE_SLOT_META[slot].label}
-                  </option>
-                ))}
-              </select>
-            </label>
+      <RoutineSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+        error={settingsError}
+        onSave={async (next) => {
+          await runWithParentAuth({ kind: "update_settings", settings: next });
+        }}
+      />
 
-            <TextField
-              label="Target Time"
-              value={draftTime}
-              onChange={(e) => setDraftTime(e.target.value)}
-              placeholder="07:30"
-            />
-          </div>
+      <ParentPinPromptModal
+        open={pendingOp !== null}
+        onClose={() => setPendingOp(null)}
+        error={pinError}
+        loading={pinSubmitting}
+        onSubmit={handlePinConfirm}
+      />
 
-          {/* Assignee & Points */}
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
-                Assignee
-              </span>
-              <select
-                value={draftAssignee}
-                onChange={(e) => setDraftAssignee(e.target.value)}
-                className="w-full rounded-2xl border border-border bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none"
-              >
-                {memberOptions.map((m) => (
-                  <option key={m} value={m}>
-                    {m === "All" ? "👥 Everyone" : `👤 ${m}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div>
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
-                Reward Points
-              </span>
-              <div className="grid grid-cols-4 gap-1.5">
-                {POINT_OPTIONS.map((pts) => (
-                  <button
-                    key={pts}
-                    type="button"
-                    onClick={() => setDraftPoints(pts)}
-                    className={`rounded-xl py-2 text-xs font-bold transition-all ${
-                      draftPoints === pts
-                        ? "bg-[var(--color-accent-selected)] text-white shadow-sm"
-                        : "border border-border bg-[var(--color-surface-2)] text-text-secondary hover:text-text-primary"
-                    }`}
-                  >
-                    +{pts}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Checklist Steps Editor */}
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">
-                Checklist Steps ({draftSteps.length})
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  setDraftSteps((prev) => [
-                    ...prev,
-                    { id: `step-${Date.now()}`, title: "", emoji: "✨" },
-                  ])
-                }
-                className="text-xs font-semibold text-[var(--color-accent-selected)] hover:underline"
-              >
-                + Add Step
-              </button>
-            </div>
-
-            <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
-              {draftSteps.map((step, idx) => (
-                <div key={step.id || idx} className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={step.emoji}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setDraftSteps((prev) =>
-                        prev.map((s, i) => (i === idx ? { ...s, emoji: val } : s))
-                      );
-                    }}
-                    placeholder="✨"
-                    className="w-12 rounded-xl border border-border bg-[var(--color-surface-2)] py-2 text-center text-sm text-text-primary outline-none"
-                    maxLength={4}
-                  />
-                  <input
-                    type="text"
-                    value={step.title}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setDraftSteps((prev) =>
-                        prev.map((s, i) => (i === idx ? { ...s, title: val } : s))
-                      );
-                    }}
-                    placeholder={`Step ${idx + 1}`}
-                    className="flex-1 rounded-xl border border-border bg-[var(--color-surface-2)] px-3 py-2 text-sm text-text-primary outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDraftSteps((prev) => prev.filter((_, i) => i !== idx))
-                    }
-                    className="rounded-lg p-2 text-text-secondary hover:bg-[var(--color-surface-2)] hover:text-[var(--color-accent-rose)]"
-                    title="Remove step"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </Modal>
+      <RoutineFocusTimerModal
+        routine={focusRoutine}
+        open={focusRoutine !== null}
+        onClose={() => setFocusRoutine(null)}
+      />
     </div>
   );
 }

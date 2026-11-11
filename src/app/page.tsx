@@ -65,6 +65,7 @@ const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { s
 // KidHome reads localStorage-backed stores and animates on mount — client-only,
 // same dynamic/ssr:false recipe FogBackground uses inside KidHome itself.
 const KidHome = dynamic(() => import("@/modes/kid/KidHome"), { ssr: false });
+const AdultRoutinesHome = dynamic(() => import("@/components/home/AdultRoutinesHome"), { ssr: false });
 
 function memberMatchesName(member: any, name: string) {
   const firstName = name.split(" ")[0];
@@ -240,6 +241,11 @@ export default function HomePage() {
   const router = useRouter();
   const { currentUser, isLoggedIn, isParent, logout, sessionRemainingMs, sessionWarning, extendSession, quickLogin } = useAuth();
   const { mode } = useDashboardMode();
+  const [familyWallMember, setFamilyWallMember] = useState<string | null>(null);
+  const showFamilyWall =
+    mode === "adult" &&
+    !!currentUser &&
+    familyWallMember === currentUser.name;
   const { visibleWidgets, orientation, mounted: layoutMounted } = useHomeLayout();
   const { wall, mounted: wallMounted } = useWallMode();
   const { board: wideBoard, mounted: boardMounted } = useWallBoard();
@@ -588,6 +594,14 @@ export default function HomePage() {
     return <KidHome />;
   }
 
+  if (mode === "adult" && !!currentUser && !showFamilyWall) {
+    return (
+      <AdultRoutinesHome
+        onSwitchToWall={() => setFamilyWallMember(currentUser?.name ?? null)}
+      />
+    );
+  }
+
   if (homeError) {
     return (
       <PageShell>
@@ -634,6 +648,16 @@ export default function HomePage() {
                     {dateInfo.dayOfWeek} · {dateInfo.dayMonth}
                   </p>
                   <div className="order-2 ml-auto flex shrink-0 items-center gap-2 pr-14 sm:pr-16">
+                    {mode === "adult" && (
+                      <button
+                        type="button"
+                        onClick={() => setFamilyWallMember(null)}
+                        data-testid="switch-to-adult-routines-btn"
+                        className="hit-44 rounded-full border border-[var(--color-accent-selected)]/40 bg-[var(--color-accent-selected)]/15 px-3.5 py-1.5 text-xs font-semibold text-text-primary transition hover:bg-[var(--color-accent-selected)]/25"
+                      >
+                        ✓ My Routines
+                      </button>
+                    )}
                     {wall ? (
                       <WallMemberRail
                         members={familyMembers}

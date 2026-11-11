@@ -77,6 +77,10 @@ export type LedgerOperationSource =
   | "task-undo"
   | "task-penalty"
   | "manual-adjust"
+  | "routine-complete"
+  | "routine-undo"
+  | "routine-penalty"
+  | "routine-penalty-excuse"
   | "legacy-migration";
 
 export type LedgerOperationAction =

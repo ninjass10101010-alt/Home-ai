@@ -18,14 +18,14 @@ vi.mock("next/dynamic", async () => {
   const { useEffect, useState } = await import("react");
   return {
     default: (loader: () => Promise<{ default: any }>) => {
-      return function DynamicComp() {
+      return function DynamicComp(props: Record<string, unknown>) {
         const [Comp, setComp] = useState<any>(null);
         useEffect(() => {
           let alive = true;
           loader().then((m) => { if (alive) setComp(() => m.default); });
           return () => { alive = false; };
         }, []);
-        return Comp ? <Comp /> : null;
+        return Comp ? <Comp {...props} /> : null;
       };
     },
   };
@@ -34,6 +34,16 @@ vi.mock("next/dynamic", async () => {
 vi.mock("@/components/ui/FogBackground", () => ({ default: () => null }));
 vi.mock("@/modes/kid/KidHome", () => ({
   default: () => <div data-testid="kid-home-marker">KID HOME</div>,
+}));
+vi.mock("@/components/home/AdultRoutinesHome", () => ({
+  default: ({ onSwitchToWall }: { onSwitchToWall: () => void }) => (
+    <div data-testid="adult-home-marker">
+      <span>ADULT HOME</span>
+      <button type="button" onClick={onSwitchToWall}>
+        Switch to Family Wall
+      </button>
+    </div>
+  ),
 }));
 
 const modeMock = vi.hoisted(() => ({ mode: "family" }));
@@ -134,7 +144,7 @@ describe("Home branches on dashboard mode", () => {
     expect(el.textContent).not.toContain("Plan Meals");
   });
 
-  it("renders the family bento (no KidHome) for family and adult modes", async () => {
+  it("renders the family bento (no KidHome) for family and unsigned-in adult fallback", async () => {
     for (const mode of ["family", "adult"] as const) {
       modeMock.mode = mode;
       const el = await renderAsync(<HomePage />);
@@ -144,5 +154,25 @@ describe("Home branches on dashboard mode", () => {
       act(() => { activeRoot?.unmount(); activeRoot = null; });
       document.body.innerHTML = "";
     }
+  });
+
+  it("renders AdultRoutinesHome for a signed-in parent and toggles back to Family Wall", async () => {
+    modeMock.mode = "adult";
+    mockAuth.currentUser = { name: "Francisco Garcia", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    mockAuth.isParent = true;
+
+    const el = await renderAsync(<HomePage />);
+    await settle();
+    expect(el.querySelector('[data-testid="adult-home-marker"]')).not.toBeNull();
+
+    const toggleBtn = el.querySelector("button")!;
+    await act(async () => {
+      toggleBtn.click();
+    });
+    await settle();
+    expect(el.querySelector('[data-testid="adult-home-marker"]')).toBeNull();
+    expect(el.textContent).toContain("Days planned");
+    expect(el.querySelector('[data-testid="switch-to-adult-routines-btn"]')).not.toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import { requireLiveSession } from "@/lib/server-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { ensureCurrentTaskWeek } from "@/lib/task-week-rollover";
 import { ensureCurrentTaskDay } from "@/lib/task-day-sweep";
+import { ensureRoutineAccountability } from "@/lib/routine-service";
 import { reconcileTaskProjectionLocked } from "@/lib/task-projection-reconciler";
 import { repairCategories } from "@/lib/task-repair-categories";
 import { drainDueTaskCommandQueue } from "@/lib/task-command-queue-server";
@@ -112,6 +113,11 @@ export async function GET(request: NextRequest) {
       snapshot: null,
     }, { status: 503 });
   }
+
+  // Daily routine accountability runs idempotently right after task day-sweep
+  // so missed routines deduct/alert promptly at local midnight without
+  // blocking /api/tasks/sync if accountability storage isn't initialized.
+  await ensureRoutineAccountability().catch(() => null);
 
   let reconciliation: Awaited<ReturnType<typeof reconcileTaskProjectionLocked>>;
   try {
