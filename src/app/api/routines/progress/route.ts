@@ -72,17 +72,11 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
   }
 
-  const actor = await readOptionalSessionActor(req);
-  if (actor.sessionError) {
+  const auth = await authorizeRoutineParentWrite(req, body);
+  if (!auth.ok) {
     return NextResponse.json(
-      { ok: false, error: actor.sessionError.error },
-      { status: actor.sessionError.status },
-    );
-  }
-  if (actor.signedIn && !actor.isParent) {
-    return NextResponse.json(
-      { ok: false, error: "use_post_action_for_member_progress" },
-      { status: 403 },
+      { ok: false, error: auth.error || "unauthorized" },
+      { status: auth.status || 401 },
     );
   }
 

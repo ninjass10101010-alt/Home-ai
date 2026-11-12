@@ -254,18 +254,6 @@ export default function RoutinesPanel({
   };
 
   const runWithParentAuth = async (op: PendingParentOp) => {
-    if (isParentSession) {
-      const res = await executeParentOp(op);
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          setPinError(null);
-          setPendingOp(op);
-          return;
-        }
-        setErrorBanner(res.error || "Action failed.");
-      }
-      return;
-    }
     setPinError(null);
     setPendingOp(op);
   };

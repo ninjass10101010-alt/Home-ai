@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listActiveKidGoals, setKidGoal, getTwoWeekCycle } from "@/lib/goals";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { authorizeParentPinRequest } from "@/lib/admin-auth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,17 +24,17 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-    // Role is a CAPABILITY: only parent role may modify goals
-    if (!session || session.role !== "parent") {
+    const body = await request.json();
+    const bodyRecord = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+    const auth = await authorizeParentPinRequest(request, bodyRecord);
+    if (!auth.ok) {
       return NextResponse.json(
-        { ok: false, error: "Only parents can set kid goals" },
-        { status: 403 }
+        { ok: false, error: auth.error === "adult_only" ? "Only parents can set kid goals" : "Parent PIN required" },
+        { status: auth.status ?? 401 }
       );
     }
 
-    const body = await request.json();
-    const { member, targetPoints, reward, bonusPoints, cycleStart } = body;
+    const { member, targetPoints, reward, bonusPoints, cycleStart } = body ?? {};
 
     if (!member || typeof targetPoints !== "number" || targetPoints < 1) {
       return NextResponse.json(

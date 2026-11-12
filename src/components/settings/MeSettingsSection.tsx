@@ -80,6 +80,7 @@ function KidProfile({ member }: { member: AuthUser }) {
 }
 
 function GuestProfile() {
+  const { quickLogin } = useAuth();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [members, setMembers] = useState<MemberPickerIdentity[]>([]);
   const [selectedMember, setSelectedMember] = useState<MemberPickerIdentity | null>(null);
@@ -105,7 +106,7 @@ function GuestProfile() {
         <div>
           <h3 className="text-lg font-bold text-text-primary">Sign in to manage your profile</h3>
           <p className="mt-1 text-sm leading-6 text-text-secondary">
-            Choose your face, then enter your private PIN.
+            Choose your face for 1-tap sign-in.
           </p>
         </div>
         <div ref={signInTriggerRef} className="w-full sm:w-auto">
@@ -122,11 +123,15 @@ function GuestProfile() {
           if (!identity) return;
           signInTriggerRef.current?.querySelector("button")?.focus();
           setPickerOpen(false);
-          setSelectedMember(identity);
+          void quickLogin(identity.name).then((res) => {
+            if (!res.success) {
+              setSelectedMember(identity);
+            }
+          });
         }}
         onClose={() => setPickerOpen(false)}
         panelClassName="settings-dialog"
-        description="Pick your face, then enter your 4-digit PIN."
+        description="Tap your face to sign in."
       />
       <SettingsSignInDialog
         open={selectedMember !== null}

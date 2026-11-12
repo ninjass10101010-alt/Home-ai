@@ -1,23 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyPinFromPB, sanitizeMember } from "@/lib/server-auth";
+import { verifyPinAgainstAnyMember, verifyPinFromPB, sanitizeMember } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
-// Server-side PIN verification for client flows that used to verify against
-// member data fetched straight from PocketBase in the browser (e.g. the Tasks
-// page completion/undo/claim/redeem/adjust gates). The PIN never leaves the
-// server unverified and the response is sanitized — no pin fields ship back.
+// Server-side PIN verification. Supports either `{ memberName, pin }` or
+// `{ pin, requireRole: "parent" }` (when validating any parent's PIN for an
+// action-level gate such as unlocking explicit music or dashboard settings).
 export async function POST(request: NextRequest) {
   try {
-    const { memberName, pin } = await request.json();
-    if (!memberName || !pin) {
+    const body = await request.json();
+    const pin = typeof body?.pin === "string" ? body.pin.trim() : "";
+    const memberName = typeof body?.memberName === "string" ? body.memberName.trim() : "";
+    const requireRole = typeof body?.requireRole === "string" ? body.requireRole.trim().toLowerCase() : "";
+
+    if (!pin) {
+      return NextResponse.json({ error: "pin is required" }, { status: 400 });
+    }
+    if (!memberName && requireRole !== "parent") {
       return NextResponse.json({ error: "memberName and pin are required" }, { status: 400 });
     }
-    const member = await verifyPinFromPB(String(memberName), String(pin));
+
+    const member = memberName
+      ? await verifyPinFromPB(memberName, pin)
+      : await verifyPinAgainstAnyMember(pin);
+
     if (!member) {
       return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
     }
-    return NextResponse.json({ success: true, member: sanitizeMember(member) });
+    if (requireRole && String(member.role || "").trim().toLowerCase() !== requireRole) {
+      return NextResponse.json({ error: "adult_only" }, { status: 403 });
+    }
+    return NextResponse.json({ success: true, ok: true, member: sanitizeMember(member) });
   } catch {
     return NextResponse.json({ error: "Verification failed" }, { status: 500 });
   }

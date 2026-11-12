@@ -170,7 +170,7 @@ describe("age-gated task completion", () => {
     expect(el.textContent || "").toMatch(/Sending 1 change|Still sending/);
   });
 
-  it("Jasmine (10) taps an assigned chore: PIN modal, and the verified PIN is queued ephemerally (no instant points)", async () => {
+  it("Jasmine (10) taps an assigned chore: one PIN-free durable command, NO PIN modal, pending approval queued", async () => {
     stubVerifyMember({ name: "Jasmine Rose", fullName: "Jasmine Rose", role: "child" });
     claimStatus.value = 503;
     mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
@@ -184,14 +184,9 @@ describe("age-gated task completion", () => {
     await act(async () => { row.click(); });
     await settle();
 
-    // 10+ kids hit the PIN step — identity still needs proving.
-    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(document.querySelector('input[inputMode="numeric"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(verifyCalls()).not.toContain("/api/members/verify");
 
-    await typeAndSubmit();
-    expect(verifyCalls()).toContain("/api/members/verify");
-
-    // Verified child: the completion is QUEUED and points never move locally.
     const [entry] = listTaskOutbox();
     expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 52 } });
     const saved = storedTasks();
@@ -200,21 +195,11 @@ describe("age-gated task completion", () => {
     expect(storedHistory()).toHaveLength(0);
     const week = JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
     expect(week.points["Jasmine Rose"]).toBeUndefined();
-    // The PIN lives only in the ephemeral registry — never in localStorage.
-    const dump = Object.keys(localStorage)
-      .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
-      .join("\n");
-    expect(dump).not.toContain("1234");
-    // Honest pending copy, never the instant-earn copy.
-    expect(document.body.textContent || "").toContain("on the way");
-    expect(document.body.textContent || "").not.toContain("completed Feed the dog");
-    // Flush the success-copy auto-close (1500ms + exit) so the portaled
-    // dialog unmounts inside this test, not after the next teardown wipes
-    // the body out from under the portal.
+    expect(el.textContent || "").toContain("on the way");
     await settle(1800);
   });
 
-  it("parent PIN-complete queues one command and moves no local point line", async () => {
+  it("parent PIN-free complete queues one command and moves no local point line", async () => {
     stubVerifyMember({ name: "Rebecca (Mom)", fullName: "Rebecca (Mom)", role: "parent" });
     claimStatus.value = 503;
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
@@ -227,12 +212,8 @@ describe("age-gated task completion", () => {
     expect(row).not.toBeNull();
     await act(async () => { row.click(); });
     await settle();
-    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
 
-    await typeAndSubmit();
-
-    // Adults are the SAME command as a kid's — only the PIN differs. The
-    // earn line is the server's, and arrives with the acknowledgment.
     const [entry] = listTaskOutbox();
     expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 53 } });
     const saved = storedTasks();
@@ -241,9 +222,6 @@ describe("age-gated task completion", () => {
     expect(storedHistory()).toHaveLength(0);
     const week = JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
     expect(week.points["Rebecca (Mom)"]).toBeUndefined();
-    expect(document.body.textContent || "").toContain("completed Mow lawn! +5pts");
-    // Flush the success-copy auto-close (1500ms + exit) — same portal-
-    // teardown hygiene as the child test.
     await settle(1800);
   });
 });

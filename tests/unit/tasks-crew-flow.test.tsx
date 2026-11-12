@@ -127,7 +127,7 @@ describe("Crew tasks — open board + join/check-in", () => {
     expect(text).toContain("Join crew");
   });
 
-  it("joining a crew sends the crew-join action with the member's PIN", async () => {
+  it("joining a crew sends the crew-join action without a PIN when signed in", async () => {
     mockAuth.currentUser = { name: "Caspian Garcia", role: "child", age: 5 };
     mockAuth.isLoggedIn = true;
     seed([CREW]);
@@ -138,10 +138,9 @@ describe("Crew tasks — open board + join/check-in", () => {
     const joinBtn = [...el.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || "").includes("Join crew for"));
     expect(joinBtn).toBeTruthy();
     await act(async () => { (joinBtn as HTMLElement).click(); });
-    await settle();
-    expect(document.body.textContent).toContain("Join the crew");
-    await submitPin();
+    await settle(150);
 
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(CLAIM_CALLS.length).toBe(1);
     expect(CLAIM_CALLS[0]).toMatchObject({ action: "crew-join", taskId: 40, memberName: "Caspian Garcia" });
     await settle(1800);
@@ -175,8 +174,7 @@ describe("Crew tasks — open board + join/check-in", () => {
     const joinBtn = [...el.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || "").includes("Join crew for"));
     expect(joinBtn).toBeTruthy();
     await act(async () => { (joinBtn as HTMLElement).click(); });
-    await settle();
-    await submitPin();
+    await settle(150);
 
     expect(CLAIM_CALLS[0]).toMatchObject({ action: "crew-join", taskId: 40 });
     expect(document.body.textContent || "").not.toContain("Couldn't reach");
@@ -186,7 +184,7 @@ describe("Crew tasks — open board + join/check-in", () => {
     await settle(1800);
   });
 
-  it("a member already on the crew sees Check in instead of Join", async () => {
+  it("a member already on the crew sees Check in and checks in PIN-free when signed in", async () => {
     mockAuth.currentUser = { name: "Bailey Garcia", role: "child", age: 12 };
     mockAuth.isLoggedIn = true;
     seed([{ ...CREW, crew: { members: [{ name: "Bailey Garcia", emoji: "👧", joinedAt: "t" }] } }]);
@@ -196,21 +194,19 @@ describe("Crew tasks — open board + join/check-in", () => {
 
     const text = el.textContent || "";
     // A joined member is no longer on the Open board; the task lives in Pending
-    // with crew progress and opens the check-in PIN step.
+    // with crew progress and completes check-in PIN-free when signed in.
     expect(text).toContain("Crew 0/2 checked in");
     const row = [...el.querySelectorAll("[role='button']")].find((b) => (b.getAttribute("aria-label") || "").includes("Wash the van"));
     expect(row).toBeTruthy();
     await act(async () => { (row as HTMLElement).click(); });
-    await settle();
-    expect(document.body.textContent).toContain("Check in");
-    await submitPin();
+    await settle(150);
     expect(CLAIM_CALLS[0]).toMatchObject({ action: "crew-checkin", taskId: 40, memberName: "Bailey Garcia" });
     await settle(1800);
   });
 });
 
 describe("Crew tasks — open claim speed bonus", () => {
-  it("an open task's claim sends action:claim (server adds the bonus)", async () => {
+  it("an open task's claim sends action:claim PIN-free when signed in (server adds the bonus)", async () => {
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
     mockAuth.isLoggedIn = true;
     seed([{ id: 50, title: "Clean the garage", assignee: "Open", assigneeEmoji: "🤝", due: todayISO(), points: 10, recurring: null, category: "Chores", completed: false, priority: "low", universal: true, speedBonus: 3 }]);
@@ -221,8 +217,7 @@ describe("Crew tasks — open claim speed bonus", () => {
     const claimBtn = [...el.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || "").includes("Claim Clean the garage"));
     expect(claimBtn).toBeTruthy();
     await act(async () => { (claimBtn as HTMLElement).click(); });
-    await settle();
-    await submitPin();
+    await settle(150);
 
     expect(CLAIM_CALLS.length).toBe(1);
     expect(CLAIM_CALLS[0]).toMatchObject({ action: "claim", taskId: 50 });

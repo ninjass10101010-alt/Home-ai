@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { namesMatch, verifyPinFromPB } from "@/lib/server-auth";
+import { SESSION_COOKIE, verifySession } from "@/lib/session";
 import { applyWeekLedgerOperation, type LedgerProjection } from "@/lib/ledger-operations";
 import { localWeekStartISO } from "@/lib/local-date";
 import {
@@ -147,14 +148,35 @@ async function parentApproval(
     const rows = await pb.collection("members").getFullList({ requestKey: null });
     return Array.isArray(rows) ? (rows as Array<Record<string, any>>) : [];
   });
-  const approver = roster.find(
-    (candidate) => typeof candidate?.name === "string" && namesMatch(candidate.name, parentName),
-  );
-  if (!approver || String(approver.role ?? "").trim().toLowerCase() !== "parent") {
-    return "not_parent";
+  if (parentName) {
+    const approver = roster.find(
+      (candidate) => typeof candidate?.name === "string" && namesMatch(candidate.name, parentName),
+    );
+    if (!approver || String(approver.role ?? "").trim().toLowerCase() !== "parent") {
+      return "not_parent";
+    }
+    const verified = await verifyPinFromPB(approver.name, parentPin);
+    return verified ? "approved" : "invalid_pin";
   }
-  const verified = await verifyPinFromPB(approver.name, parentPin);
-  return verified ? "approved" : "invalid_pin";
+  const parents = roster.filter(
+    (candidate) =>
+      typeof candidate?.name === "string" &&
+      String(candidate.role ?? "").trim().toLowerCase() === "parent",
+  );
+  for (const candidate of parents) {
+    const verified = await verifyPinFromPB(candidate.name, parentPin);
+    if (verified) return "approved";
+  }
+  const nonParents = roster.filter(
+    (candidate) =>
+      typeof candidate?.name === "string" &&
+      String(candidate.role ?? "").trim().toLowerCase() !== "parent",
+  );
+  for (const candidate of nonParents) {
+    const verified = await verifyPinFromPB(candidate.name, parentPin);
+    if (verified) return "not_parent";
+  }
+  return "invalid_pin";
 }
 
 function withRepairMarker(
@@ -194,14 +216,32 @@ export async function POST(request: NextRequest) {
     return errorResponse("", "invalid_body", 400, "A reward, a member and an operation id are required.");
   }
   const { operationId } = parsed;
-  if (!parsed.pin) {
-    return errorResponse(operationId, "invalid_pin", 401, "Invalid PIN");
-  }
 
   try {
-    const verified = await verifyPinFromPB(parsed.memberName, parsed.pin);
-    if (!verified) {
-      return errorResponse(operationId, "invalid_pin", 401, "Invalid PIN");
+    let verified: any = null;
+    if (parsed.pin) {
+      verified = await verifyPinFromPB(parsed.memberName, parsed.pin);
+      if (!verified) {
+        return errorResponse(operationId, "invalid_pin", 401, "Invalid PIN");
+      }
+    } else {
+      const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+      if (!session || typeof session.memberId !== "string" || !session.memberId.trim()) {
+        return errorResponse(operationId, "invalid_pin", 401, "Sign in to redeem a reward.");
+      }
+      const roster = await withAdmin(async (pb) => {
+        const rows = await pb.collection("members").getFullList({ requestKey: null });
+        return Array.isArray(rows) ? (rows as Array<Record<string, any>>) : [];
+      });
+      const live = roster.find(
+        (row) =>
+          (typeof row?.id === "string" && row.id === session.memberId) ||
+          (typeof row?.name === "string" && namesMatch(row.name, session.name)),
+      );
+      if (!live || typeof live.name !== "string" || !namesMatch(live.name, parsed.memberName)) {
+        return errorResponse(operationId, "invalid_pin", 401, "Sign in as this member to redeem.");
+      }
+      verified = live;
     }
     const member = typeof verified.name === "string" && verified.name.trim()
       ? verified.name.trim()
@@ -227,7 +267,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (reward.cost > PARENT_APPROVAL_MIN_COST) {
-      if (!parsed.parentName || !parsed.parentPin) {
+      if (!parsed.parentPin) {
         return errorResponse(
           operationId,
           "parent_approval_required",

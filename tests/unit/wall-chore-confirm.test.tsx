@@ -271,8 +271,8 @@ describe("Tasks page wall chore 2-step confirm (wiring)", () => {
   it("wall on: first tap arms (pill, no dialog, no verify traffic); the pill tap drives the same PIN path a non-wall tap does", async () => {
     wallState.wall = true;
     stubVerifyMember({ name: "Jasmine Rose", fullName: "Jasmine Rose", role: "child" });
-    mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
-    mockAuth.isLoggedIn = true;
+    mockAuth.currentUser = null;
+    mockAuth.isLoggedIn = false;
     seed([FEED_JASM]);
     const el = await renderAsync(<TasksPage />);
     await settle();
@@ -385,8 +385,8 @@ describe("Tasks page wall chore 2-step confirm (wiring)", () => {
   it("wall off: single tap goes straight to the completion path (regression guard)", async () => {
     wallState.wall = false;
     stubVerifyMember({ name: "Jasmine Rose", fullName: "Jasmine Rose", role: "child" });
-    mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
-    mockAuth.isLoggedIn = true;
+    mockAuth.currentUser = null;
+    mockAuth.isLoggedIn = false;
     seed([FEED_JASM]);
     const el = await renderAsync(<TasksPage />);
     await settle();

@@ -10,6 +10,7 @@ import Avatar from "@/components/ui/Avatar";
 import EmptyState from "@/components/ui/EmptyState";
 import IconButton from "@/components/ui/IconButton";
 import ListRow from "@/components/ui/ListRow";
+import ParentPinGateModal from "@/components/auth/ParentPinGateModal";
 import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
 import Toast from "@/components/ui/Toast";
@@ -107,6 +108,11 @@ export default function FamilySettingsSection() {
   const [savingMember, setSavingMember] = useState(false);
   const [memberPendingDelete, setMemberPendingDelete] = useState<FamilyMember | null>(null);
   const [deletingMember, setDeletingMember] = useState(false);
+  const [pendingPinOp, setPendingPinOp] = useState<{
+    description: string;
+    confirmLabel?: string;
+    onPin: (pin: string) => Promise<void> | void;
+  } | null>(null);
   const saveInFlightRef = useRef(false);
   const memberFormSessionRef = useRef(0);
 
@@ -178,8 +184,8 @@ export default function FamilySettingsSection() {
     setMembers(readFamilyMembers());
   };
 
-  const saveMember = async () => {
-    if (saveInFlightRef.current || !validateMember()) return;
+  const executeSaveMember = async (pin: string) => {
+    if (saveInFlightRef.current) return;
     saveInFlightRef.current = true;
     setSavingMember(true);
     const session = memberFormSessionRef.current;
@@ -200,7 +206,10 @@ export default function FamilySettingsSection() {
     try {
       const res = await fetch("/api/members/admin", {
         method: isEditing ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-pin": pin,
+        },
         body: JSON.stringify(isEditing
           ? { id: editingMember?.pbId, name: editingName, patch: payload }
           : { ...payload, joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }) }),
@@ -273,13 +282,26 @@ export default function FamilySettingsSection() {
     }
   };
 
-  const deleteMember = async (member: FamilyMember) => {
+  const saveMember = () => {
+    if (saveInFlightRef.current || !validateMember()) return;
+    const label = editingMember !== null ? `update ${memberForm.name.trim()}` : `add ${memberForm.name.trim()}`;
+    setPendingPinOp({
+      description: `Enter a parent's 4-digit PIN to ${label}.`,
+      confirmLabel: editingMember !== null ? "Save member" : "Add member",
+      onPin: (pin) => executeSaveMember(pin),
+    });
+  };
+
+  const executeDeleteMember = async (member: FamilyMember, pin: string) => {
     setDeletingMember(true);
     try {
       try {
         const res = await fetch("/api/members/admin", {
           method: "DELETE",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-pin": pin,
+          },
           body: JSON.stringify({ id: member.pbId, name: member.name }),
         });
         if (!res.ok) {
@@ -499,7 +521,7 @@ export default function FamilySettingsSection() {
             controlId={MEMBER_AGE_ID}
             helperId={MEMBER_AGE_HELPER_ID}
             errorId={MEMBER_AGE_ERROR_ID}
-            helperText="Under 10 signs in with one tap"
+            helperText="Optional — everyone signs in with one tap"
             errorText={memberErrors.age}
           >
             <input
@@ -592,7 +614,14 @@ export default function FamilySettingsSection() {
         confirmLabel="Remove member"
         busy={deletingMember}
         onConfirm={() => {
-          if (memberPendingDelete) void deleteMember(memberPendingDelete);
+          if (!memberPendingDelete) return;
+          const target = memberPendingDelete;
+          setMemberPendingDelete(null);
+          setPendingPinOp({
+            description: `Enter a parent's 4-digit PIN to remove ${target.name}.`,
+            confirmLabel: "Remove member",
+            onPin: (pin) => executeDeleteMember(target, pin),
+          });
         }}
         onClose={() => setMemberPendingDelete(null)}
       >
@@ -602,6 +631,18 @@ export default function FamilySettingsSection() {
             : "This member will be removed from the family roster."}
         </p>
       </SettingsConfirmDialog>
+
+      <ParentPinGateModal
+        open={pendingPinOp !== null}
+        title="Parent PIN required"
+        description={pendingPinOp?.description}
+        confirmLabel={pendingPinOp?.confirmLabel}
+        onClose={() => setPendingPinOp(null)}
+        onVerified={async (pin) => {
+          const op = pendingPinOp;
+          await op?.onPin(pin);
+        }}
+      />
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authorizeParentPinRequest } from "@/lib/admin-auth";
 import { executeInternalTaskCommand } from "@/lib/task-commands";
-import { verifyLiveParentSession } from "@/lib/live-member";
 import { enqueueTaskCommandRow } from "@/lib/task-command-queue-server";
 import {
   parseManageTaskCommand,
@@ -12,10 +12,11 @@ import {
 export const dynamic = "force-dynamic";
 
 function statusForReason(reason: string | undefined): number {
+  if (reason === "unauthorized") return 401;
   if (reason === "adult_only") return 403;
   if (reason === "unknown_task") return 404;
   if (reason === "operation_conflict") return 409;
-  if (reason === "member_roster_unavailable" || reason === "snapshot_write_failed" || reason === "task_store_unavailable") return 503;
+  if (reason === "identity_unavailable" || reason === "member_roster_unavailable" || reason === "snapshot_write_failed" || reason === "task_store_unavailable") return 503;
   return 400;
 }
 
@@ -45,11 +46,6 @@ function queuedResponse(operationId: string, reason: string, action?: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await verifyLiveParentSession(request);
-  if (!auth.ok) {
-    return NextResponse.json({ error: auth.reason }, { status: auth.status });
-  }
-
   let body: unknown;
   try {
     body = await request.json();
@@ -57,7 +53,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_task_command" }, { status: 400 });
   }
 
-  const command = parseManageTaskCommand(body);
+  const bodyRecord = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  const auth = await authorizeParentPinRequest(request, bodyRecord);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { error: auth.error ?? "unauthorized" },
+      { status: auth.status ?? 401 },
+    );
+  }
+  const actorMember = auth.member ?? { id: "system", name: "Parent", role: "parent" };
+
+  const cleanBody = bodyRecord ? { ...bodyRecord } : body;
+  if (cleanBody && typeof cleanBody === "object" && !Array.isArray(cleanBody)) {
+    delete (cleanBody as Record<string, unknown>).pin;
+    delete (cleanBody as Record<string, unknown>).parentPin;
+  }
+
+  const command = parseManageTaskCommand(cleanBody);
   if ("error" in command) {
     return NextResponse.json({ error: command.error }, { status: 400 });
   }
@@ -68,9 +80,9 @@ export async function POST(request: NextRequest) {
       operationId: command.operationId,
       kind: command.action,
       actor: {
-        memberId: auth.member.id,
-        name: auth.member.name,
-        role: auth.member.role,
+        memberId: actorMember.id,
+        name: actorMember.name,
+        role: actorMember.role,
       },
       payload: taskManageInternalPayload(command),
     },
@@ -88,10 +100,10 @@ export async function POST(request: NextRequest) {
           action: command.action,
           payload: taskManageInternalPayload(command),
           actor: {
-            memberId: auth.member.id,
-            name: auth.member.name,
-            role: auth.member.role,
-            authentication: "session",
+            memberId: actorMember.id,
+            name: actorMember.name,
+            role: actorMember.role,
+            authentication: "pin",
           },
           displayTarget: {
             kind: "task",

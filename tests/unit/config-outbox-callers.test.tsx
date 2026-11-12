@@ -81,6 +81,9 @@ function installFetch() {
           }),
         };
       }
+      if (url === "/api/members/verify") {
+        return { ok: true, status: 200, json: async () => ({ member: { id: "m-rebecca", name: "Rebecca", role: "parent" } }) };
+      }
       if (url === "/api/tasks/sync") {
         return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
       }
@@ -101,6 +104,24 @@ async function mount(ui: ReactElement): Promise<HTMLElement> {
 
 async function settle(ms = 80) {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+}
+
+async function submitParentPin(pin = "1234") {
+  const input = document.querySelector<HTMLInputElement>('input[aria-label="Parent 4-digit PIN"]');
+  expect(input).not.toBeNull();
+  const dlg = input!.closest<HTMLElement>('[role="dialog"]')!;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    setter.call(input!, pin);
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const confirm = Array.from(dlg.querySelectorAll("button")).find((b) => {
+    const label = b.textContent?.trim() || "";
+    return label && label !== "Cancel";
+  }) as HTMLButtonElement | undefined;
+  expect(confirm).toBeTruthy();
+  await act(async () => { confirm!.click(); });
+  await settle(80);
 }
 
 beforeEach(() => {
@@ -149,6 +170,8 @@ describe("RewardSection writes a durable config command", () => {
       (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Save") as HTMLButtonElement).click();
     });
     await settle();
+    await submitParentPin();
+    await settle();
 
     const entry = listTaskOutbox()[0];
     expect(entry).toMatchObject({ route: "/api/tasks/config", action: "upsert" });
@@ -166,6 +189,8 @@ describe("RewardSection writes a durable config command", () => {
       (document.querySelector('button[aria-label="Delete reward"]') as HTMLButtonElement).click();
     });
     await settle();
+    await submitParentPin();
+    await settle();
 
     expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/config", action: "delete", payload: { itemId: 1 } });
     expect(loadRewards<any[]>([])).toHaveLength(1);
@@ -180,6 +205,8 @@ describe("RewardSection writes a durable config command", () => {
     await act(async () => {
       (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Clear all") as HTMLButtonElement).click();
     });
+    await settle();
+    await submitParentPin();
     await settle();
 
     const entry = listTaskOutbox()[0];
@@ -203,6 +230,8 @@ describe("RewardSection writes a durable config command", () => {
     await act(async () => {
       (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Save") as HTMLButtonElement).click();
     });
+    await settle();
+    await submitParentPin();
     await settle(150);
 
     expect(server.configRequests).toHaveLength(1);
@@ -225,6 +254,8 @@ describe("WeeklyPrizesCard writes a durable config command", () => {
     await act(async () => {
       (Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").includes("Save prizes")) as HTMLButtonElement).click();
     });
+    await settle();
+    await submitParentPin();
     await settle();
 
     const entry = listTaskOutbox()[0];
@@ -251,6 +282,8 @@ describe("Settings surfaces report the queue honestly", () => {
     await act(async () => {
       (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Save") as HTMLButtonElement).click();
     });
+    await settle();
+    await submitParentPin();
     await settle(150);
 
     // The parent can SEE that the change is still in flight.
@@ -275,6 +308,8 @@ describe("Settings surfaces report the queue honestly", () => {
     await act(async () => {
       (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Save") as HTMLButtonElement).click();
     });
+    await settle();
+    await submitParentPin();
     await settle(250);
 
     const failures = document.querySelector('[data-testid="rewards-command-failures"]');
@@ -320,6 +355,8 @@ describe("Settings surfaces report the queue honestly", () => {
     await act(async () => {
       (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Save") as HTMLButtonElement).click();
     });
+    await settle();
+    await submitParentPin();
     await settle(250);
 
     expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Ghost"]);
@@ -364,6 +401,8 @@ describe("Settings surfaces report the queue honestly", () => {
     await act(async () => {
       (Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").includes("Save prizes")) as HTMLButtonElement).click();
     });
+    await settle();
+    await submitParentPin();
     await settle(250);
 
     expect(loadWeeklyPrizes().map((p) => p.text)).toEqual(["Stale prize"]);
@@ -387,6 +426,8 @@ describe("Settings surfaces report the queue honestly", () => {
     await act(async () => {
       (Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").includes("Save prizes")) as HTMLButtonElement).click();
     });
+    await settle();
+    await submitParentPin();
     await settle(150);
 
     expect(document.querySelector('[data-testid="prizes-command-queue"]')?.textContent).toMatch(/Sending 1 change/);

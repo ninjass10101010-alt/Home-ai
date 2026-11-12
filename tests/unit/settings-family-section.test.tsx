@@ -59,8 +59,12 @@ function response(ok: boolean, status: number, data: Record<string, unknown> = {
 function stubFetch(responder?: FetchResponder) {
   calls = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/members/verify")) {
+      return response(true, 200, { member: { id: "m-parent", name: "Rebecca", role: "parent" } });
+    }
     const call: FetchCall = {
-      url: String(input),
+      url,
       method: init?.method,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     };
@@ -68,6 +72,20 @@ function stubFetch(responder?: FetchResponder) {
     if (responder) return responder(call);
     return response(true, call.method === "POST" ? 201 : 200, call.method === "POST" ? { starterPin: "1234" } : {});
   }));
+}
+
+async function submitParentPin(pin = "1234") {
+  const pinInput = document.querySelector<HTMLInputElement>('input[aria-label="Parent 4-digit PIN"]');
+  if (!pinInput) throw new Error("Parent PIN input not found");
+  const modal = pinInput.closest<HTMLElement>('[role="dialog"]')!;
+  await act(async () => setInputValue(pinInput, pin));
+  const confirmBtn = Array.from(modal.querySelectorAll("button")).find((b) => {
+    const label = b.textContent?.trim() || "";
+    return label && label !== "Cancel";
+  });
+  if (!confirmBtn) throw new Error("Parent PIN confirm button not found");
+  await act(async () => confirmBtn.click());
+  await settle();
 }
 
 async function mount(ui: ReactElement) {
@@ -215,6 +233,7 @@ describe("FamilySettingsSection", () => {
     await act(async () => setInputValue(modal.querySelector<HTMLInputElement>('input[placeholder="Member name"]')!, "Rowan"));
     await act(async () => buttonByText(modal, "Save").click());
     await settle();
+    await submitParentPin();
 
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(host.textContent).toContain("shared family roster could not refresh");
@@ -230,6 +249,7 @@ describe("FamilySettingsSection", () => {
     const modal = dialog();
     await act(async () => buttonByText(modal, "Save").click());
     await settle();
+    await submitParentPin();
 
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(host.textContent).toContain("shared family roster could not refresh");
@@ -245,6 +265,15 @@ describe("FamilySettingsSection", () => {
 
     let modal = dialog();
     await act(async () => buttonByText(modal, "Save").click());
+    await settle();
+
+    // Open ParentPinGateModal (second dialog) and submit PIN without resolving request.promise
+    const dialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]'));
+    const pinModal = dialogs[dialogs.length - 1];
+    const pinInput = pinModal.querySelector<HTMLInputElement>('input[aria-label="Parent 4-digit PIN"]')!;
+    await act(async () => setInputValue(pinInput, "1234"));
+    await act(async () => buttonByText(pinModal, "Save member").click());
+    await settle();
 
     modal = dialog();
     expect(buttonByText(modal, "Cancel").disabled).toBe(true);
@@ -335,6 +364,7 @@ describe("FamilySettingsSection", () => {
     await act(async () => setInputValue(nameInput, "Rowan"));
     await act(async () => buttonByText(modal, "Save").click());
     await settle();
+    await submitParentPin();
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ url: "/api/members/admin", method: "POST" });
@@ -359,6 +389,7 @@ describe("FamilySettingsSection", () => {
     await act(async () => setInputValue(nameInput, "Rowan"));
     await act(async () => buttonByText(modal, "Save").click());
     await settle();
+    await submitParentPin();
 
     expect(dialog().textContent).toContain("Starter PIN");
     expect(dialog().textContent).toContain("4821");
@@ -392,6 +423,7 @@ describe("FamilySettingsSection", () => {
 
     await act(async () => buttonByText(modal, "Save").click());
     await settle();
+    await submitParentPin();
 
     expect(calls[0]).toMatchObject({ url: "/api/members/admin", method: "PATCH" });
     expect(calls[0].body).toMatchObject({
@@ -441,6 +473,7 @@ describe("FamilySettingsSection", () => {
     await act(async () => emojiButton.click());
     await act(async () => buttonByText(dialog(), "Save").click());
     await settle();
+    await submitParentPin();
 
     expect(calls[0].body!.patch).toMatchObject({ emoji });
     expect(calls[0].body!.patch).not.toHaveProperty("pin");
@@ -463,6 +496,7 @@ describe("FamilySettingsSection", () => {
     modal = dialog();
     await act(async () => buttonByText(modal, "Remove member").click());
     await settle();
+    await submitParentPin();
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ url: "/api/members/admin", method: "DELETE", body: { name: "Aurora" } });
@@ -480,6 +514,7 @@ describe("FamilySettingsSection", () => {
     const modal = dialog();
     await act(async () => buttonByText(modal, "Remove member").click());
     await settle();
+    await submitParentPin();
 
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(host.textContent).not.toContain("child · Mar 2024");
@@ -497,6 +532,7 @@ describe("FamilySettingsSection", () => {
     const modal = dialog();
     await act(async () => buttonByText(modal, "Remove member").click());
     await settle();
+    await submitParentPin();
 
     expect(mocks.refreshMembersCache).not.toHaveBeenCalled();
     expect(host.textContent).toContain("At least one parent must remain.");
@@ -509,6 +545,7 @@ describe("FamilySettingsSection", () => {
     await openEditor();
     await act(async () => buttonByText(dialog(), "Save").click());
     await settle();
+    await submitParentPin();
 
     expect(calls[0].body).toMatchObject({ id: "pb_aurora", name: "Aurora" });
 

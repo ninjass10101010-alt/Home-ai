@@ -439,13 +439,15 @@ export function serverMessageOf(body: TaskOutboxAcknowledgement): string {
 const CREDENTIAL_BODY_KEYS: Record<string, readonly (keyof TaskOutboxCredential)[]> = {
   "/api/tasks/claim": ["pin"],
   "/api/tasks/approve": ["pin"],
+  "/api/tasks/manage": ["pin"],
+  "/api/tasks/config": ["pin"],
   "/api/tasks/ledger": ["pin"],
   "/api/rewards/redeem": ["pin", "parentPin"],
 };
 
 /**
- * Operations whose route parser refuses a credential-less body outright
- * (`/api/tasks/approve` and `/api/tasks/ledger` both `requireCredentials`).
+ * Operations whose route parser/gate requires a Parent PIN (`pin`) or
+ * credential even when a live session cookie is present.
  * A stored entry for one of these can only ever send with a credential, so a
  * 401 with no credential in memory means "the PIN is gone, ask again" — never
  * a terminal refusal and never a network expiry.
@@ -454,6 +456,12 @@ const CREDENTIAL_REQUIRED_OPERATIONS: ReadonlySet<string> = new Set([
   "/api/tasks/approve:approve",
   "/api/tasks/approve:approve-all",
   "/api/tasks/approve:send-back",
+  "/api/tasks/manage:add",
+  "/api/tasks/manage:update",
+  "/api/tasks/manage:delete",
+  "/api/tasks/config:replace",
+  "/api/tasks/config:upsert",
+  "/api/tasks/config:delete",
   "/api/tasks/ledger:penalty",
   "/api/tasks/ledger:adjust",
 ]);

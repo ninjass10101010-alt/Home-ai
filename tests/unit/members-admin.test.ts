@@ -56,6 +56,7 @@ vi.mock("@/lib/session", () => ({
 
 vi.mock("@/lib/admin-auth", () => ({
   authorizeAdminRequest: mocks.authorizeAdminRequest,
+  authorizeParentPinRequest: mocks.authorizeAdminRequest,
 }));
 
 import { GET, PATCH, POST, DELETE } from "@/app/api/members/admin/route";

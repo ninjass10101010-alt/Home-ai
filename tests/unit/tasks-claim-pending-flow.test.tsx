@@ -105,9 +105,6 @@ async function tapUniversalRow(el: HTMLElement) {
   expect(row).not.toBeNull();
   await act(async () => { row.click(); });
   await settle();
-  // Claims are always PIN-gated and default the "Claim for" select to the
-  // signed-in member (pickDefaultClaimMember).
-  expect(document.body.textContent).toContain("Claim for");
 }
 
 beforeEach(() => {
@@ -135,10 +132,11 @@ describe("server-authoritative claims → pending for kid claimants (client mirr
     const el = await renderAsync(<TasksPage />);
     await settle();
     await tapUniversalRow(el);
-    await claimViaPinModal();
+    await settle(150);
 
     expect(claimCalls.length).toBe(1); // the server route is still the authority
     expect(claimCalls[0]).toMatchObject({ action: "claim", taskId: VACUUM.id, memberName: "Caspian Garcia" });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     // The row is the acknowledgment's to write — the browser never mirrors it.
     const saved = storedTasks();
     expect(saved[0].completed).toBe(false);
@@ -162,10 +160,11 @@ describe("server-authoritative claims → pending for kid claimants (client mirr
     const el = await renderAsync(<TasksPage />);
     await settle();
     await tapUniversalRow(el);
-    await claimViaPinModal();
+    await settle(150);
 
     expect(claimCalls.length).toBe(1);
     expect(claimCalls[0]).toMatchObject({ action: "claim", taskId: VACUUM.id, memberName: "Rebecca (Mom)" });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     const saved = storedTasks();
     expect(saved[0].completed).toBe(false);
     expect(saved[0].pendingApproval).toBeUndefined();

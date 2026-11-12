@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { createMemberRecord, findLiveMemberByExactName, findLiveMemberById, isMemberPinAvailable, listLiveMembersSanitized, listMembersSanitized, sanitizeMember, withMemberAdminOperation } from "@/lib/server-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
-import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { authorizeParentPinRequest } from "@/lib/admin-auth";
 import { normalizeWeekStart } from "@/lib/ledger-operations";
 import { migrateWeekDataMemberName } from "@/lib/task-ledger";
 import { mutateSnapshotWithMeta, normalizeWeekData, readSnapshotStateWithRevision, type AdminPB } from "@/lib/snapshot-tasks";
@@ -360,11 +360,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const gate = await authorizeAdminRequest(request);
+    const body = await request.json();
+    const bodyRecord = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+    const gate = await authorizeParentPinRequest(request, bodyRecord);
     if (!gate.ok) {
       return NextResponse.json({ error: gate.error ?? "unauthorized" }, { status: gate.status ?? 401 });
     }
-    const body = await request.json();
     if (!body || typeof body !== "object" || !body.name) {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
@@ -390,11 +391,13 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const gate = await authorizeAdminRequest(request);
+    const body = await request.json();
+    const bodyRecord = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+    const gate = await authorizeParentPinRequest(request, bodyRecord);
     if (!gate.ok) {
       return NextResponse.json({ error: gate.error ?? "unauthorized" }, { status: gate.status ?? 401 });
     }
-    const { id, name, patch } = await request.json();
+    const { id, name, patch } = body ?? {};
     if ((!id && !name) || !patch || typeof patch !== "object") {
       return NextResponse.json({ error: "id and patch are required" }, { status: 400 });
     }
@@ -472,11 +475,13 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const gate = await authorizeAdminRequest(request);
+    const body = await request.json();
+    const bodyRecord = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+    const gate = await authorizeParentPinRequest(request, bodyRecord);
     if (!gate.ok) {
       return NextResponse.json({ error: gate.error ?? "unauthorized" }, { status: gate.status ?? 401 });
     }
-    const { id, name } = await request.json();
+    const { id, name } = body ?? {};
     if (!id && !name) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }

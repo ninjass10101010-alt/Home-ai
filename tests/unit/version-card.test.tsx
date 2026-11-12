@@ -63,6 +63,21 @@ function dialog(): HTMLElement {
   return result;
 }
 
+async function submitParentPin(pin = "1234") {
+  const input = document.querySelector<HTMLInputElement>('input[aria-label="Parent 4-digit PIN"]');
+  expect(input).toBeTruthy();
+  const dlg = input!.closest<HTMLElement>('[role="dialog"]')!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  act(() => {
+    setter.call(input!, pin);
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    button(dlg, /Start update|Confirm/).click();
+  });
+  await settle();
+}
+
 const AVAILABLE = {
   ok: true,
   built_at: { hash: "local", short: "local1", message: "Local build", date: "2026-09-20T10:00:00.000Z" },
@@ -134,6 +149,7 @@ describe("VersionCard", () => {
   });
   it("does not POST a second update after a successful completion", async () => {
     stubFetch((url, init) => {
+      if (url.endsWith("/api/members/verify")) return response(true, 200, { member: { id: "m-jeff", name: "Jeff", role: "parent" } });
       if (init?.method === "POST") return response(true, 200, { ok: true, logs: [] });
       return response(true, 200, AVAILABLE);
     });
@@ -142,28 +158,37 @@ describe("VersionCard", () => {
 
     await act(async () => button(host, /Update now \(self-update\)/).click());
     await act(async () => button(dialog(), /^Update now$/).click());
-    await settle();
+    await submitParentPin();
     expect(host.textContent).toContain("Done — reloading");
 
     await act(async () => button(host, /Done — reloading/).click());
-    expect(fetchCalls.filter((call) => call.init?.method === "POST")).toHaveLength(1);
+    expect(fetchCalls.filter((call) => call.url.includes("/api/admin/update") && call.init?.method === "POST")).toHaveLength(1);
   });
 
   it("guards duplicate update confirmations while the POST is pending", async () => {
     const pending = deferred<any>();
     stubFetch((url, init) => {
-      if (init?.method === "POST") return pending.promise;
+      if (url.endsWith("/api/members/verify")) return response(true, 200, { member: { id: "m-jeff", name: "Jeff", role: "parent" } });
+      if (url.includes("/api/admin/update") && init?.method === "POST") return pending.promise;
       return response(true, 200, AVAILABLE);
     });
     const host = render(<VersionCard />);
     await settle();
     await act(async () => button(host, /Update now \(self-update\)/).click());
-    const confirm = button(dialog(), /^Update now$/);
+    await act(async () => button(dialog(), /^Update now$/).click());
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Parent 4-digit PIN"]')!;
+    const dlg = input.closest<HTMLElement>('[role="dialog"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, "1234");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const confirm = button(dlg, /^Start update$/);
     await act(async () => {
       confirm.click();
       confirm.click();
     });
-    expect(fetchCalls.filter((call) => call.init?.method === "POST")).toHaveLength(1);
+    expect(fetchCalls.filter((call) => call.url.includes("/api/admin/update") && call.init?.method === "POST")).toHaveLength(1);
     await act(async () => {
       pending.resolve(response(true, 200, { ok: true, logs: [] }));
       await Promise.resolve();
@@ -174,6 +199,7 @@ describe("VersionCard", () => {
   it("clears the pending reload timer when the version card unmounts", async () => {
     vi.useFakeTimers();
     stubFetch((url, init) => {
+      if (url.endsWith("/api/members/verify")) return response(true, 200, { member: { id: "m-jeff", name: "Jeff", role: "parent" } });
       if (init?.method === "POST") return response(true, 200, { ok: true, logs: [] });
       return response(true, 200, AVAILABLE);
     });
@@ -184,6 +210,14 @@ describe("VersionCard", () => {
     });
     await act(async () => button(host, /Update now \(self-update\)/).click());
     await act(async () => button(dialog(), /^Update now$/).click());
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Parent 4-digit PIN"]')!;
+    const dlg = input.closest<HTMLElement>('[role="dialog"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, "1234");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button(dlg, /^Start update$/).click());
     await act(async () => {
       vi.advanceTimersByTime(0);
       await Promise.resolve();
@@ -195,6 +229,7 @@ describe("VersionCard", () => {
   });
   it("rejects a malformed update log row instead of rendering it or claiming completion", async () => {
     stubFetch((url, init) => {
+      if (url.endsWith("/api/members/verify")) return response(true, 200, { member: { id: "m-jeff", name: "Jeff", role: "parent" } });
       if (init?.method === "POST") {
         return response(true, 200, {
           ok: true,
@@ -210,7 +245,7 @@ describe("VersionCard", () => {
     await settle();
     await act(async () => button(host, /Update now \(self-update\)/).click());
     await act(async () => button(dialog(), /^Update now$/).click());
-    await settle();
+    await submitParentPin();
 
     expect(host.textContent).toContain("invalid update progress response");
     expect(host.textContent).not.toContain("[object Object]");
@@ -226,6 +261,7 @@ describe("VersionCard", () => {
   });
   it("confirms self-update before POSTing and reports a failed response", async () => {
     stubFetch((url, init) => {
+      if (url.endsWith("/api/members/verify")) return response(true, 200, { member: { id: "m-jeff", name: "Jeff", role: "parent" } });
       if (init?.method === "POST") return response(false, 500, { ok: false, error: "update failed", logs: [] });
       return response(true, 200, AVAILABLE);
     });
@@ -241,9 +277,9 @@ describe("VersionCard", () => {
 
     await act(async () => button(host, /Update now \(self-update\)/).click());
     await act(async () => button(dialog(), /^Update now$/).click());
-    await settle();
+    await submitParentPin();
 
-    const post = fetchCalls.find((call) => call.init?.method === "POST");
+    const post = fetchCalls.find((call) => call.url.includes("/api/admin/update") && call.init?.method === "POST");
     expect(post).toBeTruthy();
     expect(host.textContent).toContain("update failed");
     expect(host.textContent).not.toContain("Done — reloading");

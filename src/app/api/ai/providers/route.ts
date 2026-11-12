@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { authorizeParentPinRequest } from "@/lib/admin-auth";
 import { authorizeCurrentParentRequest } from "@/lib/server-auth";
 import { listAiProviders, upsertAiProvider, deleteAiProvider, normalizeBaseUrl } from "@/lib/ai/providers";
 import { resolveChatTargets, resetAiTargetsCache } from "@/lib/ai/targets";
@@ -121,10 +121,11 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const auth = await authorizeAdminRequest(request);
-  if (!auth.ok) return NextResponse.json({ error: auth.error ?? "unauthorized" }, { status: auth.status ?? 401 });
   try {
     const body = await request.json();
+    const bodyRecord = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+    const auth = await authorizeParentPinRequest(request, bodyRecord);
+    if (!auth.ok) return NextResponse.json({ error: auth.error ?? "unauthorized" }, { status: auth.status ?? 401 });
     const id = typeof body.id === "string" && body.id ? body.id : undefined;
     const baseUrl = normalizeBaseUrl(String(body.baseUrl ?? ""));
     const apiKey = body.apiKey == null ? "" : String(body.apiKey);
@@ -180,7 +181,7 @@ export async function PUT(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const auth = await authorizeAdminRequest(request);
+  const auth = await authorizeParentPinRequest(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error ?? "unauthorized" }, { status: auth.status ?? 401 });
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });

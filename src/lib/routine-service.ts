@@ -8,10 +8,10 @@ import {
   localTodayISO,
   localWeekStartISO,
 } from "@/lib/local-date";
+import { authorizeParentPinRequest } from "@/lib/admin-auth";
 import {
   readSessionCookie,
   requireLiveSession,
-  verifyPinAgainstAnyMember,
   type ServerMember,
 } from "@/lib/server-auth";
 import { applyWeekLedgerOperationLocked } from "@/lib/ledger-operations";
@@ -65,37 +65,15 @@ export async function authorizeRoutineParentWrite(
   request: Request,
   body?: Record<string, unknown> | null,
 ): Promise<ParentWriteAuth> {
-  const secret = process.env.ADMIN_SECRET || "";
-  if (secret && request.headers.get("authorization") === `Bearer ${secret}`) {
-    return { ok: true };
+  const auth = await authorizeParentPinRequest(request, body);
+  if (!auth.ok) {
+    return {
+      ok: false,
+      status: auth.status,
+      error: auth.error === "unauthorized" && (request.headers.get("x-admin-pin") || body?.pin) ? "invalid_pin" : auth.error,
+    };
   }
-
-  const headerPin = request.headers.get("x-admin-pin");
-  const bodyPin =
-    body && typeof body.pin === "string" && body.pin.trim() ? body.pin.trim() : "";
-  const pin = (headerPin && headerPin.trim()) || bodyPin;
-
-  if (pin) {
-    const pinMember = await verifyPinAgainstAnyMember(pin);
-    if (!pinMember) {
-      return { ok: false, status: 401, error: "invalid_pin" };
-    }
-    if (String(pinMember.role || "").trim().toLowerCase() !== "parent") {
-      return { ok: false, status: 403, error: "adult_only" };
-    }
-    return { ok: true, member: pinMember as ServerMember };
-  }
-
-  if (readSessionCookie(request) !== undefined) {
-    const live = await requireLiveSession(request, {
-      requireRole: "parent",
-      withMember: true,
-    });
-    if (live.ok) return { ok: true, member: live.member };
-    return { ok: false, status: live.status, error: live.error };
-  }
-
-  return { ok: false, status: 401, error: "unauthorized" };
+  return { ok: true, member: auth.member };
 }
 
 export interface SessionActorAuth {

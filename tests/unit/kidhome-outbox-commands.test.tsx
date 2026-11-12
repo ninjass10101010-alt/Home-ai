@@ -296,8 +296,8 @@ describe("under-10 PIN-free completion", () => {
   });
 });
 
-describe("10+ PIN-gated completion", () => {
-  it("carries the PIN ephemerally and never in localStorage", async () => {
+describe("10+ PIN-free signed-in completion", () => {
+  it("completes without opening a PIN prompt when signed in", async () => {
     mockAuth.currentUser = { name: "Caspian", role: "child", age: 11 };
     server.claimStatus = 503;
     seed([QUEST]);
@@ -305,26 +305,10 @@ describe("10+ PIN-gated completion", () => {
     await settle();
 
     await tapQuest(el, "Feed the dog");
-    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
-    expect(input).toBeTruthy();
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
-      setter.call(input, KID_PIN);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const scope = document.querySelector('[role="dialog"]') ?? document;
-    const submit = Array.from(scope.querySelectorAll("button")).find((b) =>
-      /Done|Complete|Submit|✓/.test(b.textContent || ""),
-    ) as HTMLButtonElement;
-    expect(submit).toBeTruthy();
-    await act(async () => { submit.click(); });
     await settle(150);
 
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete" });
-    const dump = Object.keys(localStorage)
-      .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
-      .join("\n");
-    expect(dump).not.toContain(KID_PIN);
   });
 });
 

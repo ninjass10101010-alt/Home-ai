@@ -178,7 +178,10 @@ export async function readTaskConfig(kind: TaskConfigKind): Promise<TaskConfigRe
   return response("", leg, items, updatedAt, revision);
 }
 
-export async function writeTaskConfig(command: TaskConfigCommand): Promise<TaskConfigResponse> {
+export async function writeTaskConfig(
+  command: TaskConfigCommand,
+  options?: { pin?: string },
+): Promise<TaskConfigResponse> {
   const leg = legFor(command?.kind);
   const action = actionFor(command?.action);
   const updatedAt = stampFor(command?.updatedAt);
@@ -201,6 +204,7 @@ export async function writeTaskConfig(command: TaskConfigCommand): Promise<TaskC
     action,
     payload,
     displayTarget: { kind: "config" },
+    ...(options?.pin ? { credential: { pin: options.pin } } : {}),
   });
 
   return acknowledged(leg, entry);

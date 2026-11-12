@@ -30,6 +30,13 @@ vi.mock("@/lib/live-member", () => ({
   getLiveMembers: mocks.getLiveMembers,
 }));
 
+vi.mock("@/lib/admin-auth", () => ({
+  authorizeParentPinRequest: async (request: unknown) => {
+    const res = await mocks.verifyLiveParentSession(request);
+    return res.ok ? res : { ok: false, status: res.status, error: res.reason };
+  },
+}));
+
 vi.mock("@/lib/keyed-lock", () => ({
   withKeyedLock: async <T>(_key: string, fn: () => Promise<T>): Promise<T> => fn(),
   __resetKeyedLockForTests: vi.fn(),

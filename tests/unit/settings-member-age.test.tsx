@@ -111,10 +111,22 @@ function stubFetch() {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const u = String(input);
       calls.push({ url: u, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (u.includes("/api/members/verify")) {
+        return { ok: true, status: 200, json: async () => ({ member: { id: "m-rebecca", name: "Rebecca", role: "parent" } }) };
+      }
       return { ok: true, status: 200, json: async () => ({ ok: true }) };
     })
   );
   return calls;
+}
+
+async function submitParentPin(pin = "1234") {
+  const pinInput = document.querySelector('input[aria-label="Parent 4-digit PIN"]') as HTMLInputElement | null;
+  expect(pinInput).not.toBeNull();
+  const d = pinInput!.closest<HTMLElement>('[role="dialog"]')!;
+  await act(async () => { setInputValue(pinInput!, pin); });
+  await act(async () => { buttonIn(d, "Save member").click(); });
+  await settle();
 }
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
@@ -192,11 +204,12 @@ describe("Settings member age control", () => {
     const ageInput = dialog().querySelector('input[aria-label="Age"]') as HTMLInputElement | null;
     expect(ageInput).not.toBeNull();
     expect(ageInput!.value).toBe("7");
-    expect(dialog().textContent).toContain("Under 10 signs in with one tap");
+    expect(dialog().textContent).toContain("Optional — everyone signs in with one tap");
 
     await act(async () => { setInputValue(ageInput!, "9"); });
     await act(async () => { buttonIn(dialog(), "Save").click(); });
     await settle();
+    await submitParentPin();
 
     const patch = calls.find((c) => c.url.includes("/api/members/admin") && c.method === "PATCH");
     expect(patch).toBeTruthy();
@@ -217,6 +230,7 @@ describe("Settings member age control", () => {
     await act(async () => { setInputValue(ageInput, ""); });
     await act(async () => { buttonIn(dialog(), "Save").click(); });
     await settle();
+    await submitParentPin();
 
     const patch = calls.find((c) => c.url.includes("/api/members/admin") && c.method === "PATCH");
     expect(patch).toBeTruthy();

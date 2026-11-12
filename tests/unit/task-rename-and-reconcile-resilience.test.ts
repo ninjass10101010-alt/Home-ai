@@ -37,6 +37,7 @@ vi.mock("@/lib/pb-auth", () => ({
 
 vi.mock("@/lib/admin-auth", () => ({
   authorizeAdminRequest: mocks.authorizeAdminRequest,
+  authorizeParentPinRequest: mocks.authorizeAdminRequest,
 }));
 
 vi.mock("@/lib/session", () => ({

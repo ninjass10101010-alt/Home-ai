@@ -37,6 +37,10 @@ vi.mock("@/lib/server-auth", () => ({
   readSessionCookie: mocks.readSessionCookie,
   requireLiveSession: mocks.requireLiveSession,
   verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+  sanitizeMember: (member: any) => {
+    const { pin, ...rest } = member;
+    return rest;
+  },
 }));
 
 vi.mock("@/lib/ledger-operations", () => ({
@@ -202,13 +206,34 @@ describe("/api/routines/progress", () => {
     });
   });
 
-  it("saves legacy PUT progress payload when guest/parent writes", async () => {
+  it("requires a verified Parent PIN for legacy PUT progress payload", async () => {
+    const unauthedReq = new Request("http://localhost/api/routines/progress", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: "2026-11-05",
+        progress: {
+          checkedSteps: { "rt-1": ["s1"] },
+          completedRoutines: { "rt-1": false },
+        },
+      }),
+    });
+    expect((await PROGRESS_PUT(unauthedReq as any)).status).toBe(401);
+
+    mocks.verifyPinAgainstAnyMember.mockResolvedValueOnce({
+      id: "p1",
+      name: "Francisco Garcia",
+      role: "parent",
+    });
     mocks.getFirstListItem.mockResolvedValueOnce({ id: "rec-prog" });
     mocks.update.mockResolvedValueOnce({ id: "rec-prog" });
 
     const req = new Request("http://localhost/api/routines/progress", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-pin": "9999",
+      },
       body: JSON.stringify({
         date: "2026-11-05",
         progress: {
@@ -220,6 +245,7 @@ describe("/api/routines/progress", () => {
 
     const res = await PROGRESS_PUT(req as any);
     const body = await res.json();
+    expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.date).toBe("2026-11-05");
     expect(mocks.update).toHaveBeenCalledWith("rec-prog", {

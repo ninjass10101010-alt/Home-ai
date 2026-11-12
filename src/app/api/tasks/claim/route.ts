@@ -152,7 +152,7 @@ async function authenticate(
     }
   }
 
-  if (!(["complete", "undo", "crew-join", "crew-checkin"] as string[]).includes(action)) {
+  if (!(["claim", "complete", "undo", "crew-join", "crew-checkin"] as string[]).includes(action)) {
     return { ok: false, status: 401, reason: "pin_required" };
   }
   try {

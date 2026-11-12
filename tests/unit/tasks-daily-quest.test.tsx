@@ -75,6 +75,7 @@ describe("Daily Quests", () => {
 
     const countAfter = (el.textContent || "").split("Take out the trash").length - 1;
     expect(countAfter).toBe(countBefore); // no duplicate was added
-    expect(document.body.textContent).toMatch(/Enter your PIN/); // real completion flow opened
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.textContent).toContain("Completed! +10pts!");
   });
 });

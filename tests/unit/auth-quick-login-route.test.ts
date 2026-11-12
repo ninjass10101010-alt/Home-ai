@@ -46,15 +46,11 @@ describe("POST /api/auth/quick-login", () => {
     expect(body.member.name).toBe("Caspian");
     expect(body.member.pin).toBeUndefined();
   });
-  it("rejects a 10-year-old (strictly under 10)", async () => {
-    expect((await POST(req({ memberName: "Jasmine" }))).status).toBe(403);
-  });
-  it("fails closed when age is missing", async () => {
-    expect((await POST(req({ memberName: "Bailey" }))).status).toBe(403);
-  });
-  it("rejects pets and parents", async () => {
-    expect((await POST(req({ memberName: "Rico" }))).status).toBe(403);
-    expect((await POST(req({ memberName: "Rebecca" }))).status).toBe(403);
+  it("signs in any child (including 10+ and age-missing), pet, or parent with 1 tap", async () => {
+    expect((await POST(req({ memberName: "Jasmine" }))).status).toBe(200);
+    expect((await POST(req({ memberName: "Bailey" }))).status).toBe(200);
+    expect((await POST(req({ memberName: "Rico" }))).status).toBe(200);
+    expect((await POST(req({ memberName: "Rebecca" }))).status).toBe(200);
   });
   it("404 unknown member, 400 missing name", async () => {
     expect((await POST(req({ memberName: "Nobody" }))).status).toBe(404);

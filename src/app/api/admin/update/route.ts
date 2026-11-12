@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { authorizeParentPinRequest } from "@/lib/admin-auth";
 import { execSync } from "child_process";
 import { readFile } from "fs/promises";
 import path from "path";
@@ -35,7 +35,12 @@ async function runCmd(cmd: string, cwd?: string): Promise<string> {
 }
 
 export async function POST(request: Request) {
-  const auth = await authorizeAdminRequest(request);
+  let body: Record<string, unknown> | null = null;
+  try {
+    const parsed = await request.json();
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+  } catch {}
+  const auth = await authorizeParentPinRequest(request, body);
   if (!auth.ok) {
     return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   }

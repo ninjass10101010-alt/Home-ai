@@ -329,25 +329,13 @@ export default function HomePage() {
     []
   );
 
-  // Under-10 kids: one tap signs in (server still re-verifies; a 403 means
-  // the roster was stale and we fall back to the PIN modal — fail safe).
-  const isPinFreeChild = (member: { role?: string; age?: number }) =>
-    member.role === "child" &&
-    typeof member.age === "number" &&
-    member.age > 0 &&
-    member.age < PIN_FREE_MAX_AGE; // imported from "@/lib/task-utils" — single source
-
   const handleSignInPick = async (member: any) => {
     setPickerOpen(false);
-    if (isPinFreeChild(member)) {
-      const r = await quickLogin(member.name);
-      if (!r.success) {
-        setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false });
-        showToast("Tap your PIN to sign in.");
-      }
-      return;
+    const r = await quickLogin(member.name);
+    if (!r.success) {
+      setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false });
+      showToast("Tap your PIN to sign in.");
     }
-    setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false });
   };
 
   useEffect(() => {

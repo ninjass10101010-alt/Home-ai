@@ -10,6 +10,7 @@ import IconButton from "@/components/ui/IconButton";
 import Modal from "@/components/ui/Modal";
 import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
+import ParentPinGateModal from "@/components/auth/ParentPinGateModal";
 import FormField from "@/components/patterns/FormField";
 import { REWARDS_KEY, loadRewards } from "@/lib/task-utils";
 
@@ -65,7 +66,11 @@ function emitRewardsUpdate(): void {
   window.dispatchEvent(new Event(REWARDS_UPDATED_EVENT));
 }
 
-function queueRewardsCommand(action: "replace" | "upsert" | "delete", rest: Record<string, unknown>): void {
+function queueRewardsCommand(
+  action: "replace" | "upsert" | "delete",
+  rest: Record<string, unknown>,
+  pin?: string,
+): void {
   const command: TaskConfigCommand = {
     operationId: "",
     kind: "rewards",
@@ -74,7 +79,7 @@ function queueRewardsCommand(action: "replace" | "upsert" | "delete", rest: Reco
     ...(rest.item !== undefined ? { item: rest.item as TaskConfigCommand["item"] } : {}),
     ...(rest.itemId !== undefined ? { itemId: rest.itemId as TaskConfigCommand["itemId"] } : {}),
   };
-  void writeTaskConfig(command).catch(() => {});
+  void writeTaskConfig(command, pin ? { pin } : undefined).catch(() => {});
 }
 
 export default function RewardSection({ showToast }: RewardSectionProps) {
@@ -91,6 +96,10 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: "", emoji: "🎁", cost: 25, category: "fun" });
+  const [pendingPinOp, setPendingPinOp] = useState<{
+    description: string;
+    onPin: (pin: string) => void;
+  } | null>(null);
 
   // An adoption rewrites the canonical catalog, so the rendered list has to be
   // told to re-read: a REFUSED (stale) command repairs the visible catalog
@@ -126,19 +135,35 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
   const save = () => {
     if (!form.name.trim()) return;
     const reward = { ...form, name: form.name.trim(), id: editing?.id || `reward-${Date.now()}` };
-    queueRewardsCommand("upsert", { item: reward });
-    showToast(editing ? `✅ Updating "${reward.name}"…` : `✅ Adding "${reward.name}"…`);
-    setModalOpen(false);
+    const isEdit = Boolean(editing);
+    setPendingPinOp({
+      description: `Enter a parent's 4-digit PIN to ${isEdit ? "update" : "add"} "${reward.name}".`,
+      onPin: (pin) => {
+        queueRewardsCommand("upsert", { item: reward }, pin);
+        showToast(isEdit ? `✅ Updating "${reward.name}"…` : `✅ Adding "${reward.name}"…`);
+        setModalOpen(false);
+      },
+    });
   };
 
   const remove = (reward: any) => {
-    queueRewardsCommand("delete", { itemId: reward.id });
-    showToast(`🗑️ Removing "${reward.name}"…`);
+    setPendingPinOp({
+      description: `Enter a parent's 4-digit PIN to remove "${reward.name}".`,
+      onPin: (pin) => {
+        queueRewardsCommand("delete", { itemId: reward.id }, pin);
+        showToast(`🗑️ Removing "${reward.name}"…`);
+      },
+    });
   };
 
   const resetDefaults = () => {
-    queueRewardsCommand("replace", { items: [] });
-    showToast("✅ Clearing the rewards…");
+    setPendingPinOp({
+      description: "Enter a parent's 4-digit PIN to clear all custom rewards.",
+      onPin: (pin) => {
+        queueRewardsCommand("replace", { items: [] }, pin);
+        showToast("✅ Clearing the rewards…");
+      },
+    });
   };
 
   return (
@@ -277,6 +302,13 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
           </FormField>
         </div>
       </Modal>
+      <ParentPinGateModal
+        open={pendingPinOp !== null}
+        title="Parent PIN required"
+        description={pendingPinOp?.description}
+        onClose={() => setPendingPinOp(null)}
+        onVerified={(pin) => pendingPinOp?.onPin(pin)}
+      />
     </>
   );
 }

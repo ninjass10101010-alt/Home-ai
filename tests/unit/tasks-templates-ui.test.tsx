@@ -122,12 +122,31 @@ const TPL_TRASH: TaskTemplateConfigItem = {
   mode: "open", speedBonus: 2,
 };
 
+async function submitParentPin(pin = "1234") {
+  const pinInput = document.querySelector<HTMLInputElement>('input[aria-label="Parent 4-digit PIN"]');
+  expect(pinInput).toBeTruthy();
+  const dlg = pinInput!.closest('[role="dialog"]')!;
+  await act(async () => { typeInto(pinInput!, pin); });
+  const confirm = Array.from(dlg.querySelectorAll("button")).find((b) => {
+    const label = (b.textContent || "").trim();
+    return label && label !== "Cancel";
+  }) as HTMLButtonElement | undefined;
+  expect(confirm).toBeTruthy();
+  await act(async () => { confirm!.click(); });
+  await settle(160);
+}
+
 beforeEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
   __resetTaskOutboxForTests();
   __resetTaskCommandCredentialsForTests();
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).includes("/api/members/verify")) {
+      return { ok: true, status: 200, json: async () => ({ member: { id: "m-rebecca", name: "Rebecca (Mom)", role: "parent" } }) };
+    }
+    return { ok: false, status: 401, json: async () => ({}) };
+  }));
   vi.stubGlobal("matchMedia", vi.fn(() => ({
     matches: false,
     addEventListener: () => {},
@@ -184,7 +203,8 @@ describe("Task 7 — favorites (templates) UI", () => {
     expect(toggle).toBeTruthy();
     await act(async () => { toggle.click(); });
     await act(async () => { buttonByText(dialogAt(), "Save").click(); });
-    await settle(160);
+    await settle(80);
+    await submitParentPin();
 
     const entries = listTaskOutbox();
     const manage = entries.find((e) => e.route === "/api/tasks/manage" && e.action === "add");
@@ -230,7 +250,8 @@ describe("Task 7 — favorites (templates) UI", () => {
     const sheet = dialogs[dialogs.length - 1] as HTMLElement;
     expect(sheet.textContent).toMatch(/Delete favorite/);
     await act(async () => { buttonByText(sheet, "Delete favorite").click(); });
-    await settle(160);
+    await settle(80);
+    await submitParentPin();
 
     const config = listTaskOutbox().find((e) => e.route === "/api/tasks/config");
     expect(config).toMatchObject({ action: "replace" });
@@ -273,7 +294,8 @@ describe("Task 7 — favorites (templates) UI", () => {
       typeInto(dialogAt().querySelector('input[placeholder="Task title"]') as HTMLInputElement, "Clean garage");
     });
     await act(async () => { buttonByText(dialogAt(), "Save").click(); });
-    await settle(160);
+    await settle(80);
+    await submitParentPin();
     const manage = listTaskOutbox().find((e) => e.route === "/api/tasks/manage" && e.action === "add");
     expect((manage!.payload as any).task.expiresAfterDays).toBe(2);
 
@@ -303,7 +325,8 @@ describe("Task 7 — favorites (templates) UI", () => {
       typeInto(dialogAt().querySelector('input[placeholder="Task title"]') as HTMLInputElement, "Water plants");
     });
     await act(async () => { buttonByText(dialogAt(), "Save").click(); });
-    await settle(160);
+    await settle(80);
+    await submitParentPin();
 
     // The server refuses recurring + non-null expiry; the queued add must be
     // created, with the stale hidden value cleared.
@@ -329,7 +352,8 @@ describe("Task 7 — favorites (templates) UI", () => {
         (dialogAt().querySelector('input[type="checkbox"][aria-label="⭐ Save as favorite"]') as HTMLInputElement).click();
       });
       await act(async () => { buttonByText(dialogAt(), "Save").click(); });
-      await settle(160);
+      await settle(80);
+      await submitParentPin();
     }
     const configEntries = () => listTaskOutbox().filter((e) => e.route === "/api/tasks/config");
     const saved = configEntries().at(-1)!.payload.items as any[];
@@ -346,7 +370,8 @@ describe("Task 7 — favorites (templates) UI", () => {
       const dialogs = document.querySelectorAll('[role="dialog"]');
       const sheet = dialogs[dialogs.length - 1] as HTMLElement;
       await act(async () => { buttonByText(sheet, "Delete favorite").click(); });
-      await settle(160);
+      await settle(80);
+      await submitParentPin();
     }
     const deleted = configEntries().at(-1)!.payload.items as any[];
     expect(deleted).toEqual([]);
@@ -388,7 +413,8 @@ describe("Task 7 — favorites (templates) UI", () => {
       typeInto(dialogAt().querySelector('input[placeholder="Task title"]') as HTMLInputElement, "Eat leftovers tonight");
     });
     await act(async () => { buttonByText(dialogAt(), "Save").click(); });
-    await settle(160);
+    await settle(80);
+    await submitParentPin();
 
     // Explicit 0 is refused by the server (its stored-0 tolerance only covers
     // an OMITTED key), so the queued patch must carry null.

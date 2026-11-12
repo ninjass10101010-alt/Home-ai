@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { authorizeParentPinRequest } from "@/lib/admin-auth";
 import { restartContainer } from "@/lib/docker-api";
 
 export const dynamic = "force-dynamic";
@@ -7,17 +7,18 @@ export const dynamic = "force-dynamic";
 const ALLOWED = ["consuela-dashboard", "pocketbase", "hermes-agent-2"];
 
 export async function POST(request: NextRequest) {
-  const auth = await authorizeAdminRequest(request);
-  if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
-  }
-
-  let body: { container?: string };
+  let body: { container?: string; pin?: string };
   try {
     body = await request.json();
   } catch (e: any) {
     console.error("[admin/restart]", e);
     return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const bodyRecord = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  const auth = await authorizeParentPinRequest(request, bodyRecord);
+  if (!auth.ok) {
+    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   }
 
   const name = body.container;

@@ -12,25 +12,20 @@ describe("PIN_FREE_MAX_AGE", () => {
   });
 });
 
-describe("completesWithoutPin (under-10 assigned taps)", () => {
-  it("7yo child on an assigned task → true", () => {
+describe("completesWithoutPin (all signed-in members complete open tasks PIN-free)", () => {
+  it("7yo and 10+ children, parents, pets, universal & overdue tasks all complete without a PIN", () => {
     expect(completesWithoutPin("child", 7, assigned)).toBe(true);
+    expect(completesWithoutPin("child", 10, assigned)).toBe(true);
+    expect(completesWithoutPin("child", undefined, assigned)).toBe(true);
+    expect(completesWithoutPin("child", 5, universal)).toBe(true);
+    expect(completesWithoutPin("child", 5, overdue)).toBe(true);
+    expect(completesWithoutPin("parent", 35, assigned)).toBe(true);
+    expect(completesWithoutPin("pet", 3, assigned)).toBe(true);
   });
-  it("age 9 true, age 10 false (boundary)", () => {
-    expect(completesWithoutPin("child", 9, assigned)).toBe(true);
-    expect(completesWithoutPin("child", 10, assigned)).toBe(false);
-  });
-  it("missing/non-numeric age fails closed", () => {
-    expect(completesWithoutPin("child", undefined, assigned)).toBe(false);
-    expect(completesWithoutPin("child", 0, assigned)).toBe(false);
-    expect(completesWithoutPin("child", Number.NaN, assigned)).toBe(false);
-  });
-  it("never universal/snatchable/completed — and parents", () => {
-    expect(completesWithoutPin("child", 5, universal)).toBe(false);
-    expect(completesWithoutPin("child", 5, overdue)).toBe(false);
+  it("fails closed for unsigned callers and already-completed tasks", () => {
     expect(completesWithoutPin("child", 5, done)).toBe(false);
-    expect(completesWithoutPin("parent", 5, assigned)).toBe(false);
     expect(completesWithoutPin(undefined, 5, assigned)).toBe(false);
+    expect(completesWithoutPin(null, 5, assigned)).toBe(false);
   });
 });
 

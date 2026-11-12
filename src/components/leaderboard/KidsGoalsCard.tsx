@@ -5,6 +5,7 @@ import SectionCard from "@/components/patterns/SectionCard";
 import Surface from "@/components/ui/Surface";
 import Avatar from "@/components/ui/Avatar";
 import SoftButton from "@/components/ui/SoftButton";
+import ParentPinGateModal from "@/components/auth/ParentPinGateModal";
 import type { KidGoalView } from "@/lib/goals";
 
 interface KidsGoalsCardProps {
@@ -43,28 +44,55 @@ export default function KidsGoalsCard({
     fetchGoals();
   }, []);
 
-  const handleSaveGoal = async () => {
+  const [pendingGoalPin, setPendingGoalPin] = useState<{
+    member: string;
+    displayName: string;
+    targetPoints: number;
+    cycleStart: string;
+  } | null>(null);
+
+  const handleSaveGoal = () => {
     if (!editingKid) return;
     const num = parseInt(editTarget, 10);
     if (isNaN(num) || num < 1) return;
+    setPendingGoalPin({
+      member: editingKid.member,
+      displayName: editingKid.displayName,
+      targetPoints: num,
+      cycleStart: editingKid.cycleStart,
+    });
+  };
+
+  const commitGoalWithPin = async (pin: string) => {
+    if (!pendingGoalPin) return { ok: false, error: "No goal pending." };
     setSaving(true);
     try {
       const res = await fetch("/api/goals", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-pin": pin,
+        },
         body: JSON.stringify({
-          member: editingKid.member,
-          targetPoints: num,
-          cycleStart: editingKid.cycleStart,
+          member: pendingGoalPin.member,
+          targetPoints: pendingGoalPin.targetPoints,
+          cycleStart: pendingGoalPin.cycleStart,
         }),
       });
-      if (res.ok) {
-        await fetchGoals();
-        setEditingKid(null);
-        if (onRefresh) onRefresh();
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        return { ok: false, error: body?.error || "Could not save goal." };
       }
-    } catch {}
-    setSaving(false);
+      await fetchGoals();
+      setEditingKid(null);
+      setPendingGoalPin(null);
+      if (onRefresh) onRefresh();
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Could not reach family server." };
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -248,6 +276,19 @@ export default function KidsGoalsCard({
           </Surface>
         </div>
       )}
+
+      <ParentPinGateModal
+        open={pendingGoalPin !== null}
+        title="Parent PIN required"
+        description={
+          pendingGoalPin
+            ? `Enter a parent's 4-digit PIN to set ${pendingGoalPin.displayName}'s target to ${pendingGoalPin.targetPoints} pts.`
+            : undefined
+        }
+        confirmLabel="Save goal"
+        onClose={() => setPendingGoalPin(null)}
+        onVerified={(pin) => commitGoalWithPin(pin)}
+      />
     </SectionCard>
   );
 }

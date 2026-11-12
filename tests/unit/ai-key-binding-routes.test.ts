@@ -27,7 +27,10 @@ vi.mock("@/lib/ai/targets", () => ({
   resolveChatTargets: mocks.resolveChatTargets,
   resetAiTargetsCache: vi.fn(),
 }));
-vi.mock("@/lib/admin-auth", () => ({ authorizeAdminRequest: mocks.authorizeAdminRequest }));
+vi.mock("@/lib/admin-auth", () => ({
+  authorizeAdminRequest: mocks.authorizeAdminRequest,
+  authorizeParentPinRequest: mocks.authorizeAdminRequest,
+}));
 vi.mock("@/lib/server-auth", () => ({ authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest }));
 vi.mock("@/lib/ai/health", () => ({
   getRecentOutcomes: mocks.getRecentOutcomes,

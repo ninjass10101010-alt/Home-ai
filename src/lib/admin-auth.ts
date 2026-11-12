@@ -1,7 +1,9 @@
 import {
   readSessionCookie,
   requireLiveSession,
+  sanitizeMember,
   verifyPinAgainstAnyMember,
+  verifyPinFromPB,
   type ServerMember,
 } from "./server-auth";
 
@@ -63,5 +65,55 @@ export async function authorizeAdminRequest(request: Request): Promise<AdminAuth
   if (member.role !== "parent") {
     return { ok: false, status: 403, error: "adult_only" };
   }
-  return { ok: true, member: member as ServerMember };
+  return { ok: true, member: sanitizeMember(member) as ServerMember };
+}
+
+// Strict Parent-PIN action gate for operations that MUST remain locked behind
+// a parent's 4-digit PIN even when household profile switching is PIN-free:
+//   - Creating, editing, deleting tasks/chores, routines & point/penalty rules
+//   - Parent approvals, excusing missed routines, setting kid goals
+//   - Editing dashboard configuration, family members/roles/PINs, system/AI admin
+//
+// Unlike authorizeAdminRequest, a consuela_session cookie with role === "parent"
+// NEVER waives the PIN here. Only Authorization: Bearer $ADMIN_SECRET or a live
+// PocketBase parent PIN (via x-admin-pin header or body.pin / body.parentPin) passes.
+export async function authorizeParentPinRequest(
+  request: Request,
+  body?: Record<string, unknown> | null,
+): Promise<AdminAuthResult> {
+  const bearer = `Bearer ${process.env.ADMIN_SECRET || ""}`;
+  if (process.env.ADMIN_SECRET && request.headers.get("authorization") === bearer) {
+    return { ok: true };
+  }
+
+  const headerPin = request.headers.get("x-admin-pin")?.trim() || "";
+  const bodyParentPin = typeof body?.parentPin === "string" ? body.parentPin.trim() : "";
+  const bodyPin = typeof body?.pin === "string" ? body.pin.trim() : "";
+  const pin = headerPin || bodyParentPin || bodyPin;
+  if (!pin) {
+    return { ok: false, status: 401, error: "unauthorized" };
+  }
+
+  const namedParent =
+    typeof body?.parentName === "string" && body.parentName.trim()
+      ? body.parentName.trim()
+      : "";
+
+  let member: any;
+  try {
+    member =
+      namedParent && bodyParentPin && pin === bodyParentPin
+        ? await verifyPinFromPB(namedParent, pin)
+        : await verifyPinAgainstAnyMember(pin);
+  } catch {
+    return { ok: false, status: 503, error: "identity_unavailable" };
+  }
+
+  if (!member) {
+    return { ok: false, status: 401, error: "unauthorized" };
+  }
+  if (String(member.role || "").trim().toLowerCase() !== "parent") {
+    return { ok: false, status: 403, error: "adult_only" };
+  }
+  return { ok: true, member: sanitizeMember(member) as ServerMember };
 }

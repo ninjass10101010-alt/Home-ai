@@ -234,6 +234,7 @@ export default function RewardsShop() {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
   const [pinBusy, setPinBusy] = useState(false);
+  const [redeemFeedback, setRedeemFeedback] = useState("");
   // Large-reward (>100pts) parent-approval gate — same flow as the Tasks
   // page: a parent PIN unlocks the redemption BEFORE the kid's own PIN step.
   const [parentApprovalReward, setParentApprovalReward] = useState<Reward | null>(null);
@@ -285,21 +286,92 @@ export default function RewardsShop() {
     return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
   }, [refresh]);
 
+  const executeRedeem = useCallback(async (
+    reward: Reward,
+    approval?: { name: string; pin: string } | null,
+    memberPin?: string,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!currentUser) return { ok: false, error: "Sign in first." };
+    const operationId = redeemOperationId || createTaskOperationId();
+    if (!redeemOperationId) setRedeemOperationId(operationId);
+    const roster = db.selectMembers();
+    const resolvedMember = roster.find(
+      (m: any) =>
+        m.fullName?.toLowerCase() === currentUser.name.toLowerCase() ||
+        m.name?.toLowerCase() === currentUser.name.toLowerCase(),
+    );
+    const memberName = (resolvedMember as any)?.fullName || currentUser.name;
+
+    queueTaskCommandAndFlush({
+      operationId,
+      route: "/api/rewards/redeem",
+      action: "redeem",
+      payload: {
+        rewardId: String(reward.id),
+        memberName,
+        ...(approval ? { parentName: approval.name } : {}),
+      },
+      displayTarget: { kind: "config", title: reward.name },
+      ...((memberPin || approval) ? {
+        credential: {
+          ...(memberPin ? { pin: memberPin } : {}),
+          ...(approval ? { parentPin: approval.pin } : {}),
+        },
+      } : {}),
+    });
+
+    await requestTaskOutboxFlush();
+    const entry = listTaskOutbox().find((candidate) => candidate.operationId === operationId);
+
+    if (!entry) {
+      parentApprovalRef.current = null;
+      setPinReward(null);
+      setPin("");
+      setPinError("");
+      setRedeemOperationId("");
+      refresh();
+      setPurchasing(reward);
+      return { ok: true };
+    }
+
+    if (entry.status === "failed" || entry.status === "auth-required") {
+      cancelTaskOutboxEntry(operationId);
+      parentApprovalRef.current = null;
+      return {
+        ok: false,
+        error: entry.lastErrorMessage || entry.lastErrorReason || "That redemption could not go through.",
+      };
+    }
+
+    return { ok: false, error: unreachableCopy() };
+  }, [currentUser, redeemOperationId, refresh]);
+
   const openRedeem = useCallback((reward: Reward) => {
     setRedeemOperationId(createTaskOperationId());
+    setRedeemFeedback("");
     parentApprovalRef.current = null;
-    // Same gate as the Tasks page: big rewards (>100pts) need a parent PIN
-    // BEFORE the kid's own redemption PIN step.
+    // Large rewards (>100pts) require Parent Approval PIN only; <=100pts redeem directly when signed in.
     if (reward.cost > 100) {
       setParentApprovalReward(reward);
       setParentApprovalPin("");
       setParentApprovalError("");
       return;
     }
+    if (currentUser) {
+      setPinBusy(true);
+      void executeRedeem(reward)
+        .then((outcome) => {
+          if (!outcome.ok) {
+            setRedeemFeedback(outcome.error || "That redemption could not go through.");
+          }
+        })
+        .finally(() => setPinBusy(false));
+      return;
+    }
     setPinReward(reward);
     setPin("");
     setPinError("");
-  }, []);
+  }, [currentUser, executeRedeem]);
 
   const closeParentApproval = useCallback(() => {
     setParentApprovalReward(null);
@@ -316,7 +388,6 @@ export default function RewardsShop() {
       for (const m of db.selectMembers().filter((m: any) => m.role === "parent")) {
         const result = await verifyPinRemote(m.fullName, parentApprovalPin);
         if (result.status === "unreachable") {
-          // The server never answered — say so instead of blaming the PIN.
           setParentApprovalError(unreachableCopy());
           setParentApprovalPin("");
           return;
@@ -333,14 +404,16 @@ export default function RewardsShop() {
         approvalErrorTimer.current = setTimeout(() => setParentApprovalError(""), 2500);
         return;
       }
-      // Approved — hand off to the normal kid-PIN redemption step.
-      parentApprovalRef.current = { name: parent.fullName || parent.name, pin: parentApprovalPin };
-      setPinReward(parentApprovalReward);
+      const approval = { name: parent.fullName || parent.name, pin: parentApprovalPin };
+      const outcome = await executeRedeem(parentApprovalReward, approval);
+      if (!outcome.ok) {
+        setParentApprovalError(outcome.error || "That redemption could not go through.");
+        setParentApprovalPin("");
+        return;
+      }
       setParentApprovalReward(null);
       setParentApprovalPin("");
       setParentApprovalError("");
-      setPin("");
-      setPinError("");
     } finally {
       setPinBusy(false);
     }
@@ -358,13 +431,7 @@ export default function RewardsShop() {
     if (!pinReward || !currentUser || pinBusy || pin.length < 4) return;
     setPinBusy(true);
     const reward = pinReward;
-    const operationId = redeemOperationId || createTaskOperationId();
-    if (!redeemOperationId) setRedeemOperationId(operationId);
     try {
-      // Client-side verify is the UX gate only; the route re-verifies the PIN
-      // server-side and owns the authoritative cost + ledger write (F2: the
-      // gateway rejects child week_data writes, so the old local-then-sync
-      // path 403'd silently and could be reverted by the next snapshot).
       const result = await verifyPinRemote(currentUser.name, pin);
       if (result.status === "wrongPin") {
         setPinError("Wrong PIN. Try again.");
@@ -376,49 +443,14 @@ export default function RewardsShop() {
         setPin("");
         return;
       }
-      const memberName = (result.member as any)?.name || currentUser.name;
       const approval = parentApprovalRef.current;
-
-      queueTaskCommandAndFlush({
-        operationId,
-        route: "/api/rewards/redeem",
-        action: "redeem",
-        payload: {
-          rewardId: String(reward.id),
-          memberName,
-          ...(approval ? { parentName: approval.name } : {}),
-        },
-        displayTarget: { kind: "config", title: reward.name },
-        credential: {
-          pin,
-          ...(approval ? { parentPin: approval.pin } : {}),
-        },
-      });
-
-      await requestTaskOutboxFlush();
-      const entry = listTaskOutbox().find((candidate) => candidate.operationId === operationId);
-
-      if (!entry) {
-        parentApprovalRef.current = null;
-        setPinReward(null);
-        setPin("");
-        setPinError("");
-        setRedeemOperationId("");
-        refresh();
-        setPurchasing(reward);
-        return;
-      }
-
-      if (entry.status === "failed" || entry.status === "auth-required") {
-        cancelTaskOutboxEntry(operationId);
-        parentApprovalRef.current = null;
-        setPinError(entry.lastErrorMessage || entry.lastErrorReason || "That redemption could not go through.");
+      const outcome = await executeRedeem(reward, approval, pin);
+      if (!outcome.ok) {
+        setPinError(outcome.error || "That redemption could not go through.");
         setPin("");
         setRedeemOperationId("");
         return;
       }
-
-      setPinError(unreachableCopy());
     } finally {
       setPinBusy(false);
     }
@@ -476,6 +508,11 @@ export default function RewardsShop() {
 
       {/* Rewards by category */}
       <div className="px-4 space-y-5 pb-8">
+        {redeemFeedback ? (
+          <div role="alert" className="rounded-2xl border border-[var(--color-accent-rose)]/30 bg-[var(--color-accent-rose)]/10 px-4 py-3 text-sm font-semibold text-[var(--color-accent-ink-rose)]">
+            {redeemFeedback}
+          </div>
+        ) : null}
         {rewardsByCategory.length === 0 ? (
           <Surface variant="warm" radius="2xl" padding="lg">
             <div className="text-center py-6">

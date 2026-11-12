@@ -84,9 +84,27 @@ function setInputValue(el: HTMLElement, input: HTMLInputElement, value: string) 
   });
 }
 
+async function submitParentPin(pin = "1234") {
+  const input = document.querySelector<HTMLInputElement>('input[aria-label="Parent 4-digit PIN"]');
+  expect(input).toBeTruthy();
+  const dlg = input!.closest<HTMLElement>('[role="dialog"]')!;
+  setInputValue(dlg, input!, pin);
+  await settle();
+  const confirm = [...dlg.querySelectorAll("button")].find((b) => {
+    const label = b.textContent?.trim() || "";
+    return label && label !== "Cancel";
+  });
+  expect(confirm).toBeTruthy();
+  await act(async () => { confirm!.click(); });
+  await settle();
+}
+
 beforeEach(() => {
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {} })));
   stubFetch((url, init) => {
+    if (url.endsWith("/api/members/verify")) {
+      return { member: { id: "m-jeff", name: "Jeff", role: "parent" } };
+    }
     if (url.endsWith("/api/ai/providers") && (!init?.method || init.method === "GET")) {
       return { providers: [provider], active: { provider: "b.ai free tier", model: "glm-5.3-flash" } };
     }
@@ -125,6 +143,9 @@ describe("AiModelsCard", () => {
       "fetch",
       vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
         calls.push({ url: String(url), init });
+        if (String(url).endsWith("/api/members/verify")) {
+          return { ok: true, status: 200, json: async () => ({ member: { id: "m-jeff", name: "Jeff", role: "parent" } }) };
+        }
         if (String(url).endsWith("/api/ai/providers") && (!init?.method || init.method === "GET")) {
           return { ok: true, status: 200, json: async () => ({ providers: [provider], active: { provider: "b.ai free tier", model: "glm-5.3-flash" } }) };
         }
@@ -154,6 +175,7 @@ describe("AiModelsCard", () => {
       });
     });
     await settle();
+    await submitParentPin();
 
     const post = calls.find((c) => c.url.endsWith("/api/ai/models"));
     expect(post).toBeTruthy();
@@ -209,6 +231,9 @@ describe("AiModelsCard", () => {
       "fetch",
       vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
         calls.push({ url: String(url), init });
+        if (String(url).endsWith("/api/members/verify")) {
+          return { ok: true, status: 200, json: async () => ({ member: { id: "m-jeff", name: "Jeff", role: "parent" } }) };
+        }
         if (String(url).endsWith("/api/ai/providers") && (!init?.method || init.method === "GET")) {
           return { ok: true, status: 200, json: async () => ({ providers: [provider], active: { provider: "b.ai free tier", model: "glm-5.3-flash" } }) };
         }
@@ -225,6 +250,7 @@ describe("AiModelsCard", () => {
     expect(upBtn).toBeTruthy();
     act(() => upBtn!.click());
     await settle();
+    await submitParentPin();
 
     const put = calls.find((c) => c.init?.method === "PUT");
     expect(put).toBeTruthy();
@@ -239,6 +265,9 @@ describe("AiModelsCard", () => {
       "fetch",
       vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
         calls.push({ url: String(url), init });
+        if (String(url).endsWith("/api/members/verify")) {
+          return { ok: true, status: 200, json: async () => ({ member: { id: "m-jeff", name: "Jeff", role: "parent" } }) };
+        }
         if (String(url).endsWith("/api/ai/providers") && (!init?.method || init.method === "GET")) {
           return { ok: true, status: 200, json: async () => ({ providers: [provider, provider2], active: { provider: "b.ai free tier", model: "glm-5.3-flash" } }) };
         }
@@ -255,6 +284,7 @@ describe("AiModelsCard", () => {
     expect(upBtn).toBeTruthy();
     act(() => upBtn!.click());
     await settle();
+    await submitParentPin();
 
     const puts = calls.filter((c) => c.init?.method === "PUT");
     expect(puts).toHaveLength(2); // both providers get their order swapped
@@ -269,6 +299,9 @@ describe("AiModelsCard", () => {
       "fetch",
       vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
         calls.push({ url: String(url), init });
+        if (String(url).endsWith("/api/members/verify")) {
+          return { ok: true, status: 200, json: async () => ({ member: { id: "m-jeff", name: "Jeff", role: "parent" } }) };
+        }
         if (String(url).endsWith("/api/ai/providers") && (!init?.method || init.method === "GET")) {
           return { ok: true, status: 200, json: async () => ({ providers: [provider], active: { provider: "b.ai free tier", model: "glm-5.3-flash" } }) };
         }
@@ -296,6 +329,7 @@ describe("AiModelsCard", () => {
     expect(confirmBtn).toBeTruthy();
     await act(async () => confirmBtn!.click());
     await settle();
+    await submitParentPin();
 
     const del = calls.find((c) => c.init?.method === "DELETE");
     expect(del).toBeTruthy();
@@ -339,6 +373,7 @@ describe("AiModelsCard", () => {
     expect(testBtn).toBeTruthy();
     await act(async () => testBtn!.click());
     await settle();
+    await submitParentPin();
 
     expect(el.textContent).toContain("ok — 2 models");
   });
@@ -453,6 +488,7 @@ describe("AiModelsCard", () => {
       });
     });
     await settle();
+    await submitParentPin();
 
     // the fetched ids appear as toggle chips
     expect(el.textContent).toContain("2 models available");

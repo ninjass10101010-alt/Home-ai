@@ -543,29 +543,30 @@ export default function KidHome() {
       const action: "crew-join" | "crew-checkin" | null =
         joined && !checkedIn ? "crew-checkin" : !joined && !crewFull(task) ? "crew-join" : null;
       if (!action) return;
-      if (user.role === "child" && typeof user.age === "number" && user.age < 10) {
-        void runCrewAction(task, action, "");
-        return;
-      }
-      setQuestPinTask(task);
-      setQuestCrewAction(action);
-      setQuestPin("");
-      setQuestPinError("");
+      void runCrewAction(task, action, "");
       return;
     }
-    // Under-10 kids: one tap on an assigned quest completes it PIN-free —
-    // pending approval, same shape as the Tasks page (no PIN modal, no round trip).
-    if (completesWithoutPin(user?.role, user?.age, task) && !task.universal && !isSnatchable(task)) {
-      // Stale-cache double-tap guard (same trap-proof order as the Tasks
-      // page): a row already completed this week lands nothing, not even a
-      // second pending stamp.
-      if (task.completedInWeek === localWeekStartISO()) return;
-      const myName = resolveMemberName(db.selectMembers(), user!.name);
+    if (task.completedInWeek === localWeekStartISO()) return;
+    if (task.universal || isSnatchable(task)) {
+      const myName = resolveMemberName(db.selectMembers(), user.name);
+      const before = pointsFor(loadWeekData().points, myName);
+      const claimantIsChild = user.role === "child";
+      const claim = queueCommand({
+        route: "/api/tasks/claim",
+        action: "claim",
+        payload: { taskId: task.id, memberName: myName, assigneeEmoji: task.assigneeEmoji },
+        displayTarget: { kind: "claim", taskId: task.id, title: task.title },
+      });
+      markOptimistic(claim.operationId, task.id, "pending");
+      celebrate(task.points || 0, before, { pending: claimantIsChild });
+      return;
+    }
+    // Any signed-in member completes an assigned quest PIN-free (kid taps stay
+    // pending approval until a parent reviews them).
+    if (completesWithoutPin(user?.role, user?.age, task)) {
+      const myName = resolveMemberName(db.selectMembers(), user.name);
       const week = loadWeekData();
       const before = pointsFor(week.points, myName);
-      // PIN-free durable completion: the session IS the identity, so the
-      // command carries NO credential at all. Points still land only on parent
-      // approval, and the celebration never waits on the network.
       const complete = queueCommand({
         route: "/api/tasks/claim",
         action: "complete",
@@ -573,14 +574,9 @@ export default function KidHome() {
         displayTarget: { kind: "claim", taskId: task.id, title: task.title },
       });
       markOptimistic(complete.operationId, task.id, "pending");
-      celebrate(task.points || 0, before, { pending: true });
+      celebrate(task.points || 0, before, { pending: user.role === "child" });
       return;
     }
-    // 10+ kids (and age-unknown sessions — completesWithoutPin fails closed)
-    // keep the PIN modal; submitQuestPin verifies the PIN (predicate:
-    // completesWithPendingApproval) and lands PENDING, never a local earn.
-    // Universal/snatchable claims of any age land here too — claims are
-    // always PIN-gated (server-authoritative route).
     setQuestPinTask(task);
     setQuestPin("");
     setQuestPinError("");

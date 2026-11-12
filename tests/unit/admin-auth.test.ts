@@ -18,7 +18,7 @@ vi.mock("@/lib/server-auth", async (importOriginal) => {
   };
 });
 
-import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { authorizeAdminRequest, authorizeParentPinRequest } from "@/lib/admin-auth";
 
 const PARENT = { ok: true, identity: { memberId: "m1", name: "R", role: "parent" } };
 
@@ -170,5 +170,51 @@ describe("authorizeAdminRequest", () => {
     const badPin = await authorizeAdminRequest(req({ "x-admin-pin": "9999" }));
     expect(badPin.ok).toBe(false);
     expect(badPin.status).toBe(401);
+  });
+});
+
+describe("authorizeParentPinRequest", () => {
+  it("never waives Parent PIN for an adult session cookie", async () => {
+    vi.stubEnv("ADMIN_SECRET", "");
+    const cookie = await sessionCookie("parent");
+    mocks.requireLiveSession.mockResolvedValue(PARENT);
+
+    const result = await authorizeParentPinRequest(req({ cookie }));
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(401);
+    expect(result.error).toBe("unauthorized");
+    expect(mocks.requireLiveSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a child/pet PIN with 403 adult_only", async () => {
+    vi.stubEnv("ADMIN_SECRET", "");
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m2", name: "Kid", role: "child" });
+
+    const result = await authorizeParentPinRequest(req(), { pin: "5678" });
+
+    expect(result).toEqual({ ok: false, status: 403, error: "adult_only" });
+    expect(mocks.verifyPinAgainstAnyMember).toHaveBeenCalledWith("5678");
+  });
+
+  it("accepts a parent PIN from header, body.parentPin, or body.pin", async () => {
+    vi.stubEnv("ADMIN_SECRET", "");
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
+
+    const fromHeader = await authorizeParentPinRequest(req({ "x-admin-pin": "1234" }));
+    expect(fromHeader.ok).toBe(true);
+    expect(fromHeader.member).toMatchObject({ id: "m1", name: "Rebecca", role: "parent" });
+
+    const fromBody = await authorizeParentPinRequest(req(), { parentPin: "1234" });
+    expect(fromBody.ok).toBe(true);
+  });
+
+  it("propagates PB lookup outages as 503 identity_unavailable", async () => {
+    vi.stubEnv("ADMIN_SECRET", "");
+    mocks.verifyPinAgainstAnyMember.mockRejectedValue(new Error("PB down"));
+
+    const result = await authorizeParentPinRequest(req({ "x-admin-pin": "1234" }));
+
+    expect(result).toEqual({ ok: false, status: 503, error: "identity_unavailable" });
   });
 });

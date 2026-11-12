@@ -211,9 +211,7 @@ afterEach(async () => {
 });
 
 describe("kid tap-to-complete", () => {
-  it("a 10-year-old's tap opens the PIN step and queues a PIN-gated completion with zero local points", async () => {
-    // Jasmine is 10 — PIN-free taps are for under-10 only. Identity is still
-    // proved by PIN, and the completed row lands through the acknowledgment.
+  it("a signed-in 10-year-old's tap completes PIN-free and queues a completion with zero local points", async () => {
     server.claimStatus = 503;
     mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
     mockAuth.isLoggedIn = true;
@@ -230,13 +228,9 @@ describe("kid tap-to-complete", () => {
     const row = el.querySelector('[aria-label="Complete Make bed"]') as HTMLElement;
     expect(row).not.toBeNull();
     await act(async () => { row.click(); });
-    await settle();
-    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
-
-    await typePin("4-digit PIN", KID_PIN);
-    await act(async () => { dialogButton("Submit").click(); });
     await settle(120);
 
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     const [entry] = listTaskOutbox();
     expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 51 } });
     // The roster-resolved FULL name is the ledger key, so approve credits the
@@ -246,10 +240,11 @@ describe("kid tap-to-complete", () => {
     expect(storedTasks()[0].completed).toBe(false);
     expect(storedTasks()[0].pendingApproval).toBeUndefined();
     expect(storedHistory()).toHaveLength(0);
-    expect(verifyCalls()).toContain("/api/members/verify");
+    expect(verifyCalls()).not.toContain("/api/members/verify");
   });
 
-  it("adult tap still opens a real dialog and writes no pending record", async () => {
+  it("signed-in adult tap completes PIN-free and writes no local pending record", async () => {
+    server.claimStatus = 503;
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
     mockAuth.isLoggedIn = true;
     seed([OPEN]);
@@ -264,9 +259,10 @@ describe("kid tap-to-complete", () => {
 
     const row = el.querySelector('[aria-label="Complete Make bed"]') as HTMLElement;
     await act(async () => { row.click(); });
-    await settle();
+    await settle(120);
 
-    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 51 } });
     expect(storedTasks()[0].pendingApproval).toBeUndefined();
   });
 

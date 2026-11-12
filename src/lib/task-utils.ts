@@ -80,24 +80,15 @@ export function pendingPointsFor(memberName: string, tasks: Task[]): number {
 // same bound server-side in /api/auth/quick-login — single source here).
 export const PIN_FREE_MAX_AGE = 10;
 
-// One tap, no PIN: under-10 kids complete ASSIGNED chores (never universal/
-// snatchable — claims keep their PIN). Missing age fails closed to the PIN
-// path. Task 7 routes every kid completion through pendingApproval.
+// All signed-in household members (kids of any age, pets, and parents) complete
+// and claim everyday chores without a member PIN; Task 7 still routes every
+// child completion through pendingApproval (parent PIN needed to approve).
 export function completesWithoutPin(
-  role: string | undefined,
-  age: number | undefined,
+  role: string | null | undefined,
+  _age: number | undefined,
   task: Task
 ): boolean {
-  return (
-    role === "child" &&
-    typeof age === "number" &&
-    Number.isFinite(age) &&
-    age > 0 &&
-    age < PIN_FREE_MAX_AGE &&
-    !task.completed &&
-    !task.universal &&
-    !isSnatchable(task)
-  );
+  return Boolean(role) && !task.completed;
 }
 
 // Every CHILD completion (any age) lands as done-but-unpaid: the PIN proves

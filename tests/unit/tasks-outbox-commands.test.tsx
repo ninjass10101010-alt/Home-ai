@@ -252,6 +252,24 @@ function dialogButton(text: string): HTMLButtonElement {
   return found!;
 }
 
+async function confirmParentPinGate(pin: string = PARENT_PIN) {
+  await settle();
+  const input = document.querySelector('input[aria-label="Parent 4-digit PIN"]') as HTMLInputElement;
+  expect(input).toBeTruthy();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    setter.call(input, pin);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const dialog = input.closest('[role="dialog"]') ?? document;
+  const confirm = Array.from(dialog.querySelectorAll("button")).find((button) => {
+    const label = button.textContent?.trim() || "";
+    return label.length > 0 && label !== "Cancel";
+  }) as HTMLButtonElement | undefined;
+  expect(confirm).toBeTruthy();
+  await act(async () => { confirm!.click(); });
+}
+
 async function setField(label: string, value: string) {
   const input = document.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement;
   expect(input).toBeTruthy();
@@ -584,16 +602,13 @@ describe("send-back and approve-all are commands too", () => {
 });
 
 describe("assigned completion, open claim, crew and undo", () => {
-  it("queues a kid pending completion without any local earn", async () => {
+  it("queues a kid pending completion without any local earn or PIN modal", async () => {
     server.claimStatus = 503;
     mockAuth.currentUser = { name: "Jasmine", role: "child", age: 11 };
     seed([ASSIGNED_TASK]);
     await renderAsync(<TasksPage />);
     await settle();
     await click("Complete Make bed");
-    await settle();
-    await typePin("4-digit PIN", KID_PIN);
-    await act(async () => { dialogButton("Submit").click(); });
     await settle(80);
 
     const entry = listTaskOutbox()[0];
@@ -602,15 +617,12 @@ describe("assigned completion, open claim, crew and undo", () => {
     expect(storedTasks()[0].completed).toBe(false);
   });
 
-  it("queues an open claim with the claim action", async () => {
+  it("queues an open claim with the claim action and no PIN modal", async () => {
     server.claimBody = { success: true, claimedBy: "Rebecca Mom", weekData: weekWithEarn("Rebecca Mom", 10) };
     seed([OPEN_TASK]);
     await renderAsync(<TasksPage />);
     await settle();
     await click("Claim Wash car");
-    await settle();
-    await typePin("4-digit PIN", PARENT_PIN);
-    await act(async () => { dialogButton("Submit").click(); });
     await settle(60);
 
     expect(requestsFor("/api/tasks/claim")[0]?.body).toMatchObject({ action: "claim", taskId: 103 });
@@ -618,16 +630,13 @@ describe("assigned completion, open claim, crew and undo", () => {
     expect(storedWeek().points["Rebecca Mom"]).toBe(10);
   });
 
-  it("queues a crew join for a kid session", async () => {
+  it("queues a crew join for a kid session without a PIN modal", async () => {
     server.claimBody = { success: true, task: { id: 104, title: "Garden", crew: { members: [{ name: "Caspian Garcia", joinedAt: new Date().toISOString() }] }, crewSize: 2 } };
     mockAuth.currentUser = { name: "Caspian", role: "child", age: 7 };
     seed([CREW_TASK]);
     await renderAsync(<TasksPage />);
     await settle();
     await click("Join crew for Garden");
-    await settle();
-    await typePin("4-digit PIN", KID_PIN);
-    await act(async () => { dialogButton("Submit").click(); });
     await settle(60);
 
     expect(requestsFor("/api/tasks/claim")[0]?.body).toMatchObject({ action: "crew-join", taskId: 104 });
@@ -701,6 +710,7 @@ describe("task CRUD is a manage command, never local persistence", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { dialogButton("Save").click(); });
+    await confirmParentPinGate();
     await settle(80);
 
     const entry = listTaskOutbox()[0];
@@ -734,6 +744,7 @@ describe("config edits go through the durable command and never the retired writ
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { dialogButton("Save").click(); });
+    await confirmParentPinGate();
     await settle(80);
 
     const entry = listTaskOutbox()[0];
@@ -756,6 +767,7 @@ describe("config edits go through the durable command and never the retired writ
     await settle();
     await click("Edit penalty");
     await act(async () => { dialogButton("Delete").click(); });
+    await confirmParentPinGate();
     await settle(80);
 
     expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/config", action: "delete" });
@@ -804,8 +816,6 @@ describe("display-only optimism is visible but never persisted", () => {
     const el = await renderAsync(<TasksPage />);
     await settle();
     await click("Complete Make bed");
-    await typePin("4-digit PIN", KID_PIN);
-    await act(async () => { dialogButton("Submit").click(); });
     await settle(120);
 
     expect(el.querySelector('[data-testid="optimistic-task-row"]')).not.toBeNull();
@@ -826,6 +836,7 @@ describe("display-only optimism is visible but never persisted", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { dialogButton("Save").click(); });
+    await confirmParentPinGate();
     await settle(120);
 
     expect(el.textContent || "").toContain("Rake leaves");
@@ -872,7 +883,7 @@ describe("reward redemption, penalty and manual adjust are server commands", () 
     return el;
   }
 
-  it("queues a redemption with the member PIN and adopts the server weekData", async () => {
+  it("queues a PIN-free redemption for a signed-in member and adopts the server weekData", async () => {
     const REDEEM = { id: 7, name: "Movie night", emoji: "🎬", cost: 25 };
     localStorage.setItem("consuela-rewards", JSON.stringify([REDEEM]));
     server.redeemBody = {
@@ -901,26 +912,24 @@ describe("reward redemption, penalty and manual adjust are server commands", () 
     await act(async () => { leaderboard.click(); });
     await settle();
     await click(`Redeem Movie night`);
-    await typePin("4-digit PIN", PARENT_PIN);
-    await act(async () => { dialogButton("Submit").click(); });
     await settle(150);
 
-    // The real request body: the reward id and the member PIN, no cost.
+    // Signed-in low-cost redemption needs no PIN modal or pin in body.
     const posted = requestsFor("/api/rewards/redeem");
     expect(posted).toHaveLength(1);
     expect(posted[0].body).toMatchObject({
       action: "redeem",
-      rewardId: 7,
+      rewardId: "7",
       memberName: "Rebecca Mom",
-      pin: PARENT_PIN,
     });
+    expect(posted[0].body.pin).toBeUndefined();
     expect(posted[0].body.cost).toBeUndefined();
     // The deduction is the server's ledger, adopted through the acknowledgment.
     expect(storedWeek().points["Rebecca Mom"]).toBe(25);
     expect(storedWeek().history).toHaveLength(1);
   });
 
-  it("sends BOTH pins for a high-cost redemption", async () => {
+  it("requires only Parent Approval PIN for a high-cost redemption when signed in", async () => {
     const EXPENSIVE = { id: 9, name: "Trip", emoji: "🎡", cost: 250 };
     localStorage.setItem("consuela-rewards", JSON.stringify([EXPENSIVE]));
     server.redeemBody = { ok: true, weekData: { weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] } };
@@ -933,21 +942,18 @@ describe("reward redemption, penalty and manual adjust are server commands", () 
     await act(async () => { leaderboard.click(); });
     await settle();
     await click("Redeem Trip");
-    await typePin("Parent PIN", KID_PIN);
+    await typePin("Parent PIN", PARENT_PIN);
     await act(async () => { dialogButton("Approve").click(); });
-    await settle();
-    // The member then confirms with their own PIN; the parent's travels with it.
-    await typePin("4-digit PIN", PARENT_PIN);
-    await act(async () => { dialogButton("Submit").click(); });
     await settle(150);
 
     const posted = requestsFor("/api/rewards/redeem");
     expect(posted).toHaveLength(1);
-    expect(posted[0].body).toMatchObject({ pin: PARENT_PIN, parentPin: KID_PIN });
+    expect(posted[0].body).toMatchObject({ parentPin: PARENT_PIN, parentName: "Rebecca Mom" });
+    expect(posted[0].body.pin).toBeUndefined();
     const dump = Object.keys(localStorage)
       .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
       .join("\n");
-    expect(dump).not.toContain(KID_PIN);
+    expect(dump).not.toContain(PARENT_PIN);
   });
 
   it("queues a penalty with the catalog id and the parent PIN, never a point value", async () => {
@@ -1117,12 +1123,8 @@ describe("optimism is per operation, and a temp row can never be acted on", () =
 
     // Two independent completion commands, both still in flight.
     await click("Complete Make bed");
-    await typePin("4-digit PIN", KID_PIN);
-    await act(async () => { dialogButton("Submit").click(); });
     await settle(120);
     await click("Complete Feed the cat");
-    await typePin("4-digit PIN", KID_PIN);
-    await act(async () => { dialogButton("Submit").click(); });
     await settle(120);
 
     expect(listTaskOutbox()).toHaveLength(2);
@@ -1167,6 +1169,7 @@ describe("optimism is per operation, and a temp row can never be acted on", () =
       title.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { dialogButton("Save").click(); });
+    await confirmParentPinGate();
     await settle(120);
 
     // The queued command is an UPDATE, not an add…
@@ -1212,6 +1215,7 @@ describe("optimism is per operation, and a temp row can never be acted on", () =
         field.dispatchEvent(new Event("input", { bubbles: true }));
       });
       await act(async () => { dialogButton("Save").click(); });
+      await confirmParentPinGate();
       await settle(120);
     }
 
@@ -1243,6 +1247,7 @@ describe("optimism is per operation, and a temp row can never be acted on", () =
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { dialogButton("Save").click(); });
+    await confirmParentPinGate();
     await settle(120);
 
     const row = el.querySelector('[data-testid="optimistic-add-row"]');
@@ -1270,6 +1275,7 @@ describe("optimism is per operation, and a temp row can never be acted on", () =
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { dialogButton("Save").click(); });
+    await confirmParentPinGate();
     await settle(120);
 
     // Reaching the delete handler for a row the server has never seen (the

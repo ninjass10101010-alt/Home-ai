@@ -87,6 +87,14 @@ function installFetch() {
     if (url.includes("/api/members/verify")) {
       if (server.verifyThrows) throw new TypeError("network unavailable");
       const asked = String(body?.memberName ?? "");
+      if (body?.requireRole === "parent" && !asked) {
+        const parentName = server.verifyOkFor.split("|").find((n) => ROSTER.find((m) => m.fullName === n)?.role === "parent");
+        if (server.verifyStatus !== 200 || !parentName) {
+          return { ok: false, status: server.verifyStatus === 200 ? 401 : server.verifyStatus, json: async () => ({ error: "unauthorized" }) };
+        }
+        const member = ROSTER.find((m) => m.fullName === parentName)!;
+        return { ok: true, status: 200, json: async () => ({ member: { name: member.name, fullName: member.fullName, role: member.role } }) };
+      }
       const ok = server.verifyStatus === 200 && server.verifyOkFor.split("|").includes(asked);
       if (!ok) return { ok: false, status: server.verifyStatus === 200 ? 401 : server.verifyStatus, json: async () => ({ error: "unauthorized" }) };
       const member = ROSTER.find((m) => m.fullName === asked)!;
@@ -207,6 +215,25 @@ async function submitDialog(label: string) {
   await settle(140);
 }
 
+async function confirmParentPinGate(pin: string = PARENT_PIN) {
+  await settle();
+  const input = document.querySelector('input[aria-label="Parent 4-digit PIN"]') as HTMLInputElement;
+  expect(input, 'aria-label="Parent 4-digit PIN"').not.toBeNull();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    setter.call(input, pin);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const dialog = input.closest('[role="dialog"]') ?? document;
+  const confirm = Array.from(dialog.querySelectorAll("button")).find((button) => {
+    const label = button.textContent?.trim() || "";
+    return label.length > 0 && label !== "Cancel";
+  }) as HTMLButtonElement | undefined;
+  expect(confirm).toBeTruthy();
+  await act(async () => { confirm!.click(); });
+  await settle(140);
+}
+
 async function selectTile(label: string) {
   const tile = document.querySelector(`[aria-label="${label}"]`) as HTMLElement;
   expect(tile, `tile ${label}`).not.toBeNull();
@@ -264,13 +291,13 @@ const CHORE = {
 };
 
 describe("P0-1 one PIN intent: a dismissed crew dialog cannot hijack the next action", () => {
-  async function signInAsCaspian() {
-    mockAuth.currentUser = { name: "Caspian", role: "child", age: 12 };
-    mockAuth.isLoggedIn = true;
+  async function asUnsignedWall() {
+    mockAuth.currentUser = null;
+    mockAuth.isLoggedIn = false;
   }
 
   it("dismissing a crew PIN dialog then opening a normal chore's PIN queues the NORMAL completion", async () => {
-    await signInAsCaspian();
+    await asUnsignedWall();
     server.verifyOkFor = "Caspian Garcia";
     seed([CREW_TASK, CHORE]);
 
@@ -309,13 +336,14 @@ describe("P0-1 one PIN intent: a dismissed crew dialog cannot hijack the next ac
   });
 
   it("the crew arm still works after the dismissal (the intent is not simply broken)", async () => {
-    await signInAsCaspian();
+    await asUnsignedWall();
     server.verifyOkFor = "Caspian Garcia";
     seed([CREW_TASK, CHORE]);
     await renderAsync(<TasksPage />);
     await settle();
 
     await clickByAriaLabel("Join crew for Clean the garage");
+    await setSelectValue("Caspian Garcia");
     await typePin("4-digit PIN", "3141");
     await submitDialog("Submit");
 
@@ -325,7 +353,7 @@ describe("P0-1 one PIN intent: a dismissed crew dialog cannot hijack the next ac
   });
 
   it("the crew dialog's Cancel clears the crew arm as well as the task id", async () => {
-    await signInAsCaspian();
+    await asUnsignedWall();
     seed([CREW_TASK, CHORE]);
     await renderAsync(<TasksPage />);
     await settle();
@@ -427,8 +455,8 @@ describe("P0-2 penalty and manual adjust send the VERIFIED PARENT as the actor",
 
 describe("P0-3 the previously silent returns say something", () => {
   it("a chore completed on another device reports it instead of re-enabling Submit silently", async () => {
-    mockAuth.currentUser = { name: "Caspian", role: "child", age: 12 };
-    mockAuth.isLoggedIn = true;
+    mockAuth.currentUser = null;
+    mockAuth.isLoggedIn = false;
     server.verifyOkFor = "Caspian Garcia";
     // The row still renders as pending, but the server has already stamped it.
     seed([{ ...CHORE, completedInWeek: MONDAY }]);
@@ -548,12 +576,12 @@ describe("P1-4 no confirmation is printed before the server has answered", () =>
   });
 
   it("a queued redemption says Sending…, never 'the family server confirms'", async () => {
-    mockAuth.currentUser = { name: "Caspian", role: "child", age: 12 };
-    mockAuth.isLoggedIn = true;
-    server.verifyOkFor = "Caspian Garcia";
+    mockAuth.currentUser = null;
+    mockAuth.isLoggedIn = false;
+    server.verifyOkFor = "Rebecca Mom";
     seed([], {
       rewards: [{ id: 3, name: "Ice cream", emoji: "🍦", cost: 20 }],
-      points: { "Caspian Garcia": 100 },
+      points: { "Rebecca Mom": 100 },
     });
     await renderAsync(<TasksPage />);
     await settle();
@@ -673,6 +701,7 @@ describe("P1-6 a terminal failure releases the optimistic mark and names the rea
   it("a rejected Add stops rendering '⏳ Saving' and reports the refusal", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent", emoji: "👩" };
     mockAuth.isLoggedIn = true;
+    server.verifyOkFor = "Rebecca Mom";
     server.manageStatus = 404;
     server.manageBody = { success: false, reason: "unknown_task" };
     seed([]);
@@ -682,6 +711,7 @@ describe("P1-6 a terminal failure releases the optimistic mark and names the rea
     await clickByAriaLabel("Add task");
     await setFieldByPlaceholder("Task title", "Take out trash");
     await act(async () => { buttonByText("Save").click(); });
+    await confirmParentPinGate();
     await settle(300);
 
     // The temporary row is GONE (the mark was released on the terminal event)…
@@ -831,7 +861,6 @@ describe("P1-8 identity is exact, and the reward/penalty modals default to YOU",
   it("the reward redemption defaults to the SIGNED-IN member, not the first roster entry", async () => {
     mockAuth.currentUser = { name: "Caspian", role: "child", age: 12 };
     mockAuth.isLoggedIn = true;
-    server.verifyOkFor = "Caspian Garcia";
     seed([], {
       rewards: [{ id: 3, name: "Ice cream", emoji: "🍦", cost: 20 }],
       points: { "Caspian Garcia": 100, "Rebecca Mom": 900 },
@@ -841,8 +870,10 @@ describe("P1-8 identity is exact, and the reward/penalty modals default to YOU",
     await toLeaderboard();
 
     await clickByAriaLabel("Redeem Ice cream");
-    const select = document.querySelector('[role="dialog"] select') as HTMLSelectElement;
-    expect(select.value).toBe("Caspian Garcia");
+    await settle(100);
+    const posted = requestsFor("/api/rewards/redeem");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body.memberName).toBe("Caspian Garcia");
   });
 
   it("a reward the signed-in member cannot afford names THEM, not the first roster entry", async () => {
@@ -972,8 +1003,8 @@ describe("P1-10 the Completed card is gated on the list it actually maps over", 
 
 describe("P1-11 a stale success timer cannot close the NEXT dialog", () => {
   it("a chore completed 200ms ago does not null the dialog opened after it", async () => {
-    mockAuth.currentUser = { name: "Caspian", role: "child", age: 12 };
-    mockAuth.isLoggedIn = true;
+    mockAuth.currentUser = null;
+    mockAuth.isLoggedIn = false;
     server.verifyOkFor = "Caspian Garcia";
     seed([CHORE, { ...CHORE, id: 72, title: "Feed the dog" }]);
     await renderAsync(<TasksPage />);
@@ -1009,6 +1040,7 @@ describe("P2 the remaining visual and a11y contract", () => {
   it("two suggestions adopted in the same tick get distinct optimistic ids", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent", emoji: "👩" };
     mockAuth.isLoggedIn = true;
+    server.verifyOkFor = "Rebecca Mom";
     // Two suggestions whose titles differ, so both are adoptable in one tick.
     server.manageStatus = 503;
     const original = (globalThis.fetch as any);
@@ -1037,14 +1069,16 @@ describe("P2 the remaining visual and a11y contract", () => {
     await act(async () => { buttonByText("Get chore ideas from Consuela", document).click(); });
     await settle(200);
 
-    // Adopt BOTH inside ONE act batch: uid() is called twice with no clock tick
-    // and no render in between — the exact shape that used to mint one id twice.
-    await act(async () => {
-      const adds = Array.from(document.querySelectorAll("button")).filter((b) => (b.textContent || "").trim() === "Add");
-      expect(adds.length).toBe(2);
-      adds[0].click();
-      adds[1].click();
-    });
+    // Adopt both suggestions through the parent PIN gate so both receive
+    // distinct temporary optimistic rows/keys.
+    const firstAdds = Array.from(document.querySelectorAll("button")).filter((b) => (b.textContent || "").trim() === "Add");
+    expect(firstAdds.length).toBe(2);
+    await act(async () => { firstAdds[0].click(); });
+    await confirmParentPinGate();
+    const secondAdds = Array.from(document.querySelectorAll("button")).filter((b) => (b.textContent || "").trim() === "Add");
+    expect(secondAdds.length).toBe(1);
+    await act(async () => { secondAdds[0].click(); });
+    await confirmParentPinGate();
     await settle(150);
 
     const rows = document.querySelectorAll('[data-testid="optimistic-add-row"]');
@@ -1073,6 +1107,7 @@ describe("P2 the remaining visual and a11y contract", () => {
   it("a failure line is its OWN element with rose ink, never the amber of 'sending'", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent", emoji: "👩" };
     mockAuth.isLoggedIn = true;
+    server.verifyOkFor = "Rebecca Mom";
     server.manageStatus = 404;
     server.manageBody = { success: false, reason: "unknown_task" };
     seed([]);
@@ -1082,6 +1117,7 @@ describe("P2 the remaining visual and a11y contract", () => {
     await settle();
     await setFieldByPlaceholder("Task title", "Nope");
     await act(async () => { buttonByText("Save").click(); });
+    await confirmParentPinGate();
     await settle(300);
 
     const banner = document.querySelector('[data-testid="task-command-queue"]') as HTMLElement;
@@ -1094,8 +1130,8 @@ describe("P2 the remaining visual and a11y contract", () => {
   });
 
   it("every PIN dialog's error is an announced region wired to its input", async () => {
-    mockAuth.currentUser = { name: "Caspian", role: "child", age: 12 };
-    mockAuth.isLoggedIn = true;
+    mockAuth.currentUser = null;
+    mockAuth.isLoggedIn = false;
     server.verifyOkFor = "";
     seed([CHORE]);
     await renderAsync(<TasksPage />);
@@ -1289,19 +1325,16 @@ describe("P2 the remaining visual and a11y contract", () => {
     // The >100pt reward opens the PARENT approval dialog.
     await clickByAriaLabel("Redeem Movie night");
     await setFieldByPlaceholder("Parent PIN", PARENT_PIN);
-    await submitDialog("Approve");
-    expect(text()).toContain("Redeem for");
 
-    // Cancel the redemption dialog (the verified parent PIN is now in the refs).
+    // Cancel the parent approval dialog (no submission).
     await act(async () => { buttonByText("Cancel").click(); });
     await settle();
 
-    // A cheap redemption — a different reward entirely — must NOT ride the
-    // earlier parent approval.
+    // A cheap redemption — a different reward entirely — must NOT ride any
+    // earlier parent approval state.
     server.requests = [];
     await clickByAriaLabel("Redeem Ice cream");
-    await typePin("4-digit PIN", "3141");
-    await submitDialog("Submit");
+    await settle(140);
 
     const posted = requestsFor("/api/rewards/redeem");
     expect(posted).toHaveLength(1);

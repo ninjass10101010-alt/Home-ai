@@ -15,7 +15,7 @@ vi.mock("next/dynamic", () => {
   return { default: () => Noop };
 });
 
-const mockAuth = vi.hoisted(() => ({ currentUser: { name: "Caspian", role: "child" } as any }));
+const mockAuth = vi.hoisted(() => ({ currentUser: { name: "Caspian", role: "child" } as any, isLoggedIn: true }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => mockAuth }));
 
 vi.mock("@/hooks/useDashboardMode", () => ({
@@ -204,8 +204,7 @@ function redeemsOnTheWire(): number {
 async function approveBigReward() {
   await clickRewardCard("Movie night — 150 points", "Parent PIN");
   await fillPin("Parent PIN", "0000");
-  await pressButton("Approve", () => expect(pinInputByLabel("Your 4-digit PIN")).not.toBeNull());
-  await fillPin("Your 4-digit PIN", "1234");
+  await pressButton("Approve", () => expect(listTaskOutbox().length + redeemsOnTheWire() + Number(store.saveWeekData.mock.calls.length > 0)).toBeGreaterThan(0));
 }
 
 describe("RewardsShop parent approval gate (>100pt rewards)", () => {
@@ -269,7 +268,7 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     expectNoStructuredTaskPush();
   });
 
-  it("a correct parent PIN unlocks the kid-PIN step, and the write lands only after it", async () => {
+  it("a correct parent PIN immediately submits the >100pt redemption without a second kid-PIN step", async () => {
     stubFetch();
     const el = await renderAsync(<RewardsShop />);
     await settle();
@@ -282,19 +281,8 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     await act(async () => { buttonByText("Approve")!.click(); });
     await settle();
 
-    // Approved → the normal kid redemption PIN step opens; still no write.
-    expect(document.body.textContent || "").toContain("Redeem with your PIN");
-    expect(store.saveWeekData).not.toHaveBeenCalled();
-
-    const kidInput = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
-    expect(kidInput).not.toBeNull();
-    await act(async () => { setInputValue(kidInput, "1234"); });
-    await act(async () => { buttonByText("Redeem")!.click(); });
-    await settle();
-
-    // The server's returned weekData is adopted verbatim — the old
-    // local-then-fire-and-forget is gone: the gateway now rejects a child's
-    // week_data write, so it would 403 and be reverted.
+    // No kid-PIN modal; server's returned weekData is adopted verbatim.
+    expect(document.body.textContent || "").not.toContain("Redeem with your PIN");
     expect(store.saveWeekData).toHaveBeenCalled();
     const week = store.saveWeekData.mock.calls.at(-1)![0];
     expect(week.points.Caspian).toBe(50);
@@ -303,7 +291,7 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     expect(document.body.textContent || "").toContain("Redeemed!");
   });
 
-  it("a ≤100pt reward skips parent approval (kid PIN only, as before)", async () => {
+  it("a ≤100pt reward skips parent approval and kid PIN when signed in", async () => {
     stubFetch();
     const el = await renderAsync(<RewardsShop />);
     await settle();
@@ -313,7 +301,9 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     await settle();
 
     expect(document.body.textContent || "").not.toContain("Parent Approval Required");
-    expect(document.body.textContent || "").toContain("Redeem with your PIN");
+    expect(document.body.textContent || "").not.toContain("Redeem with your PIN");
+    expect(redeemsOnTheWire()).toBe(1);
+    expect(store.saveWeekData).toHaveBeenCalled();
   });
 
   it("a failed redeem (duplicate 409) shows the honest error and does NOT celebrate", async () => {
@@ -328,16 +318,10 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     await act(async () => { card.click(); });
     await settle();
 
-    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
-    await act(async () => { setInputValue(input, "1234"); });
-    await act(async () => { buttonByText("Redeem")!.click(); });
-    await settle();
-
     const text = document.body.textContent || "";
     expect(text).toContain("That redemption just went through");
     expect(text).not.toContain("Redeemed!");
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    expect((document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement).value).toBe("");
   });
 
   it("an insufficient-points 400 surfaces the server's 'needs N more pts' copy (no celebration)", async () => {
@@ -350,11 +334,6 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     await settle();
     const card = el.querySelector('[aria-label^="Ice cream trip — 40 points"]') as HTMLElement;
     await act(async () => { card.click(); });
-    await settle();
-
-    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
-    await act(async () => { setInputValue(input, "1234"); });
-    await act(async () => { buttonByText("Redeem")!.click(); });
     await settle();
 
     const text = document.body.textContent || "";
@@ -395,8 +374,9 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     await settle();
 
     const before = JSON.parse(JSON.stringify(store.week));
-    await approveBigReward();
-    await pressButton("Redeem", () => {
+    await clickRewardCard("Movie night — 150 points", "Parent PIN");
+    await fillPin("Parent PIN", "0000");
+    await pressButton("Approve", () => {
       const entry = outboxEntry("Movie night");
       expect(entry?.status).toBe("retrying");
     });
@@ -416,15 +396,17 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     await renderAsync(<RewardsShop />);
     await settle();
 
-    await approveBigReward();
-    await pressButton("Redeem", () => expect(outboxEntry("Movie night")?.status).toBe("retrying"));
+    await clickRewardCard("Movie night — 150 points", "Parent PIN");
+    await fillPin("Parent PIN", "0000");
+    await pressButton("Approve", () => expect(outboxEntry("Movie night")?.status).toBe("retrying"));
     expect(listTaskOutbox()).toHaveLength(1);
 
     redeemResult = {
       status: 200,
       body: { ok: true, applied: true, duplicate: false, reconciled: true, weekData: REDEEMED_WEEK },
     };
-    await pressButton("Redeem", () => expect(listTaskOutbox()).toHaveLength(0));
+    await fillPin("Parent PIN", "0000");
+    await pressButton("Approve", () => expect(listTaskOutbox()).toHaveLength(0));
 
     const redeems = posted.filter((entry) => entry.url.includes("/api/rewards/redeem"));
     expect(redeems).toHaveLength(1);
@@ -433,14 +415,13 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     expect(redeems[0].body.operationId.length).toBeGreaterThan(0);
     expect(redeems[0].body).toMatchObject({
       action: "redeem",
-      pin: "1234",
       parentPin: "0000",
       parentName: "Jeffery",
     });
+    expect(redeems[0].body.pin).toBeUndefined();
     const dump = Object.keys(localStorage)
       .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
       .join("\n");
-    expect(dump).not.toContain("1234");
     expect(dump).not.toContain("0000");
   });
 
@@ -454,7 +435,7 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     await settle();
 
     await approveBigReward();
-    await pressButton("Redeem", () => {
+    await waitUntil(() => {
       expect(store.saveWeekData).toHaveBeenCalled();
       expect(listTaskOutbox()).toHaveLength(0);
     });
@@ -479,7 +460,7 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     await settle();
 
     await approveBigReward();
-    await pressButton("Redeem", () => expect(redeemsOnTheWire()).toBe(1));
+    await waitUntil(() => expect(redeemsOnTheWire()).toBe(1));
 
     const redeems = posted.filter((entry) => entry.url.includes("/api/rewards/redeem"));
     expect(redeems).toHaveLength(1);
@@ -487,30 +468,29 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
       action: "redeem",
       memberName: "Caspian",
       parentName: "Jeffery",
-      pin: "1234",
       parentPin: "0000",
     });
+    expect(redeems[0].body.pin).toBeUndefined();
     expect(redeems[0].body).not.toHaveProperty("cost");
     expect(redeems[0].body).not.toHaveProperty("title");
     const dump = Object.keys(localStorage)
       .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
       .join("\n");
-    expect(dump).not.toContain("1234");
     expect(dump).not.toContain("0000");
   });
 
-  it("a ≤100pt redemption sends the member PIN only — no parent identity at all", async () => {
+  it("a signed-in ≤100pt redemption sends neither member PIN nor parent identity", async () => {
     stubFetch();
-    await renderAsync(<RewardsShop />);
+    const el = await renderAsync(<RewardsShop />);
     await settle();
 
-    await clickRewardCard("Ice cream trip — 40 points", "Your 4-digit PIN");
-    await fillPin("Your 4-digit PIN", "1234");
-    await pressButton("Redeem", () => expect(redeemsOnTheWire()).toBe(1));
+    const card = el.querySelector('[aria-label^="Ice cream trip — 40 points"]') as HTMLElement;
+    await act(async () => { card.click(); });
+    await waitUntil(() => expect(redeemsOnTheWire()).toBe(1));
 
     const redeems = posted.filter((entry) => entry.url.includes("/api/rewards/redeem"));
     expect(redeems).toHaveLength(1);
-    expect(redeems[0].body.pin).toBe("1234");
+    expect(redeems[0].body.pin).toBeUndefined();
     expect(redeems[0].body).not.toHaveProperty("parentPin");
     expect(redeems[0].body).not.toHaveProperty("parentName");
   });

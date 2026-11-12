@@ -15,20 +15,21 @@ import { readTaskConfig, writeTaskConfig } from "@/lib/task-config-client";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import type { TaskConfigResponse } from "@/lib/task-config";
 import type { WeeklyPrize } from "@/types/tasks";
+import ParentPinGateModal from "@/components/auth/ParentPinGateModal";
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 const MAX_PRIZES = 3;
 
 type FeedbackTone = "neutral" | "success" | "error";
 
-function queueWeeklyPrizes(items: WeeklyPrize[]): void {
+function queueWeeklyPrizes(items: WeeklyPrize[], pin?: string): void {
   void writeTaskConfig({
     operationId: "",
     kind: "weekly-prizes",
     action: "replace",
     updatedAt: new Date().toISOString(),
     items,
-  }).catch(() => {});
+  }, pin ? { pin } : undefined).catch(() => {});
 }
 
 /**
@@ -74,6 +75,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   // authoritative and render as a gold-medal row with a holder and no prize.
   // Keyed by prize id so the message survives the outbox's catalog adoption.
   const [textError, setTextError] = useState<{ id: string; message: string } | null>(null);
+  const [pendingPrizesSave, setPendingPrizesSave] = useState<WeeklyPrize[] | null>(null);
 
   // An acknowledgment adopts the AUTHORITATIVE prize list into the store, so
   // the card re-reads it the moment the command lands or is refused — a stale
@@ -174,9 +176,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
       emoji: p.emoji.trim() || MEDALS[i],
       text: p.text.trim(),
     }));
-    queueWeeklyPrizes(list);
-    dirtyRef.current = false;
-    showToast("🏆 Saving the weekly prizes…");
+    setPendingPrizesSave(list);
   };
 
   return (
@@ -293,6 +293,20 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
         </SoftButton>
       </div>
       <p className="mt-3 text-xs text-text-muted">Winners are locked in when the week resets Monday.</p>
+      <ParentPinGateModal
+        open={pendingPrizesSave !== null}
+        title="Parent PIN required"
+        description="Enter a parent's 4-digit PIN to save the weekly prizes."
+        confirmLabel="Save prizes"
+        onClose={() => setPendingPrizesSave(null)}
+        onVerified={(pin) => {
+          if (!pendingPrizesSave) return;
+          queueWeeklyPrizes(pendingPrizesSave, pin);
+          dirtyRef.current = false;
+          setPendingPrizesSave(null);
+          showToast("🏆 Saving the weekly prizes…");
+        }}
+      />
     </SectionCard>
   );
 }

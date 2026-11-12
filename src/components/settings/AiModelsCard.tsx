@@ -14,6 +14,7 @@ import IconButton from "@/components/ui/IconButton";
 import Toggle from "@/components/ui/Toggle";
 import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/hooks/useAuth";
+import ParentPinGateModal from "@/components/auth/ParentPinGateModal";
 
 interface ProviderRow {
   id: string;
@@ -117,6 +118,11 @@ export default function AiModelsCard() {
   const [reordering, setReordering] = useState(false);
   const [testResult, setTestResult] = useState<Record<string, string>>({}); // providerId → "ok — N models · Xms" | error
   const [testing, setTesting] = useState<string | null>(null);
+  const [pendingPinOp, setPendingPinOp] = useState<{
+    description: string;
+    confirmLabel?: string;
+    onPin: (pin: string) => Promise<void> | void;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -150,13 +156,16 @@ export default function AiModelsCard() {
     void loadHealth();
   }, [load, loadHealth]);
 
-  const save = async () => {
+  const executeSave = async (pin: string) => {
     if (!draft) return;
     setSaving(true);
     try {
       const res = await fetch("/api/ai/providers", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-pin": pin,
+        },
         body: JSON.stringify(draft),
       });
       const body = await res.json().catch(() => ({}));
@@ -172,108 +181,151 @@ export default function AiModelsCard() {
     }
   };
 
-  const removeProvider = async () => {
+  const save = () => {
+    if (!draft) return;
+    setPendingPinOp({
+      description: `Enter a parent's 4-digit PIN to save AI provider "${draft.displayName || "provider"}".`,
+      confirmLabel: "Save provider",
+      onPin: (pin) => executeSave(pin),
+    });
+  };
+
+  const removeProvider = () => {
     if (!confirmRemove) return;
     const { id, displayName } = confirmRemove;
     setConfirmRemove(null);
-    const res = await fetch(`/api/ai/providers?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (res.ok) setNotice(`Removed ${displayName}.`);
-    else setNotice("Couldn't remove that provider.");
-    await load();
+    setPendingPinOp({
+      description: `Enter a parent's 4-digit PIN to remove AI provider "${displayName}".`,
+      confirmLabel: "Remove provider",
+      onPin: async (pin) => {
+        const res = await fetch(`/api/ai/providers?id=${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          headers: { "x-admin-pin": pin },
+        });
+        if (res.ok) setNotice(`Removed ${displayName}.`);
+        else setNotice("Couldn't remove that provider.");
+        await load();
+      },
+    });
   };
 
-  const moveModel = async (p: ProviderRow, index: number, dir: -1 | 1) => {
+  const moveModel = (p: ProviderRow, index: number, dir: -1 | 1) => {
     const next = [...p.models];
     const swap = index + dir;
     if (swap < 0 || swap >= next.length) return;
-    [next[index], next[swap]] = [next[swap], next[index]];
-    setNotice(`Reordering models in ${p.displayName}…`);
-    const res = await fetch("/api/ai/providers", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: p.id, displayName: p.displayName, baseUrl: p.baseUrl, models: next, enabled: p.enabled, order: p.order }),
+    setPendingPinOp({
+      description: `Enter a parent's 4-digit PIN to reorder models in "${p.displayName}".`,
+      confirmLabel: "Save order",
+      onPin: async (pin) => {
+        setNotice(`Reordering models in ${p.displayName}…`);
+        const res = await fetch("/api/ai/providers", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-pin": pin,
+          },
+          body: JSON.stringify({ id: p.id, displayName: p.displayName, baseUrl: p.baseUrl, models: next, enabled: p.enabled, order: p.order }),
+        });
+        setNotice(res.ok ? `Model order updated — ${next[0]} answers first.` : "Couldn't save the new order.");
+        await load();
+      },
     });
-    setNotice(res.ok ? `Model order updated — ${next[0]} answers first.` : "Couldn't save the new order.");
-    await load();
+    [next[index], next[swap]] = [next[swap], next[index]];
   };
 
-  const moveProvider = async (index: number, dir: -1 | 1) => {
+  const moveProvider = (index: number, dir: -1 | 1) => {
     const swap = index + dir;
     if (swap < 0 || swap >= providers.length || reordering) return;
     const a = providers[index];
     const b = providers[swap];
-    setReordering(true);
-    setNotice(`Reordering providers…`);
-    // Swap the two providers' order values (both PUTs land before reload).
-    const putA = fetch("/api/ai/providers", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: a.id, displayName: a.displayName, baseUrl: a.baseUrl, models: a.models, enabled: a.enabled, order: b.order }),
+    setPendingPinOp({
+      description: "Enter a parent's 4-digit PIN to reorder AI providers.",
+      confirmLabel: "Save order",
+      onPin: async (pin) => {
+        setReordering(true);
+        setNotice(`Reordering providers…`);
+        const putA = fetch("/api/ai/providers", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "x-admin-pin": pin },
+          body: JSON.stringify({ id: a.id, displayName: a.displayName, baseUrl: a.baseUrl, models: a.models, enabled: a.enabled, order: b.order }),
+        });
+        const putB = fetch("/api/ai/providers", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "x-admin-pin": pin },
+          body: JSON.stringify({ id: b.id, displayName: b.displayName, baseUrl: b.baseUrl, models: b.models, enabled: b.enabled, order: a.order }),
+        });
+        try {
+          const [ra, rb] = await Promise.all([putA, putB]);
+          if (ra.ok && rb.ok) {
+            setNotice(`${b.displayName} is now the brain.`);
+          } else {
+            setNotice("One side of the swap failed — the list may need a refresh.");
+          }
+        } catch {
+          setNotice("Couldn't save the new order.");
+        } finally {
+          setReordering(false);
+          await load();
+        }
+      },
     });
-    const putB = fetch("/api/ai/providers", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: b.id, displayName: b.displayName, baseUrl: b.baseUrl, models: b.models, enabled: b.enabled, order: a.order }),
-    });
-    try {
-      const [ra, rb] = await Promise.all([putA, putB]);
-      if (ra.ok && rb.ok) {
-        setNotice(`${b.displayName} is now the brain.`);
-      } else {
-        // Honest partial-failure message — the reload below re-reads truth.
-        setNotice("One side of the swap failed — the list may need a refresh.");
-      }
-    } catch {
-      setNotice("Couldn't save the new order.");
-    } finally {
-      setReordering(false);
-      await load();
-    }
   };
 
-  const testProvider = async (p: ProviderRow) => {
-    setTesting(p.id);
-    setTestResult((m) => ({ ...m, [p.id]: "testing…" }));
-    const started = Date.now();
-    try {
-      const res = await fetch("/api/ai/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: p.id, baseUrl: p.baseUrl }),
-      });
-      const body = await res.json().catch(() => ({}));
-      const ms = Date.now() - started;
-      if (!res.ok) throw new Error(body.error || `status ${res.status}`);
-      const n = (body.models as unknown[] | undefined)?.length ?? 0;
-      setTestResult((m) => ({ ...m, [p.id]: `ok — ${n} models · ${ms}ms` }));
-    } catch (err) {
-      setTestResult((m) => ({ ...m, [p.id]: `failed: ${(err as Error).message}` }));
-    } finally {
-      setTesting(null);
-    }
+  const testProvider = (p: ProviderRow) => {
+    setPendingPinOp({
+      description: `Enter a parent's 4-digit PIN to test "${p.displayName}".`,
+      confirmLabel: "Test provider",
+      onPin: async (pin) => {
+        setTesting(p.id);
+        setTestResult((m) => ({ ...m, [p.id]: "testing…" }));
+        const started = Date.now();
+        try {
+          const res = await fetch("/api/ai/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-admin-pin": pin },
+            body: JSON.stringify({ providerId: p.id, baseUrl: p.baseUrl }),
+          });
+          const body = await res.json().catch(() => ({}));
+          const ms = Date.now() - started;
+          if (!res.ok) throw new Error(body.error || `status ${res.status}`);
+          const n = (body.models as unknown[] | undefined)?.length ?? 0;
+          setTestResult((m) => ({ ...m, [p.id]: `ok — ${n} models · ${ms}ms` }));
+        } catch (err) {
+          setTestResult((m) => ({ ...m, [p.id]: `failed: ${(err as Error).message}` }));
+        } finally {
+          setTesting(null);
+        }
+      },
+    });
   };
 
-  const loadModels = async () => {
+  const loadModels = () => {
     if (!draft) return;
-    setListing(true);
-    try {
-      const res = await fetch("/api/ai/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: draft.id, baseUrl: draft.baseUrl, apiKey: draft.apiKey }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "listing failed");
-      const ids: string[] = (body.models ?? []).map((m: { id: string }) => m.id);
-      if (ids.length === 0) throw new Error("provider listed no models — enter names manually");
-      setDraft((d) => (d ? { ...d, models: d.models.length ? d.models : [ids[0]] } : d));
-      setFetchedIds(ids);
-      setNotice(`${ids.length} models available — tap the ones you want; the first one in the chain answers.`);
-    } catch (err) {
-      setNotice(`${(err as Error).message}`);
-    } finally {
-      setListing(false);
-    }
+    setPendingPinOp({
+      description: "Enter a parent's 4-digit PIN to fetch available models.",
+      confirmLabel: "Load models",
+      onPin: async (pin) => {
+        setListing(true);
+        try {
+          const res = await fetch("/api/ai/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-admin-pin": pin },
+            body: JSON.stringify({ providerId: draft.id, baseUrl: draft.baseUrl, apiKey: draft.apiKey }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.error || "listing failed");
+          const ids: string[] = (body.models ?? []).map((m: { id: string }) => m.id);
+          if (ids.length === 0) throw new Error("provider listed no models — enter names manually");
+          setDraft((d) => (d ? { ...d, models: d.models.length ? d.models : [ids[0]] } : d));
+          setFetchedIds(ids);
+          setNotice(`${ids.length} models available — tap the ones you want; the first one in the chain answers.`);
+        } catch (err) {
+          setNotice(`${(err as Error).message}`);
+        } finally {
+          setListing(false);
+        }
+      },
+    });
   };
 
   const h = health?.summary;
@@ -602,6 +654,18 @@ export default function AiModelsCard() {
             : ""}
         </p>
       </Modal>
+
+      <ParentPinGateModal
+        open={pendingPinOp !== null}
+        title="Parent PIN required"
+        description={pendingPinOp?.description}
+        confirmLabel={pendingPinOp?.confirmLabel}
+        onClose={() => setPendingPinOp(null)}
+        onVerified={async (pin) => {
+          const op = pendingPinOp;
+          await op?.onPin(pin);
+        }}
+      />
     </SectionCard>
   );
 }

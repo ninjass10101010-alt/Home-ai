@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import SettingsConfirmDialog from "@/components/settings/SettingsConfirmDialog";
 import SoftButton from "@/components/ui/SoftButton";
+import ParentPinGateModal from "@/components/auth/ParentPinGateModal";
 
 interface VersionInfo {
   hash: string;
@@ -67,6 +68,7 @@ export default function VersionCard() {
   const [checking, setChecking] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateOpen, setUpdateOpen] = useState(false);
+  const [updatePinOpen, setUpdatePinOpen] = useState(false);
   const [updateLogs, setUpdateLogs] = useState<UpdateLog[]>([]);
   const [updateDone, setUpdateDone] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -107,7 +109,7 @@ export default function VersionCard() {
     }
   };
 
-  const runUpdate = async () => {
+  const runUpdate = async (pin: string) => {
     if (updateGuardRef.current || updating || updateDone) return;
     updateGuardRef.current = true;
     setUpdating(true);
@@ -115,7 +117,10 @@ export default function VersionCard() {
     setUpdateDone(false);
     setUpdateError(null);
     try {
-      const res = await fetch("/api/admin/update", { method: "POST" });
+      const res = await fetch("/api/admin/update", {
+        method: "POST",
+        headers: { "x-admin-pin": pin },
+      });
       const result = await res.json().catch(() => null) as unknown;
       if (!res.ok || !isRecord(result) || result.ok !== true) {
         const detail = isRecord(result) && result.error === "adult_only"
@@ -273,7 +278,7 @@ export default function VersionCard() {
         busy={updating}
         onConfirm={() => {
           setUpdateOpen(false);
-          void runUpdate();
+          setUpdatePinOpen(true);
         }}
         onClose={() => {
           if (!updating) setUpdateOpen(false);
@@ -281,6 +286,17 @@ export default function VersionCard() {
       >
         <p className="text-sm leading-6 text-text-secondary">Only continue when you are ready for the family server to restart.</p>
       </SettingsConfirmDialog>
+
+      <ParentPinGateModal
+        open={updatePinOpen}
+        title="Parent PIN required"
+        description="Enter a parent's 4-digit PIN to start the dashboard update."
+        confirmLabel="Start update"
+        onClose={() => setUpdatePinOpen(false)}
+        onVerified={(pin) => {
+          void runUpdate(pin);
+        }}
+      />
     </div>
   );
 }

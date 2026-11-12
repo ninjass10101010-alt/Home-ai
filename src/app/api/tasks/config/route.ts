@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { verifyLiveParentSession } from "@/lib/live-member";
+import { authorizeParentPinRequest } from "@/lib/admin-auth";
 import { enqueueTaskCommandRow } from "@/lib/task-command-queue-server";
 import { applyTaskConfigCommand, type ConfigApplyOutcome } from "@/lib/task-config-apply";
 import { parseTaskConfigCommand } from "@/lib/task-config";
@@ -47,11 +47,6 @@ function configCommandPayload(command: {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await verifyLiveParentSession(request);
-  if (!auth.ok) {
-    return NextResponse.json({ error: auth.reason }, { status: auth.status });
-  }
-
   let body: unknown;
   try {
     body = await request.json();
@@ -59,7 +54,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_config_command" }, { status: 400 });
   }
 
-  const command = parseTaskConfigCommand(body, textEmoji);
+  const bodyRecord = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  const auth = await authorizeParentPinRequest(request, bodyRecord);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error ?? "unauthorized" }, { status: auth.status ?? 401 });
+  }
+  const actorMember = auth.member ?? { id: "system", name: "Parent", role: "parent" };
+
+  const cleanBody = bodyRecord ? { ...bodyRecord } : body;
+  if (cleanBody && typeof cleanBody === "object" && !Array.isArray(cleanBody)) {
+    delete (cleanBody as Record<string, unknown>).pin;
+    delete (cleanBody as Record<string, unknown>).parentPin;
+  }
+
+  const command = parseTaskConfigCommand(cleanBody, textEmoji);
   if ("error" in command) {
     if (command.error === "config_natural_key_conflict" || command.error === "invalid_resulting_config") {
       return NextResponse.json({
@@ -100,10 +108,10 @@ export async function POST(request: NextRequest) {
         action: command.action,
         payload: configCommandPayload(command),
         actor: {
-          memberId: auth.member.id,
-          name: auth.member.name,
-          role: auth.member.role,
-          authentication: "session",
+          memberId: actorMember.id,
+          name: actorMember.name,
+          role: actorMember.role,
+          authentication: "pin",
         },
         displayTarget: { kind: "config" },
       });

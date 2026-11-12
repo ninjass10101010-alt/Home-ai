@@ -93,6 +93,7 @@ import AllTimeValue from "@/components/leaderboard/AllTimeValue";
 import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard/level";
 import { useAllTimeTotals } from "@/hooks/useAllTimeTotals";
 import { readReducedMotionPreference } from "@/hooks/useReducedMotionPreference";
+import ParentPinGateModal from "@/components/auth/ParentPinGateModal";
 import { familyAllTimePoints } from "@/lib/all-time-totals";
 
 function formatDueLabel(dateStr: string): string {
@@ -583,6 +584,12 @@ export default function TasksPage() {
   const [crewRemoveError, setCrewRemoveError] = useState("");
   const [crewCloseTarget, setCrewCloseTarget] = useState<{ taskId: number } | null>(null);
   const [crewClosePin, setCrewClosePin] = useState("");
+  const [pendingParentTaskOp, setPendingParentTaskOp] = useState<{
+    title: string;
+    description: string;
+    confirmLabel?: string;
+    onPin: (pin: string) => void;
+  } | null>(null);
   const [crewCloseError, setCrewCloseError] = useState("");
   // Repeat last week (spec §5): the feed is exactly the archived one-off defs
   // keyed by the previous week's Monday (written by the rollover, adopted from
@@ -1033,62 +1040,65 @@ export default function TasksPage() {
           : null,
     };
     if (isAdding) {
-      const temporaryId = uid();
-      const added = queueCommand({
-        route: "/api/tasks/manage",
-        action: "add",
-        payload: { task: { ...normalized } },
-        displayTarget: { kind: "task", temporaryId, title: normalized.title },
+      setPendingParentTaskOp({
+        title: "Parent PIN required",
+        description: `Enter a parent's 4-digit PIN to add "${normalized.title}".`,
+        confirmLabel: "Add task",
+        onPin: (pin) => {
+          const temporaryId = uid();
+          const added = queueCommand({
+            route: "/api/tasks/manage",
+            action: "add",
+            payload: { task: { ...normalized } },
+            displayTarget: { kind: "task", temporaryId, title: normalized.title },
+            credential: { pin },
+          });
+          addOptimisticRow(added.operationId, { kind: "add", task: { ...normalized, id: temporaryId } });
+          if (saveAsFavorite) {
+            const item: TaskTemplateConfigItem = {
+              id: templateId ?? `tpl-${added.operationId}`,
+              title: normalized.title,
+              points: normalized.points,
+              category: normalized.category,
+              priority: normalized.priority,
+              mode: normalized.crewSize ? "crew" : normalized.universal ? "open" : "assigned",
+              ...(normalized.crewSize ? { crewSize: normalized.crewSize } : {}),
+              ...(!normalized.crewSize && !normalized.universal ? { assigneeName: normalized.assignee } : {}),
+              ...(normalized.universal && normalized.speedBonus ? { speedBonus: normalized.speedBonus } : {}),
+              ...(normalized.expiresAfterDays ? { expiresAfterDays: normalized.expiresAfterDays } : {}),
+            };
+            const next = [...templates.filter((t) => t.id !== item.id), item];
+            saveTaskTemplates(next);
+            setTemplates(next);
+            void writeTaskConfig({
+              operationId: "",
+              kind: "task-templates",
+              action: "replace",
+              updatedAt: new Date().toISOString(),
+              items: next,
+            }, { pin }).catch(() => {});
+          }
+          closeEdit();
+        },
       });
-      addOptimisticRow(added.operationId, { kind: "add", task: { ...normalized, id: temporaryId } });
-      if (saveAsFavorite) {
-        const item: TaskTemplateConfigItem = {
-          id: templateId ?? `tpl-${added.operationId}`,
-          title: normalized.title,
-          points: normalized.points,
-          category: normalized.category,
-          priority: normalized.priority,
-          mode: normalized.crewSize ? "crew" : normalized.universal ? "open" : "assigned",
-          ...(normalized.crewSize ? { crewSize: normalized.crewSize } : {}),
-          ...(!normalized.crewSize && !normalized.universal ? { assigneeName: normalized.assignee } : {}),
-          ...(normalized.universal && normalized.speedBonus ? { speedBonus: normalized.speedBonus } : {}),
-          ...(normalized.expiresAfterDays ? { expiresAfterDays: normalized.expiresAfterDays } : {}),
-        };
-        // The leg does not exist until first written, and the config seam
-        // refuses non-`replace` actions on an absent leg (422
-        // invalid_current_config). Save is therefore the full next list,
-        // mirroring WeeklyPrizesCard.
-        // Compose from the PAGE state and adopt it optimistically: two
-        // back-to-back saves sit in the outbox window together, and reading
-        // the ack-only store would drop the first favorite from the second
-        // replace. The ack's strictly-newer adoption remains the reconciler.
-        const next = [...templates.filter((t) => t.id !== item.id), item];
-        saveTaskTemplates(next);
-        setTemplates(next);
-        // The outbox is keyed by operationId, so the config write deliberately
-        // owns its own key: sharing the manage add's operationId would make
-        // this enqueue replace that entry and one of the two commands would
-        // silently never send or retry. The two legs' server receipt maps are
-        // separate, so replay-safety does not depend on the shared key (the
-        // template id still names the manage operation that created it).
-        void writeTaskConfig({
-          operationId: "",
-          kind: "task-templates",
-          action: "replace",
-          updatedAt: new Date().toISOString(),
-          items: next,
-        }).catch(() => {});
-      }
-    } else {
-      const updated = queueCommand({
-        route: "/api/tasks/manage",
-        action: "update",
-        payload: { taskId: editingId, patch: { ...normalized } },
-        displayTarget: { kind: "task", taskId: editingId ?? undefined, title: normalized.title },
-      });
-      addOptimisticRow(updated.operationId, { kind: "update", task: { ...normalized, id: editingId as number } });
+      return;
     }
-    closeEdit();
+    setPendingParentTaskOp({
+      title: "Parent PIN required",
+      description: `Enter a parent's 4-digit PIN to save changes to "${normalized.title}".`,
+      confirmLabel: "Save changes",
+      onPin: (pin) => {
+        const updated = queueCommand({
+          route: "/api/tasks/manage",
+          action: "update",
+          payload: { taskId: editingId, patch: { ...normalized } },
+          displayTarget: { kind: "task", taskId: editingId ?? undefined, title: normalized.title },
+          credential: { pin },
+        });
+        addOptimisticRow(updated.operationId, { kind: "update", task: { ...normalized, id: editingId as number } });
+        closeEdit();
+      },
+    });
   };
 
   // A delete is only ever queued for a row the SERVER already has. A
@@ -1100,14 +1110,22 @@ export default function TasksPage() {
       showToast("That chore is still being saved — try again in a moment.", "neutral");
       return;
     }
-    const removed = queueCommand({
-      route: "/api/tasks/manage",
-      action: "delete",
-      payload: { taskId: id },
-      displayTarget: { kind: "task", taskId: id, title: row.title },
+    setPendingParentTaskOp({
+      title: "Parent PIN required",
+      description: `Enter a parent's 4-digit PIN to delete "${row.title}".`,
+      confirmLabel: "Delete task",
+      onPin: (pin) => {
+        const removed = queueCommand({
+          route: "/api/tasks/manage",
+          action: "delete",
+          payload: { taskId: id },
+          displayTarget: { kind: "task", taskId: id, title: row.title },
+          credential: { pin },
+        });
+        addOptimisticRow(removed.operationId, { kind: "remove", taskId: id });
+        closeEdit();
+      },
     });
-    addOptimisticRow(removed.operationId, { kind: "remove", taskId: id });
-    closeEdit();
   };
 
   const updateForm = (field: keyof Task, value: any) => {
@@ -1195,17 +1213,24 @@ export default function TasksPage() {
   // page state and adopted optimistically — a second delete must not read the
   // ack-only store and resurrect the first deleted row in its replace.
   const deleteTemplate = (template: TaskTemplateConfigItem) => {
-    const next = templates.filter((t) => t.id !== template.id);
-    saveTaskTemplates(next);
-    setTemplates(next);
-    void writeTaskConfig({
-      operationId: "",
-      kind: "task-templates",
-      action: "replace",
-      updatedAt: new Date().toISOString(),
-      items: next,
-    }).catch(() => {});
-    setManageTemplate(null);
+    setPendingParentTaskOp({
+      title: "Parent PIN required",
+      description: `Enter a parent's 4-digit PIN to remove "${template.title}" from favorites.`,
+      confirmLabel: "Remove favorite",
+      onPin: (pin) => {
+        const next = templates.filter((t) => t.id !== template.id);
+        saveTaskTemplates(next);
+        setTemplates(next);
+        void writeTaskConfig({
+          operationId: "",
+          kind: "task-templates",
+          action: "replace",
+          updatedAt: new Date().toISOString(),
+          items: next,
+        }, { pin }).catch(() => {});
+        setManageTemplate(null);
+      },
+    });
   };
 
   // The sheet opens as a DRAFT: state is copied from the feed so per-row
@@ -1219,20 +1244,33 @@ export default function TasksPage() {
   // (queueCommand mints one when none is passed) — partial failures surface
   // per-row through the existing outbox, never a new mechanism.
   const confirmRepeatLastWeek = () => {
-    repeatRows.forEach((def) => {
-      const mode = def.crewSize && def.crewSize >= 2 ? "crew" : def.universal ? "open" : "assigned";
-      const roster = membersData.find((m: any) => m.fullName === def.assigneeName);
-      const task = {
-        title: def.title, points: def.points, category: def.category, priority: def.priority,
-        due: getISO.today, recurring: null,
-        universal: mode === "open",
-        ...(mode === "open" ? { assignee: OPEN_ASSIGNEE, assigneeEmoji: "🤝", speedBonus: 0 } : {}),
-        ...(mode === "assigned" ? { assignee: def.assigneeName ?? "", assigneeEmoji: roster?.emoji ?? "👤" } : {}),
-        ...(mode === "crew" ? { crewSize: def.crewSize, crew: { members: [] }, ...(def.crewCloseMode ? { crewCloseMode: def.crewCloseMode } : {}) } : {}),
-      };
-      queueCommand({ route: "/api/tasks/manage", action: "add", payload: { task }, displayTarget: { kind: "task", title: def.title } });
+    setPendingParentTaskOp({
+      title: "Parent PIN required",
+      description: `Enter a parent's 4-digit PIN to repeat ${repeatRows.length} task${repeatRows.length === 1 ? "" : "s"}.`,
+      confirmLabel: "Repeat tasks",
+      onPin: (pin) => {
+        repeatRows.forEach((def) => {
+          const mode = def.crewSize && def.crewSize >= 2 ? "crew" : def.universal ? "open" : "assigned";
+          const roster = membersData.find((m: any) => m.fullName === def.assigneeName);
+          const task = {
+            title: def.title, points: def.points, category: def.category, priority: def.priority,
+            due: getISO.today, recurring: null,
+            universal: mode === "open",
+            ...(mode === "open" ? { assignee: OPEN_ASSIGNEE, assigneeEmoji: "🤝", speedBonus: 0 } : {}),
+            ...(mode === "assigned" ? { assignee: def.assigneeName ?? "", assigneeEmoji: roster?.emoji ?? "👤" } : {}),
+            ...(mode === "crew" ? { crewSize: def.crewSize, crew: { members: [] }, ...(def.crewCloseMode ? { crewCloseMode: def.crewCloseMode } : {}) } : {}),
+          };
+          queueCommand({
+            route: "/api/tasks/manage",
+            action: "add",
+            payload: { task },
+            displayTarget: { kind: "task", title: def.title },
+            credential: { pin },
+          });
+        });
+        setRepeatOpen(false);
+      },
     });
-    setRepeatOpen(false);
   };
 
   const generateAiTasks = async () => {
@@ -1261,15 +1299,23 @@ export default function TasksPage() {
   };
 
   const adoptSuggestion = (suggestion: Task) => {
-    const temporaryId = uid();
-    const adopted = queueCommand({
-      route: "/api/tasks/manage",
-      action: "add",
-      payload: { task: { ...suggestion } },
-      displayTarget: { kind: "task", temporaryId, title: suggestion.title },
+    setPendingParentTaskOp({
+      title: "Parent PIN required",
+      description: `Enter a parent's 4-digit PIN to add "${suggestion.title}".`,
+      confirmLabel: "Add task",
+      onPin: (pin) => {
+        const temporaryId = uid();
+        const adopted = queueCommand({
+          route: "/api/tasks/manage",
+          action: "add",
+          payload: { task: { ...suggestion } },
+          displayTarget: { kind: "task", temporaryId, title: suggestion.title },
+          credential: { pin },
+        });
+        addOptimisticRow(adopted.operationId, { kind: "add", task: { ...suggestion, id: temporaryId } });
+        setAiSuggestions(prev => prev.filter(s => s.title !== suggestion.title));
+      },
     });
-    addOptimisticRow(adopted.operationId, { kind: "add", task: { ...suggestion, id: temporaryId } });
-    setAiSuggestions(prev => prev.filter(s => s.title !== suggestion.title));
   };
 
   const dismissSuggestion = (title: string) => {
@@ -1325,6 +1371,18 @@ export default function TasksPage() {
         return;
       }
       setUndoTaskId(null);
+      if (isLoggedIn && currentUser && me) {
+        const cmd = queueCommand({
+          route: "/api/tasks/claim",
+          action,
+          payload: { taskId, memberName: me },
+          displayTarget: { kind: "crew", taskId, title: task.title },
+        });
+        addOptimisticRow(cmd.operationId, { kind: "pending", taskId });
+        triggerConfetti();
+        showToast(action === "crew-join" ? "Joined the crew!" : "Checked in!", "success");
+        return;
+      }
       setPinIntent({ kind: "crew", taskId, action });
       setPinInput("");
       setPinError("");
@@ -1333,45 +1391,39 @@ export default function TasksPage() {
       return;
     }
     if (completesWithoutPin(currentUser?.role, currentUser?.age, task)) {
-      // Trust-but-verify, junior edition: an under-10 kid's tap on their OWN
-      // assigned chore is a durable PIN-free completion command — queued FIRST,
-      // with no credential at all, because the session IS the identity. Points
-      // move only when a parent approves, and only through the outbox.
       if (task.completedInWeek === localWeekStartISO()) {
         showToast("That chore was already completed on another device.", "neutral");
         return;
       }
-      // This branch has no `pinBusy` to guard it — a double-tap queued the same
-      // command twice, and its only dedupe read a row the just-queued command
-      // has not stamped yet. The guard is synchronous with the tap.
       if (pinFreeInFlightRef.current.has(taskId)) {
         showToast("That tap is already on its way.", "neutral");
         return;
       }
       const me = resolveMemberName(membersData, currentUser!.name);
+      const isClaim = Boolean(task.universal || isSnatchable(task));
       const complete = queueCommand({
         route: "/api/tasks/claim",
-        action: "complete",
+        action: isClaim ? "claim" : "complete",
         payload: { taskId, memberName: me, assigneeEmoji: task.assigneeEmoji },
         displayTarget: { kind: "claim", taskId, title: task.title },
       });
       pinFreeInFlightRef.current.add(taskId);
       addOptimisticRow(complete.operationId, { kind: "pending", taskId });
       triggerConfetti();
-      showToast(`Done! +${task.points}pts on the way — a parent approves.`, "success");
+      showToast(
+        currentUser?.role === "child"
+          ? `Done! +${task.points}pts on the way — a parent approves.`
+          : `Completed! +${task.points}pts!`,
+        "success",
+      );
       return;
     }
-    // 10+ kids and anyone else hit a PIN step; child rows then wait for
-    // approval (decided in submitPin from the VERIFIED member record, not
-    // the session).
     setUndoTaskId(null);
     setPinIntent({ kind: "task", taskId });
     setPinInput("");
     setPinError("");
     setPinSuccess("");
     if (task.universal || isSnatchable(task)) {
-      // Default the claim to the signed-in member — a kid typing their own
-      // PIN against a select stuck on "Rebecca (Mom)" reads as "wrong PIN".
       const defaultSnatcher = pickDefaultClaimMember(membersData, currentUser?.name) || task.assignee;
       setSnatchForMember(defaultSnatcher);
     } else {
@@ -1381,9 +1433,6 @@ export default function TasksPage() {
 
   const openRewardPin = (reward: Reward, memberName?: string) => {
     clearDialogTimers();
-    // Default to the SIGNED-IN member, not the first roster entry: a kid
-    // redeeming was told "Caspian needs 850 more pts" — a number computed
-    // against a parent's balance. Same trap the claim select documents.
     const member = memberName || pickDefaultClaimMember(membersData, currentUser?.name);
     const balance = weekData.points[member] || 0;
     if (balance < reward.cost) {
@@ -1395,6 +1444,16 @@ export default function TasksPage() {
       setParentApprovalPin("");
       setParentApprovalError("");
       setRedeemForMember(member);
+      return;
+    }
+    if (isLoggedIn && currentUser) {
+      queueCommand({
+        route: "/api/rewards/redeem",
+        action: "redeem",
+        payload: { rewardId: String(reward.id), memberName: member },
+        displayTarget: { kind: "config", title: reward.name },
+      });
+      showToast(`${reward.emoji} Redeeming "${reward.name}" — -${reward.cost}pts!`, "success");
       return;
     }
     setPinIntent({ kind: "reward", reward });
@@ -1427,15 +1486,24 @@ export default function TasksPage() {
         armDialogTimer(() => setParentApprovalError(""), 2500);
         return;
       }
-      parentApprovalPinRef.current = parentApprovalPin;
-      parentApprovalNameRef.current = parent.fullName;
-      setPinIntent({ kind: "reward", reward: parentApprovalReward });
+      const member = redeemForMember || pickDefaultClaimMember(membersData, currentUser?.name);
+      queueCommand({
+        route: "/api/rewards/redeem",
+        action: "redeem",
+        payload: {
+          rewardId: String(parentApprovalReward.id),
+          memberName: member,
+          parentName: parent.fullName,
+        },
+        displayTarget: { kind: "config", title: parentApprovalReward.name },
+        credential: { parentPin: parentApprovalPin },
+      });
+      showToast(`${parentApprovalReward.emoji} Approved & redeemed "${parentApprovalReward.name}"!`, "success");
       setParentApprovalReward(null);
       setParentApprovalPin("");
       setParentApprovalError("");
-      setPinInput("");
-      setPinError("");
-      setPinSuccess("");
+      parentApprovalPinRef.current = "";
+      parentApprovalNameRef.current = "";
     } finally {
       setPinBusy(false);
     }
@@ -2011,42 +2079,54 @@ export default function TasksPage() {
   // Reward + penalty catalog writes are durable config commands: queued BEFORE
   // the local list changes, adopted from the acknowledgment, and never written
   // to localStorage as a "success" first.
-  const queueConfig = (kind: "rewards" | "penalties", action: "upsert" | "delete", rest: Record<string, unknown>) => {
-    void writeTaskConfig({
-      operationId: "",
-      kind,
-      action,
-      updatedAt: new Date().toISOString(),
-      ...(rest.item !== undefined ? { item: rest.item as TaskConfigCommand["item"] } : {}),
-      ...(rest.itemId !== undefined ? { itemId: rest.itemId as TaskConfigCommand["itemId"] } : {}),
-    }).catch(() => {});
+  const queueConfig = (kind: "rewards" | "penalties", action: "upsert" | "delete", rest: Record<string, unknown>, onDone?: () => void) => {
+    setPendingParentTaskOp({
+      title: "Parent PIN required",
+      description: `Enter a parent's 4-digit PIN to save changes to ${kind}.`,
+      confirmLabel: "Save change",
+      onPin: (pin) => {
+        void writeTaskConfig({
+          operationId: "",
+          kind,
+          action,
+          updatedAt: new Date().toISOString(),
+          ...(rest.item !== undefined ? { item: rest.item as TaskConfigCommand["item"] } : {}),
+          ...(rest.itemId !== undefined ? { itemId: rest.itemId as TaskConfigCommand["itemId"] } : {}),
+        }, { pin }).catch(() => {});
+        onDone?.();
+      },
+    });
   };
   const saveReward = () => {
     if (!rewardForm.name.trim()) return;
-    queueConfig("rewards", "upsert", { item: { ...rewardForm, name: rewardForm.name.trim() } });
-    setEditingRewardId(null);
-    setAddingReward(false);
-    showToast(`\u2705 "${rewardForm.name.trim()}" \u2014 saving to the family server\u2026`);
+    queueConfig("rewards", "upsert", { item: { ...rewardForm, name: rewardForm.name.trim() } }, () => {
+      setEditingRewardId(null);
+      setAddingReward(false);
+      showToast(`\u2705 "${rewardForm.name.trim()}" \u2014 saving to the family server\u2026`);
+    });
   };
   const deleteReward = (id: number) => {
-    queueConfig("rewards", "delete", { itemId: id });
-    setEditingRewardId(null);
-    showToast("\u{1F5D1}\uFE0F Removing that reward \u2014 saving to the family server\u2026");
+    queueConfig("rewards", "delete", { itemId: id }, () => {
+      setEditingRewardId(null);
+      showToast("\u{1F5D1}\uFE0F Removing that reward \u2014 saving to the family server\u2026");
+    });
   };
 
   const startAddPenalty = () => { setEditingPenaltyId(null); setAddingPenalty(true); setPenaltyForm({ id: Date.now(), name: "", emoji: "\u26A0\uFE0F", points: 10 }); };
   const startEditPenalty = (p: Penalty) => { setEditingPenaltyId(p.id); setAddingPenalty(false); setPenaltyForm({ ...p }); };
   const savePenalty = () => {
     if (!penaltyForm.name.trim()) return;
-    queueConfig("penalties", "upsert", { item: { ...penaltyForm, name: penaltyForm.name.trim() } });
-    setEditingPenaltyId(null);
-    setAddingPenalty(false);
-    showToast(`\u2705 "${penaltyForm.name.trim()}" \u2014 saving to the family server\u2026`);
+    queueConfig("penalties", "upsert", { item: { ...penaltyForm, name: penaltyForm.name.trim() } }, () => {
+      setEditingPenaltyId(null);
+      setAddingPenalty(false);
+      showToast(`\u2705 "${penaltyForm.name.trim()}" \u2014 saving to the family server\u2026`);
+    });
   };
   const deletePenalty = (id: number) => {
-    queueConfig("penalties", "delete", { itemId: id });
-    setEditingPenaltyId(null);
-    showToast("\u{1F5D1}\uFE0F Removing that penalty \u2014 saving to the family server\u2026");
+    queueConfig("penalties", "delete", { itemId: id }, () => {
+      setEditingPenaltyId(null);
+      showToast("\u{1F5D1}\uFE0F Removing that penalty \u2014 saving to the family server\u2026");
+    });
   };
 
   const generateAiRewards = async () => {
@@ -4316,6 +4396,18 @@ aria-describedby="crew-close-dialog-error"               onChange={(e) => { setC
         rank={shareCard?.rank ?? 1}
         points={shareCard?.points ?? 0}
         onClose={() => setShareCard(null)}
+      />
+
+      <ParentPinGateModal
+        open={pendingParentTaskOp !== null}
+        title={pendingParentTaskOp?.title}
+        description={pendingParentTaskOp?.description}
+        confirmLabel={pendingParentTaskOp?.confirmLabel}
+        onClose={() => setPendingParentTaskOp(null)}
+        onVerified={(pin) => {
+          const op = pendingParentTaskOp;
+          op?.onPin(pin);
+        }}
       />
     </PageShell>
   );

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { authorizeParentPinRequest } from "@/lib/admin-auth";
 import { listAiProviders, normalizeBaseUrl } from "@/lib/ai/providers";
 import {
   resolveEgressTarget,
@@ -29,10 +29,11 @@ const EGRESS_MESSAGES: Record<EgressErrorCode, string> = {
  *  different host is reachable ONLY together with the caller's own key. A
  *  posted key is used for unsaved drafts and is never persisted. */
 export async function POST(request: NextRequest) {
-  const auth = await authorizeAdminRequest(request);
-  if (!auth.ok) return NextResponse.json({ error: auth.error ?? "unauthorized" }, { status: auth.status ?? 401 });
   try {
     const body = await request.json();
+    const bodyRecord = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+    const auth = await authorizeParentPinRequest(request, bodyRecord);
+    if (!auth.ok) return NextResponse.json({ error: auth.error ?? "unauthorized" }, { status: auth.status ?? 401 });
     const providerId = typeof body.providerId === "string" ? body.providerId.trim() : "";
     // The provider list is read ONLY when a stored provider is named, so an
     // unsaved draft never causes a store read (and the plaintext key of any

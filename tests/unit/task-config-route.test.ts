@@ -25,6 +25,13 @@ vi.mock("@/lib/live-member", () => ({
   verifyLiveParentSession: mocks.verifyLiveParentSession,
 }));
 
+vi.mock("@/lib/admin-auth", () => ({
+  authorizeParentPinRequest: async (request: unknown) => {
+    const res = await mocks.verifyLiveParentSession(request);
+    return res.ok ? res : { ok: false, status: res.status, error: res.reason };
+  },
+}));
+
 vi.mock("@/lib/session", () => ({
   SESSION_COOKIE: "consuela_session",
   verifySession: mocks.verifySession,
