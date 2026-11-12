@@ -8,7 +8,6 @@ import Podium from "@/components/leaderboard/Podium";
 import YourCard from "@/components/leaderboard/YourCard";
 import MemberSheet from "@/components/leaderboard/MemberSheet";
 import TasksPage from "@/app/tasks/page";
-import KidHome from "@/modes/kid/KidHome";
 import { ALL_TIME_CACHE_KEY } from "@/hooks/useAllTimeTotals";
 import { HALL_OF_FAME_KEY, WEEK_DATA_KEY } from "@/lib/task-utils";
 
@@ -613,61 +612,5 @@ describe("Tasks page weekly champ badge (hall of fame)", () => {
     const el = await renderLeaderboardTab();
 
     expect(badgeSparkles(el)).not.toContain("🥇");
-  });
-});
-
-// ─── KidHome hero caption ───────────────────────────────────────────────────
-describe("KidHome hero all-time caption", () => {
-  it("renders the PB all-time total in the labeled FOREVER card, keyed by the ledger-resolved name", async () => {
-    mockAuth.currentUser = { name: "Caspian", role: "child", age: 5 };
-    mockAuth.isLoggedIn = true;
-    localStorage.setItem("consuela-week-data", JSON.stringify({
-      weekStart: thisMondayISO(),
-      points: { "Caspian Garcia": 20 },
-      streak: {}, lastActive: {}, history: [],
-    }));
-    localStorage.setItem("consuela-week-archive", JSON.stringify({
-      "2026-09-07": {
-        weekStart: "2026-09-07",
-        points: { "Caspian Garcia": 100 },
-        streak: {}, lastActive: {}, history: [],
-      },
-    }));
-    serveAllTime({
-      Rebecca: { points: 115, completions: 9 },
-      Emily: { points: 55, completions: 5 },
-      Jasmine: { points: 0, completions: 0 },
-      "Caspian Garcia": { points: 120, completions: 8 },
-    });
-
-    const el = await renderAsync(<KidHome />);
-    await settle();
-
-    // This case pins the LEDGER KEY, not the source: the retired local helper
-    // would also have produced 120 from the stored map. The source is proven by
-    // the two divergent-number cases above (a 9999 archive that must not win,
-    // and an unknown total that must render unavailable).
-    const foreverCard = el.querySelector('[data-testid="kid-forever-card"]');
-    expect(foreverCard).toBeTruthy();
-    expect(foreverCard!.textContent).toContain("120 pts · yours to keep");
-  });
-
-  it("an unknown all-time total says unavailable and shows no level bar", async () => {
-    mockAuth.currentUser = { name: "Caspian", role: "child", age: 5 };
-    mockAuth.isLoggedIn = true;
-    localStorage.setItem("consuela-week-data", JSON.stringify({
-      weekStart: thisMondayISO(),
-      points: { "Caspian Garcia": 20 },
-      streak: {}, lastActive: {}, history: [],
-    }));
-    serveAllTime({ "Caspian Garcia": { points: null, completions: null } }, false);
-
-    const el = await renderAsync(<KidHome />);
-    await settle();
-
-    const foreverCard = el.querySelector('[data-testid="kid-forever-card"]')!;
-    expect(foreverCard.textContent).toContain("All-time unavailable");
-    expect(foreverCard.textContent).not.toContain("Level 1");
-    expect(foreverCard.textContent).not.toContain("yours to keep");
   });
 });

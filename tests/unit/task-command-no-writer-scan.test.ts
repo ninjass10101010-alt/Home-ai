@@ -82,37 +82,6 @@ describe("no-writer scan — tasks page", () => {
   });
 });
 
-describe("no-writer scan — kid home", () => {
-  const source = read("modes/kid/KidHome.tsx");
-
-  it("never posts a task command directly", () => {
-    expect(lineNumbers(source, /fetch\(\s*["'`]\/api\/tasks\/(claim|approve|manage|config)/)).toEqual([]);
-  });
-
-  it("never writes the local task or week store", () => {
-    expect(lineNumbers(source, /saveTasks\(/)).toEqual([]);
-    expect(lineNumbers(source, /saveWeekData\(/)).toEqual([]);
-    expect(lineNumbers(source, /addTransaction\(/)).toEqual([]);
-  });
-
-  it("verifies a PIN-gated claim BEFORE queueing it", () => {
-    // A 10+ claim is PIN-gated for every age, so a wrong PIN must never
-    // become a queued (and forever-retried) command.
-    const claimBranch = source.slice(source.indexOf("if (task.universal || isSnatchable(task)) {"));
-    const verifyAt = claimBranch.indexOf("verifyPinRemote");
-    const queueAt = claimBranch.indexOf("queueCommand");
-    expect(verifyAt).toBeGreaterThanOrEqual(0);
-    expect(queueAt).toBeGreaterThan(verifyAt);
-  });
-
-  it("queues an under-10 tap with NO credential at all", () => {
-    const tapBranch = source.slice(source.indexOf("completesWithoutPin(user?.role, user?.age, task) && !task.universal"));
-    const body = tapBranch.slice(0, tapBranch.indexOf("markOptimistic("));
-    expect(body).toContain('action: "complete"');
-    expect(body).not.toMatch(/credential:/);
-  });
-});
-
 describe("no-writer scan — config callers", () => {
   it("RewardSection, WeeklyPrizesCard and action-runner all reach the durable config queue", () => {
     for (const file of [
@@ -153,7 +122,6 @@ describe("no-writer scan — the credential boundary", () => {
   it("no caller stores a PIN in localStorage", () => {
     for (const file of [
       "app/tasks/page.tsx",
-      "modes/kid/KidHome.tsx",
       "components/settings/RewardSection.tsx",
       "components/settings/WeeklyPrizesCard.tsx",
       "lib/action-runner.ts",

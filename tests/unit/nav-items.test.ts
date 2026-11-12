@@ -35,17 +35,13 @@ function shippedRoutes(): string[] {
 }
 
 const PARENT_LABELS = ["Home", "Ask", "Meals", "Tasks", "Calendar", "House", "Settings"];
-const KID_LABELS = ["Home", "Ask", "Meals", "Tasks", "Rewards", "Calendar", "Settings"];
 
 describe("nav manifest — primary items", () => {
-  it("gives a parent and a guest the 7 pre-manifest caps, in that order", () => {
+  it("gives every role the same 7 unified caps, in that order", () => {
     expect(navItemsForRole("parent").map((item) => item.label)).toEqual(PARENT_LABELS);
     expect(navItemsForRole("guest").map((item) => item.label)).toEqual(PARENT_LABELS);
-  });
-
-  it("swaps House for Rewards after Tasks for a child and a pet", () => {
-    expect(navItemsForRole("child").map((item) => item.label)).toEqual(KID_LABELS);
-    expect(navItemsForRole("pet").map((item) => item.label)).toEqual(KID_LABELS);
+    expect(navItemsForRole("child").map((item) => item.label)).toEqual(PARENT_LABELS);
+    expect(navItemsForRole("pet").map((item) => item.label)).toEqual(PARENT_LABELS);
     expect(navItemsForRole("child")).toHaveLength(7);
   });
 
@@ -68,10 +64,9 @@ describe("nav manifest — primary items", () => {
 });
 
 describe("nav manifest — secondary items", () => {
-  it("surfaces every formerly orphaned route plus Photos for a parent", () => {
+  it("surfaces every secondary destination plus Photos for a parent", () => {
     expect(moreNavItemsForRole("parent").map((item) => item.path)).toEqual([
       "/grocery",
-      "/skill-tree",
       "/time-capsule",
       "/analytics",
       "/money-mountain",
@@ -86,7 +81,6 @@ describe("nav manifest — secondary items", () => {
     const child = moreNavItemsForRole("child").map((item) => item.path);
     expect(child).toEqual([
       "/grocery",
-      "/skill-tree",
       "/time-capsule",
       "/analytics",
       "/money-mountain",
@@ -94,7 +88,7 @@ describe("nav manifest — secondary items", () => {
     ]);
 
     const guest = moreNavItemsForRole("guest").map((item) => item.path);
-    expect(guest).toEqual(["/grocery", "/skill-tree", "/time-capsule", "/analytics"]);
+    expect(guest).toEqual(["/grocery", "/time-capsule", "/analytics"]);
   });
 });
 

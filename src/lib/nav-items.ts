@@ -38,12 +38,10 @@ export const NAV_ICON_KEYS = [
   "ask",
   "meals",
   "tasks",
-  "rewards",
   "calendar",
   "house",
   "settings",
   "grocery",
-  "skill",
   "capsule",
   "analytics",
   "mountain",
@@ -70,29 +68,17 @@ export interface NavItemDefinition {
 const ALL_ROLES: readonly NavRole[] = ["guest", "parent", "child", "pet"];
 const SIGNED_IN_ROLES: readonly NavRole[] = ["parent", "child", "pet"];
 const PARENT_ONLY: readonly NavRole[] = ["parent"];
-/** Kid mode = signed-in non-parent (child or pet), same as `resolveMode()`. */
-const KID_ROLES: readonly NavRole[] = ["child", "pet"];
-/**
- * Home Assistant is adult tooling, so a signed-in child/pet never sees it.
- * Guests keep it: that is the pre-manifest dock behaviour on the family screen
- * and the source of the wall's light/climate controls.
- */
-const HOUSE_ROLES: readonly NavRole[] = ["guest", "parent"];
 
 /**
- * The manifest, in display order. The kid dock loses House and gains Rewards
- * purely through `roles` + this order — no mode-specific splicing, which is how
- * both modes stay at exactly 7 primary items (`CapsuleNav` sizes its capsule
- * for 7).
+ * The manifest, in display order — all roles share the same 7 primary caps.
  */
 export const NAV_ITEMS: readonly NavItemDefinition[] = [
   { path: "/", label: "Home", iconKey: "home", roles: ALL_ROLES, group: "primary", wall: true },
   { path: "/chat", label: "Ask", iconKey: "ask", roles: ALL_ROLES, group: "primary", wall: true },
   { path: "/meals", label: "Meals", iconKey: "meals", roles: ALL_ROLES, group: "primary", wall: true },
   { path: "/tasks", label: "Tasks", iconKey: "tasks", roles: ALL_ROLES, group: "primary", wall: true },
-  { path: "/rewards", label: "Rewards", iconKey: "rewards", roles: KID_ROLES, group: "primary", wall: false },
   { path: "/calendar", label: "Calendar", iconKey: "calendar", roles: ALL_ROLES, group: "primary", wall: true },
-  { path: "/ha", label: "House", iconKey: "house", roles: HOUSE_ROLES, group: "primary", wall: true },
+  { path: "/ha", label: "House", iconKey: "house", roles: ALL_ROLES, group: "primary", wall: true },
   { path: "/settings", label: "Settings", iconKey: "settings", roles: ALL_ROLES, group: "primary", wall: true },
 
   // ── Secondary: every shipped route that had no inbound link before Phase 3 ──
@@ -101,15 +87,6 @@ export const NAV_ITEMS: readonly NavItemDefinition[] = [
     label: "Grocery",
     iconKey: "grocery",
     description: "Shopping list and sync status",
-    roles: ALL_ROLES,
-    group: "more",
-    wall: true,
-  },
-  {
-    path: "/skill-tree",
-    label: "Skill Tree",
-    iconKey: "skill",
-    description: "Quests, levels and badges",
     roles: ALL_ROLES,
     group: "more",
     wall: true,

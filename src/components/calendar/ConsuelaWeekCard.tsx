@@ -8,7 +8,7 @@ import Modal from "@/components/ui/Modal";
 import Skeleton from "@/components/ui/Skeleton";
 import Toast from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/useAuth";
-import { verifyPinRemote, unreachableCopy } from "@/modes/kid/kid-store";
+import { verifyPinRemote, unreachableCopy } from "@/lib/member-store";
 
 // Task 11 — "Consuela's week": grounded weekly planning for parents on the
 // Calendar tab. Reads the schedule_week planner (Task 9, zero tools, nothing

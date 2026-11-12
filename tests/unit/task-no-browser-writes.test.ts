@@ -40,7 +40,6 @@ function lineNumbers(source: string, pattern: RegExp): number[] {
 
 const NORMAL_SURFACES = [
   "app/tasks/page.tsx",
-  "modes/kid/KidHome.tsx",
   "lib/push-local-to-pb.ts",
 ];
 

@@ -5,6 +5,7 @@ import SectionCard from "@/components/patterns/SectionCard";
 import Surface from "@/components/ui/Surface";
 import Avatar from "@/components/ui/Avatar";
 import SoftButton from "@/components/ui/SoftButton";
+import Modal from "@/components/ui/Modal";
 import ParentPinGateModal from "@/components/auth/ParentPinGateModal";
 import type { KidGoalView } from "@/lib/goals";
 
@@ -233,49 +234,51 @@ export default function KidsGoalsCard({
       </div>
 
       {/* Parent Target Editor Modal */}
-      {editingKid && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <Surface variant="material-thick" radius="2xl" padding="lg" className="w-full max-w-sm space-y-4">
-            <h3 className="text-base font-bold text-text-primary">
-              Adjust Goal for {editingKid.displayName}
-            </h3>
-            <p className="text-xs text-text-secondary">
-              Set the 2-week target points for {editingKid.displayName} ({cycleRange}).
-            </p>
-            <div>
-              <label className="text-xs font-semibold text-text-muted block mb-1">
-                Target Points
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="500"
-                value={editTarget}
-                onChange={(e) => setEditTarget(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-text-primary text-sm focus:outline-none focus:border-[var(--color-accent-amber)]"
-              />
-            </div>
-            <div className="flex gap-2 pt-2">
-              <SoftButton
-                variant="secondary"
-                className="flex-1 text-sm py-2"
-                onClick={() => setEditingKid(null)}
-                disabled={saving}
-              >
-                Cancel
-              </SoftButton>
-              <SoftButton
-                variant="primary"
-                className="flex-1 text-sm py-2"
-                onClick={handleSaveGoal}
-                disabled={saving || !editTarget}
-              >
-                {saving ? "Saving..." : "Save Goal"}
-              </SoftButton>
-            </div>
-          </Surface>
+      <Modal
+        open={editingKid !== null}
+        onClose={() => !saving && setEditingKid(null)}
+        title={editingKid ? `Adjust Goal for ${editingKid.displayName}` : "Adjust Goal"}
+        description={
+          editingKid
+            ? `Set the 2-week target points for ${editingKid.displayName} (${cycleRange}).`
+            : undefined
+        }
+        panelClassName="max-w-sm"
+        footer={
+          <div className="flex gap-2 w-full">
+            <SoftButton
+              variant="secondary"
+              className="flex-1 text-sm py-2"
+              onClick={() => setEditingKid(null)}
+              disabled={saving}
+            >
+              Cancel
+            </SoftButton>
+            <SoftButton
+              variant="primary"
+              className="flex-1 text-sm py-2"
+              onClick={handleSaveGoal}
+              disabled={saving || !editTarget}
+            >
+              {saving ? "Saving..." : "Save Goal"}
+            </SoftButton>
+          </div>
+        }
+      >
+        <div>
+          <label className="text-xs font-semibold text-text-muted block mb-1">
+            Target Points
+          </label>
+          <input
+            type="number"
+            min="1"
+            max="500"
+            value={editTarget}
+            onChange={(e) => setEditTarget(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-text-primary text-sm focus:outline-none focus:border-[var(--color-accent-amber)]"
+          />
         </div>
-      )}
+      </Modal>
 
       <ParentPinGateModal
         open={pendingGoalPin !== null}

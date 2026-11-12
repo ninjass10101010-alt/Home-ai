@@ -76,11 +76,10 @@ describe("MoreSheet", () => {
     expect(document.querySelectorAll('[data-more-sheet] a').length).toBeGreaterThan(0);
   });
 
-  it("gives a parent every formerly orphaned destination plus Photos, with real copy", () => {
+  it("gives a parent every secondary destination plus Photos, with real copy", () => {
     render(<MoreSheet open onClose={() => {}} />);
     expect(hrefs()).toEqual([
       "/grocery",
-      "/skill-tree",
       "/time-capsule",
       "/analytics",
       "/money-mountain",
@@ -89,7 +88,6 @@ describe("MoreSheet", () => {
     ]);
     expect(titles()).toEqual([
       "Grocery",
-      "Skill Tree",
       "Time Capsule",
       "Insights",
       "Money Mountain",
@@ -113,7 +111,7 @@ describe("MoreSheet", () => {
   it("keeps personal and financial destinations off the signed-out wall", () => {
     mockUseAuth.mockReturnValue(GUEST);
     render(<MoreSheet open onClose={() => {}} />);
-    expect(hrefs()).toEqual(["/grocery", "/skill-tree", "/time-capsule", "/analytics"]);
+    expect(hrefs()).toEqual(["/grocery", "/time-capsule", "/analytics"]);
     expect(document.querySelector("[data-more-role]")?.getAttribute("data-more-role")).toBe("guest");
   });
 

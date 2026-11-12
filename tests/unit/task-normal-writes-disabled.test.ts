@@ -20,7 +20,6 @@ const source = (relative: string) => readFileSync(join(ROOT, relative), "utf8");
 const DOTALL = "s";
 
 const TASKS_PAGE = "app/tasks/page.tsx";
-const KID_HOME = "modes/kid/KidHome.tsx";
 const MIGRATION_PUSH = "lib/push-local-to-pb.ts";
 
 // The retired structured whole-body push family. Every member of it wrote
@@ -57,14 +56,6 @@ describe("normal task surfaces do not POST tasks or weekData to the legacy sync 
     expect(page).not.toContain("syncAllTasksToPB");
     expect(page).not.toContain("syncWeekDataToPB");
     expect(page).not.toMatch(new RegExp(RETIRED_SYNC_HELPERS));
-  });
-});
-
-describe("KidHome does not call structured task writers", () => {
-  it("has no sync helper call site; localStorage stays a cache only", () => {
-    const kidHome = source(KID_HOME);
-    expect(kidHome).not.toContain("syncTasksToPB");
-    expect(kidHome).not.toMatch(new RegExp(RETIRED_SYNC_HELPERS));
   });
 });
 
@@ -108,7 +99,6 @@ describe("the retired structured sync family is gone from production source", ()
       "db/index.ts",
       "db/pb-db.ts",
       TASKS_PAGE,
-      KID_HOME,
       MIGRATION_PUSH,
       "lib/task-command-store.ts",
     ]) {

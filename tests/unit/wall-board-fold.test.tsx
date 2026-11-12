@@ -436,14 +436,6 @@ describe("routes declare their own measure", () => {
     it(`${file} is a board`, () => expect(read(file), file).toContain(needle));
   }
 
-  it("src/app/rewards/page.tsx is the read route", () => {
-    const src = read("src/app/rewards/page.tsx");
-    expect(src).toContain('<PageShell measure="read">');
-    // Rewards is KID_ROLES and hidden from the wall, so the grown-up half is a
-    // short page — it must be centred and capped, not stretched.
-    expect(src).toContain("grid min-h-[70svh] place-items-center");
-  });
-
   it("captains the suggestion cards two-up at board width, and caps the empty state", () => {
     const src = read("src/app/suggestions/page.tsx");
     expect(src).toContain("2xl:grid-cols-2");
@@ -483,7 +475,6 @@ describe("no board rule overrides a named breakpoint with an arbitrary variant",
       "src/app/suggestions/page.tsx",
       "src/app/chat/page.tsx",
       "src/app/analytics/page.tsx",
-      "src/app/rewards/page.tsx",
       "src/components/ui/PageShell.tsx",
       "src/lib/layout-config.ts",
     ];

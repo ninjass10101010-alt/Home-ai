@@ -2,7 +2,6 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties } from "react";
-import { useRouter } from "next/navigation";
 import { mapTaskIdeas, mapRewardIdeas } from "@/lib/ai-suggestions";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import { getISO, previousWeekStartISO } from "@/lib/due-date-utils";
@@ -68,7 +67,7 @@ import { writeTaskConfig } from "@/lib/task-config-client";
 import type { TaskConfigCommand, TaskTemplateConfigItem } from "@/lib/task-config";
 import {
   verifyPinRemote, unreachableCopy,
-} from "@/modes/kid/kid-store";
+} from "@/lib/member-store";
 import Podium from "@/components/leaderboard/Podium";
 import PrizeRaceCard from "@/components/leaderboard/PrizeRaceCard";
 import YourCard from "@/components/leaderboard/YourCard";
@@ -362,17 +361,8 @@ export default function TasksPage() {
   const weeklyPrizes = useMemo(() => loadWeeklyPrizes(), [prizesVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const allTime = useAllTimeTotals();
   const { currentUser, isLoggedIn } = useAuth();
-  const router = useRouter();
   // P0 gate: creating, editing, and deleting family chores is parent-only.
   const isParent = isLoggedIn && currentUser?.role === "parent";
-  // P0 redirect: a kid's task screen is their KidHome quest list — kids never
-  // see the (dense, adult) Tasks page. Catches every entry path (capsule nav,
-  // Home widget links, bookmarks). Pets ride the kid surface the same way.
-  useEffect(() => {
-    if (isLoggedIn && (currentUser?.role === "child" || currentUser?.role === "pet")) {
-      router.replace("/");
-    }
-  }, [isLoggedIn, currentUser, router]);
   const allMembers = useMemo(() => {
     // Pets are never assignees — a task handed to 🐶 would strand its points
     // (leaderboard and claims exclude pets by design).

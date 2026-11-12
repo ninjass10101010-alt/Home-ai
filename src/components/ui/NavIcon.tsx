@@ -45,15 +45,6 @@ export const NAV_ICON_PATHS: Record<NavIconKey, ReactNode> = {
       <path d="m8.5 12 2.5 2.5 4.5-5" />
     </>
   ),
-  rewards: (
-    <>
-      <rect x="3.5" y="8" width="17" height="4" rx="1" />
-      <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7" />
-      <path d="M12 8v12" />
-      <path d="M12 8s-1.2-4-4-4a2.2 2.2 0 0 0 0 4h4Z" />
-      <path d="M12 8s1.2-4 4-4a2.2 2.2 0 0 1 0 4h-4Z" />
-    </>
-  ),
   calendar: (
     <>
       <rect x="3.5" y="4.5" width="17" height="16" rx="3" />
@@ -92,11 +83,6 @@ export const NAV_ICON_PATHS: Record<NavIconKey, ReactNode> = {
       <path d="M3 4h2l2.4 10.2a1 1 0 0 0 1 .8h8.6a1 1 0 0 0 1-.8L20 7H6" />
       <circle cx="9.5" cy="19" r="1.4" />
       <circle cx="17" cy="19" r="1.4" />
-    </>
-  ),
-  skill: (
-    <>
-      <path d="m12 3 2.6 5.4 5.9.8-4.3 4.2 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.2 5.9-.8Z" />
     </>
   ),
   capsule: (

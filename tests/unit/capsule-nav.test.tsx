@@ -62,19 +62,18 @@ describe("CapsuleNav with the House tab", () => {
     expect(navLabels(el)).toEqual(["Home", "Ask", "Meals", "Tasks", "Calendar", "House", "Settings"]);
   });
 
-  it("renders 7 items for a child: House swapped for Rewards after Tasks", () => {
+  it("renders the same 7 unified items for a child", () => {
     mockUseAuth.mockReturnValue(CHILD_USER);
     const el = render(<CapsuleNav />);
     const labels = navLabels(el);
     expect(labels).toHaveLength(7);
-    expect(labels).not.toContain("House");
-    expect(labels).toEqual(["Home", "Ask", "Meals", "Tasks", "Rewards", "Calendar", "Settings"]);
+    expect(labels).toEqual(["Home", "Ask", "Meals", "Tasks", "Calendar", "House", "Settings"]);
   });
 
-  it("renders the same kid capsule for a pet session (kid mode = any non-parent)", () => {
+  it("renders the same 7 unified items for a pet session", () => {
     mockUseAuth.mockReturnValue(PET_USER);
     const el = render(<CapsuleNav />);
-    expect(navLabels(el)).toEqual(["Home", "Ask", "Meals", "Tasks", "Rewards", "Calendar", "Settings"]);
+    expect(navLabels(el)).toEqual(["Home", "Ask", "Meals", "Tasks", "Calendar", "House", "Settings"]);
   });
 
   it("every nav item carries an aria-label", () => {

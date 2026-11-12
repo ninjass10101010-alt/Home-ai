@@ -126,7 +126,7 @@ describe("a kid never sees the parent's House cap before auth hydrates", () => {
     expect(el.querySelector("nav")).toBeNull();
   });
 
-  it("swaps to the kid capsule on hydration, never through a House frame", () => {
+  it("renders the unified 7-item capsule on hydration for children too", () => {
     auth.currentUser = { role: "child", name: "Caspian" };
     const el = mount();
     expect(labels(el)).toEqual([]);
@@ -137,8 +137,8 @@ describe("a kid never sees the parent's House cap before auth hydrates", () => {
     });
 
     const painted = labels(el);
-    expect(painted).toEqual(["Home", "Ask", "Meals", "Tasks", "Rewards", "Calendar", "Settings"]);
-    expect(painted).not.toContain("House");
+    expect(painted).toEqual(["Home", "Ask", "Meals", "Tasks", "Calendar", "House", "Settings"]);
+    expect(painted).not.toContain("Rewards");
   });
 
   it("gives a parent the same seven caps it always had", () => {

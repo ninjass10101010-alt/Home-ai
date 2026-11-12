@@ -42,7 +42,7 @@ describe("dialog a11y adoption (P1)", () => {
   it("finds the dialogs it is meant to govern", () => {
     const rels = modalDialogs().map((d) => d.rel).sort();
     // Sanity floor: the app has more than the two that already worked.
-    expect(rels.length).toBeGreaterThanOrEqual(18);
+    expect(rels.length).toBeGreaterThanOrEqual(17);
     expect(rels).toContain("src/components/ui/Modal.tsx");
     expect(rels).toContain("src/components/auth/PinModal.tsx");
     expect(rels).toContain("src/components/wall/WallPinPad.tsx");

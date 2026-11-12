@@ -70,14 +70,14 @@ The chat surface joins the dashboard's accent system completely; its former fixe
 - Empty states are real: "Nothing planned yet" dinner, "Quiet rest of day" events, engine-quiet fallback chips. Never invented data.
 - **The orb can speak.** A 44px 🔊 companion beside the today-strip reads the last reply aloud for pre-readers (system voice, stripped of markdown/emoji); error replies are never read; it stops on tap. **The brief is alive** — it re-reads on the family data pulse and counts down to what's next. **Do-it is confirm-gated** — actionable loops carry a separate accent button through the shared PIN flow; the primary tap still drafts.
 
-## Kid mode (wired 2026-09-04)
+## Unified dashboard (consolidated 2026-11-12)
 
-The kid experience is a mode, not a parallel app: `KidHome` renders behind `mode === "kid"` (any signed-in non-parent) on the same Home route, with kid-specific styling scoped in `src/modes/modes.css` (kid-scoped selectors only — no global overrides). The capsule nav gains a 🎁 Rewards entry (House is swapped out; both modes stay 7 items so the ≥44px-at-390px sizing holds). Quest completion runs through the shared PIN flow (`verifyPinRemote` — server-side verification, PINs never client-side), rewards redeem through `RewardsShop` with the same >100pts parent-approval gate as the Tasks page, and the celebration fires only after a real, confirmed success.
+Signed-in family members (parents, children, and pets) remain on the shared main Home dashboard (`/`) and use the unified `/tasks` experience (`Tasks | Routines | Leaderboard`) rather than swapping into `KidHome`, `AdultRoutinesHome`, `/rewards`, or `/skill-tree`. Kid profile themes remain configurable via `KidProfileSheet`, while rewards redemption lives in `TasksRewardsPanel` inside `/tasks`'s Leaderboard tab and uses `verifyPinRemote` / `readRewardsStamp` (`src/lib/member-store.ts`).
 
 ## Calendar truth + honest failures (wired 2026-09-04)
 
 - **Google events wear their calendar's color.** Every synced event carries its owning calendar's Google `colorRgb` (`colorHex` from `src/lib/calendar/google-mapping.ts`) on rows and month dots — cyan is the fallback, never a guess. Color is data, not decoration.
-- **A PIN failure says which kind it is.** The shared seam `verifyPinRemote` (`src/modes/kid/kid-store.ts`) returns `ok | wrongPin | unreachable`; every gate (kid quest, redeem, parent approval, all seven Tasks gates) distinguishes "Couldn't reach Consuela" from "Wrong PIN" and clears the input on both paths. Offline is never blamed on the user.
+- **A PIN failure says which kind it is.** The shared seam `verifyPinRemote` (`src/lib/member-store.ts`) returns `ok | wrongPin | unreachable`; every gate (redeem, parent approval, all Tasks gates) distinguishes "Couldn't reach Consuela" from "Wrong PIN" and clears the input on both paths. Offline is never blamed on the user.
 - **The calendar-member roster is live-primed.** `src/lib/calendar-member-snapshot.ts` primes its cached snapshot at subscribe time, so events that fired while a surface was unmounted are recovered, not lost. Contract for any future surface using it: subscribe → prime → re-read on dispatch, and pass the CLIENT snapshot as `useSyncExternalStore` arg 2 (the deterministic server fallback is arg 3 — swapping them silently pins the UI to placeholders forever).
 
 ---
@@ -104,34 +104,28 @@ rail's Emergency link. `SidebarNav.tsx` and its suite are deleted. A second nav,
 in `src/lib/nav-items.ts` owns every destination, role, icon and group, and `PageShell` reads
 nothing from it.
 
-**Capsule Nav (always present, `CapsuleNav.tsx`):** a floating bottom-center glass capsule. The active item expands into an accent pill (icon circle + label); inactive items are compact dark circles. Width expansion is a CSS-only `0fr→1fr` grid-column transition; the whole capsule auto-scales down on narrow viewports (`--capsule-scale`). Items are `<button>`s with `aria-label` + `aria-current="page"`. **Eight primary caps**, filtered by role and by whether the signed-out shared wall may show the destination (`wall`):
+**Capsule Nav (always present, `CapsuleNav.tsx`):** a floating bottom-center glass capsule. The active item expands into an accent pill (icon circle + label); inactive items are compact dark circles. Width expansion is a CSS-only `0fr→1fr` grid-column transition; the whole capsule auto-scales down on narrow viewports (`--capsule-scale`). Items are `<button>`s with `aria-label` + `aria-current="page"`. **Seven primary caps**, shared identically across every role (`ALL_ROLES`, all `wall: true`):
 
-| Label      | Route       | Roles shown to        | Wall | Icon (`NavIcon` key)        | Notes |
-|------------|-------------|-----------------------|------|-----------------------------|-------|
-| Home       | `/`         | everyone              | yes  | `home`                      | Morning briefing, today's events, weather, tasks — the ranked `FIRST_FOLD_WIDGETS` |
-| Ask        | `/chat`     | everyone              | yes  | `ask`                       | Main conversational interface |
-| Meals      | `/meals`    | everyone              | yes  | `meals`                     | 🍽️ Plan → 🛒 Shop → 🥫 Stock |
-| Tasks      | `/tasks`    | everyone              | yes  | `tasks`                     | Chores, points, leaderboard |
-| Rewards    | `/rewards`  | **kids only** (child, pet) | no | `rewards`              | Redeem shop — hidden from adults and from the wall |
-| Calendar   | `/calendar` | everyone              | yes  | `calendar`                  | Routines, events, month view |
-| House      | `/ha`       | parent + guest (not kids) | yes | `house`                 | Home Assistant: Overview, Security, Climate, Lights, Automations |
-| Settings   | `/settings` | everyone              | yes  | `settings`                  | Appearance, family, safety, connections |
+| Label      | Route       | Roles shown to | Wall | Icon (`NavIcon` key) | Notes |
+|------------|-------------|----------------|------|----------------------|-------|
+| Home       | `/`         | everyone       | yes  | `home`               | Morning briefing, today's events, weather, tasks — the ranked `FIRST_FOLD_WIDGETS` |
+| Ask        | `/chat`     | everyone       | yes  | `ask`                | Main conversational interface |
+| Meals      | `/meals`    | everyone       | yes  | `meals`              | 🍽️ Plan → 🛒 Shop → 🥫 Stock |
+| Tasks      | `/tasks`    | everyone       | yes  | `tasks`              | Chores, routines, points, leaderboard & rewards shop |
+| Calendar   | `/calendar` | everyone       | yes  | `calendar`           | Routines, events, month view |
+| House      | `/ha`       | everyone       | yes  | `house`              | Home Assistant: Overview, Security, Climate, Lights, Automations |
+| Settings   | `/settings` | everyone       | yes  | `settings`           | Appearance, family, safety, connections |
 
-So the dock always shows **seven** caps, and *which* seven depends on the role: a parent (and the
-signed-out wall) gets Home, Ask, Meals, Tasks, Calendar, House, Settings; a kid gets Rewards
-**in place of** House. The manifest holds eight primary entries but no role is offered all
-eight — `Rewards` is `KID_ROLES` and `House` is `guest`+`parent`, so exactly one of the pair is
-always present. That is the invariant `CapsuleNav` sizes its capsule for.
+So the dock always shows **seven** caps identically for parents, kids, pets, and the signed-out wall (`CapsuleNav` sizes its capsule for 7 items).
 
-**Home "More…" sheet (`MoreSheet.tsx`)** — the seven secondary destinations that no dock cap
+**Home "More…" sheet (`MoreSheet.tsx`)** — the six secondary destinations that no dock cap
 points at, role-filtered the same way. This is what makes "no unreachable route" hold. How many
-appear depends on the role: **7** to a parent, **6** to a kid (no Family Memory), **4** on the
+appear depends on the role: **6** to a parent, **5** to a kid (no Family Memory), **3** on the
 signed-out wall (no Money Mountain, no Family Memory, no Photos).
 
 | Label            | Route               | Roles    | Wall | Blurb |
 |------------------|---------------------|----------|------|-------|
 | Grocery          | `/grocery`          | everyone | yes  | Shopping list and sync status |
-| Skill Tree       | `/skill-tree`       | everyone | yes  | Quests, levels and badges |
 | Time Capsule     | `/time-capsule`     | everyone | yes  | Letters and photos for later |
 | Insights         | `/analytics`        | everyone | yes  | Schedule and routine patterns |
 | Money Mountain   | `/money-mountain`   | signed in | no  | Savings goals and allowance |

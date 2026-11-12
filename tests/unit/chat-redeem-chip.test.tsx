@@ -34,7 +34,7 @@ const kidStore = vi.hoisted(() => ({
   verifyPinRemote: vi.fn(),
   unreachableCopy: vi.fn(() => "Couldn't reach Consuela — check the connection and try again."),
 }));
-vi.mock("@/modes/kid/kid-store", () => ({
+vi.mock("@/lib/member-store", () => ({
   verifyPinRemote: kidStore.verifyPinRemote,
   unreachableCopy: kidStore.unreachableCopy,
 }));

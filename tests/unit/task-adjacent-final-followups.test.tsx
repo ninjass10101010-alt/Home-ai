@@ -98,7 +98,6 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
 }));
 
 import HomeLeaderboardWidget from "@/components/leaderboard/HomeLeaderboardWidget";
-import KidHome from "@/modes/kid/KidHome";
 import { mapRewardIdeas } from "@/lib/ai-suggestions";
 import { buildAllTimeTotals } from "@/lib/all-time-totals";
 import { WEEK_DATA_KEY, TASKS_STORAGE_KEY, WEEKLY_PRIZES_KEY } from "@/lib/task-utils";
@@ -165,38 +164,6 @@ afterEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
   vi.unstubAllGlobals();
-});
-
-// ── A ────────────────────────────────────────────────────────────────────────
-describe("A — KidHome week-reset countdown", () => {
-  async function countdownLine(days: number): Promise<string> {
-    countdown.days = days;
-    authMock.currentUser = KID;
-    authMock.isLoggedIn = true;
-    const el = await render(KidHome);
-    const card = el.querySelector('[data-testid="kid-week-card"]');
-    expect(card).not.toBeNull();
-    // The countdown is the card's own copy line under the points figure.
-    return Array.from(card!.querySelectorAll("p"))
-      .map((p) => p.textContent || "")
-      .join(" | ");
-  }
-
-  it('never renders "Resets tonight!" for any value the countdown can return', async () => {
-    // getDaysUntilWeekReset() is 1..7 by construction, so 0 (and anything ≤ 0)
-    // has no state to render. Nothing may fabricate one either.
-    for (const days of [0, -1, -7, 1, 2, 3, 4, 5, 6, 7, 8, 14]) {
-      const line = await countdownLine(days);
-      expect(line, `days=${days}`).not.toContain("Resets tonight!");
-      expect(line, `days=${days}`).not.toContain("NaN");
-    }
-  });
-
-  it("renders the honest wording for both ends of the 1..7 range", async () => {
-    expect(await countdownLine(1)).toContain("Resets tomorrow");
-    expect(await countdownLine(7)).toContain("Resets in 7 days");
-    expect(await countdownLine(3)).toContain("Resets in 3 days");
-  });
 });
 
 // ── B ────────────────────────────────────────────────────────────────────────

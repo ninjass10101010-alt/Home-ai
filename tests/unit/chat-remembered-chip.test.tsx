@@ -8,7 +8,7 @@ import type { ReactElement } from "react";
 
 vi.mock("@/lib/chat-stream", () => ({ streamConsuelaChat: vi.fn() }));
 vi.mock("@/lib/chat-thread", () => ({ mergeThread: vi.fn(), SEED_GREETING_ID: "seed" }));
-vi.mock("@/modes/kid/kid-store", () => ({ verifyPinRemote: vi.fn(), unreachableCopy: () => "unreachable" }));
+vi.mock("@/lib/member-store", () => ({ verifyPinRemote: vi.fn(), unreachableCopy: () => "unreachable" }));
 
 import RememberedChip, { isMemoryProposal } from "@/components/chat/RememberedChip";
 

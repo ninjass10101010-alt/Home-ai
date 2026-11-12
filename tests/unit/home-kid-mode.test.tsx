@@ -32,19 +32,6 @@ vi.mock("next/dynamic", async () => {
 });
 
 vi.mock("@/components/ui/FogBackground", () => ({ default: () => null }));
-vi.mock("@/modes/kid/KidHome", () => ({
-  default: () => <div data-testid="kid-home-marker">KID HOME</div>,
-}));
-vi.mock("@/components/home/AdultRoutinesHome", () => ({
-  default: ({ onSwitchToWall }: { onSwitchToWall: () => void }) => (
-    <div data-testid="adult-home-marker">
-      <span>ADULT HOME</span>
-      <button type="button" onClick={onSwitchToWall}>
-        Switch to Family Wall
-      </button>
-    </div>
-  ),
-}));
 
 const modeMock = vi.hoisted(() => ({ mode: "family" }));
 vi.mock("@/hooks/useDashboardMode", () => ({
@@ -132,47 +119,24 @@ describe("Home branches on dashboard mode", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders KidHome instead of the family bento when mode is kid", async () => {
-    modeMock.mode = "kid";
-    mockAuth.currentUser = { name: "Caspian", role: "child" };
-    mockAuth.isLoggedIn = true;
-    const el = await renderAsync(<HomePage />);
-    await settle();
-    expect(el.querySelector('[data-testid="kid-home-marker"]')).not.toBeNull();
-    // The family bento must NOT render for kids.
-    expect(el.textContent).not.toContain("Days planned");
-    expect(el.textContent).not.toContain("Plan Meals");
-  });
-
-  it("renders the family bento (no KidHome) for family and unsigned-in adult fallback", async () => {
-    for (const mode of ["family", "adult"] as const) {
+  it("keeps every signed-in role on the main family dashboard bento", async () => {
+    for (const [mode, currentUser, isLoggedIn, isParent] of [
+      ["family", null, false, false],
+      ["kid", { name: "Caspian", role: "child" }, true, false],
+      ["adult", { name: "Francisco Garcia", role: "parent" }, true, true],
+    ] as const) {
       modeMock.mode = mode;
+      mockAuth.currentUser = currentUser;
+      mockAuth.isLoggedIn = isLoggedIn;
+      mockAuth.isParent = isParent;
       const el = await renderAsync(<HomePage />);
       await settle();
       expect(el.querySelector('[data-testid="kid-home-marker"]')).toBeNull();
+      expect(el.querySelector('[data-testid="adult-home-marker"]')).toBeNull();
       expect(el.textContent).toContain("Days planned");
+      expect(el.textContent).toContain("Plan Meals");
       act(() => { activeRoot?.unmount(); activeRoot = null; });
       document.body.innerHTML = "";
     }
-  });
-
-  it("renders AdultRoutinesHome for a signed-in parent and toggles back to Family Wall", async () => {
-    modeMock.mode = "adult";
-    mockAuth.currentUser = { name: "Francisco Garcia", role: "parent" };
-    mockAuth.isLoggedIn = true;
-    mockAuth.isParent = true;
-
-    const el = await renderAsync(<HomePage />);
-    await settle();
-    expect(el.querySelector('[data-testid="adult-home-marker"]')).not.toBeNull();
-
-    const toggleBtn = el.querySelector("button")!;
-    await act(async () => {
-      toggleBtn.click();
-    });
-    await settle();
-    expect(el.querySelector('[data-testid="adult-home-marker"]')).toBeNull();
-    expect(el.textContent).toContain("Days planned");
-    expect(el.querySelector('[data-testid="switch-to-adult-routines-btn"]')).not.toBeNull();
   });
 });

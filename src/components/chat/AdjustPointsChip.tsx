@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
 import Toast from "@/components/ui/Toast";
-import { verifyPinRemote, unreachableCopy } from "@/modes/kid/kid-store";
+import { verifyPinRemote, unreachableCopy } from "@/lib/member-store";
 
 // Task 15 — the ONLY way a chat point adjustment becomes real: a parent taps
 // this chip and lands their PIN. Chat NEVER moves points directly; the tool

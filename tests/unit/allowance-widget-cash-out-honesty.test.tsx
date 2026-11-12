@@ -50,7 +50,7 @@ vi.mock("@/hooks/useDashboardMode", () => ({
 
 // The points are real (the server-owned weekData ledger); only the transfer
 // was fictional.
-vi.mock("@/modes/kid/kid-store", () => ({
+vi.mock("@/lib/member-store", () => ({
   currentWeekPoints: () => ({ points: state.points, key: "Kid" }),
 }));
 

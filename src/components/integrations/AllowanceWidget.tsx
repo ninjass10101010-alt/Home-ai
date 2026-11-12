@@ -27,7 +27,7 @@ import SoftButton from "@/components/ui/SoftButton";
 import { isConnected, getCredentials } from "@/lib/connections/store";
 import { useAuth } from "@/hooks/useAuth";
 import { useDashboardMode } from "@/hooks/useDashboardMode";
-import { currentWeekPoints } from "@/modes/kid/kid-store";
+import { currentWeekPoints } from "@/lib/member-store";
 
 const NO_CASH_OUT =
   "Cashing out isn't set up yet — Consuela can show your points, but it can't move money.";

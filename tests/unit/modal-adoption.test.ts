@@ -32,7 +32,6 @@ const HAND_ROLLED: Record<string, { kind: "dialog" | "layer"; reason: string }> 
   "src/components/ui/MemberModal.tsx": { kind: "dialog", reason: "Member editor (port in a later pass)." },
   "src/components/auth/PinModal.tsx": { kind: "dialog", reason: "PIN entry (port in a later pass)." },
   "src/components/leaderboard/LevelUpModal.tsx": { kind: "dialog", reason: "Level-up dialog (port in a later pass)." },
-  "src/components/skill-tree/QuestDetail.tsx": { kind: "dialog", reason: "Quest detail dialog (port in a later pass)." },
   "src/components/money-mountain/TransactionLogger.tsx": { kind: "dialog", reason: "Transaction log (port in a later pass)." },
   "src/components/money-mountain/CreateMountainForm.tsx": { kind: "dialog", reason: "Create-mountain form (port in a later pass)." },
   "src/components/ha/AlarmPinModal.tsx": { kind: "dialog", reason: "Alarm PIN entry (port in a later pass)." },
@@ -48,9 +47,6 @@ const HAND_ROLLED: Record<string, { kind: "dialog" | "layer"; reason: string }> 
   "src/app/page.tsx": { kind: "layer", reason: "Shell root (PageShell)." },
   "src/components/ui/CapsuleNav.tsx": { kind: "layer", reason: "Fixed dock." },
   "src/components/ui/ConfettiBurst.tsx": { kind: "layer", reason: "Pointer-events-none celebration layer." },
-  "src/modes/kid/CelebrationBurst.tsx": { kind: "layer", reason: "Pointer-events-none celebration layer." },
-  "src/modes/kid/RewardsShop.tsx": { kind: "layer", reason: "Pointer-events-none reward toast layer." },
-  "src/components/skill-tree/LevelUpAnimation.tsx": { kind: "layer", reason: "Full-screen celebration (not a dialog)." },
   "src/components/screensaver/ScreensaverBoard.tsx": { kind: "layer", reason: "Full-screen wall app, not an overlay." },
 };
 

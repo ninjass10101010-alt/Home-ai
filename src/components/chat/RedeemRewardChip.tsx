@@ -5,7 +5,7 @@ import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
 import TextField from "@/components/ui/TextField";
 import Toast from "@/components/ui/Toast";
-import { verifyPinRemote, unreachableCopy } from "@/modes/kid/kid-store";
+import { verifyPinRemote, unreachableCopy } from "@/lib/member-store";
 
 // Task 14 — the ONLY way a chat reward redemption becomes real: the reward
 // OWNER lands their PIN and the chip POSTs /api/rewards/redeem, which re-reads
