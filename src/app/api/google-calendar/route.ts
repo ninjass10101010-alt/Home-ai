@@ -139,7 +139,7 @@ export async function GET(request: NextRequest) {
     const rows = await readSyncRows();
     const familyRows = (await withAdmin((pb) =>
       pb.collection("events").getFullList({
-        filter: 'source = "family" && googleEventId != ""',
+        filter: 'googleEventId != ""',
         requestKey: null,
       }),
     ).catch(() => [])) as { googleEventId?: string }[];

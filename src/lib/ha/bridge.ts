@@ -10,10 +10,38 @@ export interface HABridgeStatus {
   lastEventAt: string | null;
 }
 
-let started = false;
-let lastEventAt: string | null = null;
-let wsClient: HAWebSocketClient | null = null;
-let mqttClient: HAMQTTClient | null = null;
+interface HABridgeState {
+  started: boolean;
+  lastEventAt: string | null;
+  wsClient: HAWebSocketClient | null;
+  mqttClient: HAMQTTClient | null;
+}
+
+const gBridge = globalThis as unknown as {
+  __consuelaHABridge?: HABridgeState;
+};
+
+function createBridgeState(): HABridgeState {
+  return {
+    started: false,
+    lastEventAt: null,
+    wsClient: null,
+    mqttClient: null,
+  };
+}
+
+// Keep bridge singleton on globalThis so Next.js instrumentation and route
+// chunks share state; reinitialize on Vitest module resets.
+if (process.env.VITEST || !gBridge.__consuelaHABridge) {
+  gBridge.__consuelaHABridge = createBridgeState();
+}
+
+function getBridgeState(): HABridgeState {
+  if (!gBridge.__consuelaHABridge) {
+    gBridge.__consuelaHABridge = createBridgeState();
+  }
+  return gBridge.__consuelaHABridge;
+}
 
 const MQTT_STATE_KEYS = [
   "state",
@@ -86,19 +114,20 @@ function mapMqttMessage(msg: {
 }
 
 export async function startHABridge(): Promise<void> {
-  if (started) return;
+  const state = getBridgeState();
+  if (state.started) return;
   let cfg;
   try {
     cfg = await getHAConfig();
   } catch {
     return; // not configured — bridge stays off, House tab shows empty states
   }
-  started = true;
+  state.started = true;
 
   const ws = new HAWebSocketClient(cfg);
-  wsClient = ws;
+  state.wsClient = ws;
   ws.onStateChange((change) => {
-    lastEventAt = new Date().toISOString();
+    state.lastEventAt = new Date().toISOString();
     // HA sends new_state: null when an entity is removed — delete the cached
     // row instead of skipping, otherwise removed devices linger as ghosts.
     if (change.new_state === null || change.new_state === undefined) {
@@ -118,9 +147,9 @@ export async function startHABridge(): Promise<void> {
 
   if (cfg.mqttBroker) {
     const mqtt = new HAMQTTClient(cfg);
-    mqttClient = mqtt;
+    state.mqttClient = mqtt;
     mqtt.onDeviceMessage((msg) => {
-      lastEventAt = new Date().toISOString();
+      state.lastEventAt = new Date().toISOString();
       const record = mapMqttMessage(msg);
       if (!record) return;
       upsertHAEntity(record).catch(() => {});
@@ -130,19 +159,20 @@ export async function startHABridge(): Promise<void> {
 }
 
 export function getHABridgeStatus(): HABridgeStatus {
-  if (!started) {
+  const state = getBridgeState();
+  if (!state.started) {
     return {
       started: false,
       wsConnected: false,
       mqttStatus: "disabled",
-      lastEventAt,
+      lastEventAt: state.lastEventAt,
     };
   }
   return {
     started: true,
-    wsConnected: wsClient?.status === "connected",
-    mqttStatus: mqttClient ? mqttClient.status : "disabled",
-    lastEventAt,
+    wsConnected: state.wsClient?.status === "connected",
+    mqttStatus: state.mqttClient ? state.mqttClient.status : "disabled",
+    lastEventAt: state.lastEventAt,
   };
 }
 
@@ -152,19 +182,20 @@ export function getHABridgeStatus(): HABridgeStatus {
  * call-service/alarm/notify/todo-mirror) are reset too — otherwise they keep
  * serving the OLD credentials after rotation. */
 export async function resetHABridge(): Promise<void> {
+  const state = getBridgeState();
   try {
-    await wsClient?.close();
+    await state.wsClient?.close();
   } catch {
     /* already closed */
   }
   try {
-    mqttClient?.stop?.();
+    state.mqttClient?.stop?.();
   } catch {
     /* mqtt optional */
   }
-  wsClient = null;
-  mqttClient = null;
-  started = false;
+  state.wsClient = null;
+  state.mqttClient = null;
+  state.started = false;
   // Control path: drop singletons BEFORE the next startHABridge()/getter so
   // every consumer rebuilds from the freshly saved config.
   resetHAWebSocketClient();

@@ -1055,10 +1055,9 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
     return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
   }, [pullFamilyEvents]);
 
-  // Pull family routines from PocketBase — the schedule tab was localStorage
-  // only, so a routine added on one device never appeared on another (and a
-  // failed PB write vanished silently). Same merge contract as events: adopt
-  // server ids for local rows, drop Google-style dupes by title+time+days.
+  // Pull family routines from PocketBase — server rows are authoritative, so
+  // routines deleted or updated on another device reflect across all devices.
+  // Local optimistic rows that have not landed yet (numeric ids) are retained.
   const pullFamilySchedules = useCallback(() => {
     const requestGeneration = calendarDataGenerationRef.current;
     let cancelled = false;
@@ -1069,23 +1068,14 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
           .map(dbScheduleToScheduleItem)
           .filter(Boolean) as ScheduleItem[];
         setSchedules((prev) => {
-          const out = [...prev];
-          for (const ms of mapped) {
-            const dupe = out.find(
-              (s) =>
-                String(s.id) === String(ms.id) ||
-                (s.title === ms.title && s.time === ms.time && s.days === ms.days)
-            );
-            if (dupe) {
-              if (typeof dupe.id === "number" && typeof ms.id === "string") {
-                const idx = out.indexOf(dupe);
-                out[idx] = { ...dupe, id: ms.id };
-              }
-            } else {
-              out.push(ms);
-            }
-          }
-          return out;
+          const unsaved = prev.filter((s) => typeof s.id === "number");
+          const serverKeys = new Set(
+            mapped.map((m) => `${m.title.toLowerCase()}|${m.time.toLowerCase()}|${m.days.toLowerCase()}`)
+          );
+          const remainingUnsaved = unsaved.filter(
+            (u) => !serverKeys.has(`${u.title.toLowerCase()}|${u.time.toLowerCase()}|${u.days.toLowerCase()}`)
+          );
+          return [...mapped, ...remainingUnsaved];
         });
       })
       .catch(() => {});
@@ -1809,7 +1799,7 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                     <p className="calendar-panel-subtitle">{renderSchedules.length} routine{renderSchedules.length !== 1 ? "s" : ""} &middot; {filteredSchedules.length} shown</p>
                   </div>
                 </div>
-                <button onClick={startAddSched} className="calendar-add-link">+ Add</button>
+                {isParent && <button onClick={startAddSched} className="calendar-add-link">+ Add</button>}
               </div>
 
               <div className="calendar-filter-tabs mt-3 scrollbar-hide">
@@ -1913,18 +1903,20 @@ const restOfWeekWithEvents = restOfWeek.filter((d) => d.events.length > 0);
                                   </div>
                                 </div>
 
-                                <div className="calendar-routine-actions">
-                                  <button
-                                    onClick={() => startEditSched(item)}
-                                    className="calendar-routine-toggle"
-                                    aria-label="Edit routine"
-                                  >
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                                      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" strokeLinecap="round" strokeLinejoin="round" />
-                                      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" strokeLinecap="round" strokeLinejoin="round" />
-                                    </svg>
-                                  </button>
-                                </div>
+                                {isParent && (
+                                  <div className="calendar-routine-actions">
+                                    <button
+                                      onClick={() => startEditSched(item)}
+                                      className="calendar-routine-toggle"
+                                      aria-label="Edit routine"
+                                    >
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                        <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" strokeLinecap="round" strokeLinejoin="round" />
+                                        <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" strokeLinecap="round" strokeLinejoin="round" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             );
                           })}

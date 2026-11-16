@@ -172,7 +172,7 @@ export async function retryFamilyEventGoogle(id: string) {
 export async function retryPendingCalendarMirrors(limit = MIRROR_BATCH) {
   const all = (await withAdmin((pb: any) =>
     collectionOf(pb).getFullList({
-      filter: 'source = "family" && (googleSyncStatus = "pending" || googleSyncStatus = "failed")',
+      filter: 'googleSyncStatus = "pending" || googleSyncStatus = "failed"',
       sort: "created",
       requestKey: null,
     }),

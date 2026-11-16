@@ -44,7 +44,9 @@ export async function syncGroceryMirror(): Promise<MirrorResult> {
     let last: string[] | null = null;
     try {
       const row = await pb.collection("ha_mirror_state").getFirstListItem(`key="${MIRROR_KEY}"`);
-      last = JSON.parse(String(row.names ?? "[]"));
+      last = Array.isArray(row.names)
+        ? row.names.map(String)
+        : JSON.parse(String(row.names ?? "[]"));
       if (!Array.isArray(last)) last = [];
     } catch (err) {
       if ((err as { status?: number })?.status !== 404) throw err;
@@ -72,10 +74,10 @@ export async function syncGroceryMirror(): Promise<MirrorResult> {
 
   const client = await getHAWebSocketClient();
   for (const name of toAdd) {
-    await client.callService("todo", "add_item", { item: name, list: listEntityId });
+    await client.callService("todo", "add_item", { item: name, entity_id: listEntityId });
   }
   for (const name of toRemove) {
-    await client.callService("todo", "remove_item", { item: name, list: listEntityId });
+    await client.callService("todo", "remove_item", { item: name, entity_id: listEntityId });
   }
 
   await withAdmin(async (pb) => {

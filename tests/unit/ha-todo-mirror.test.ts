@@ -99,7 +99,7 @@ describe("syncGroceryMirror", () => {
     expect(calls).toHaveLength(3);
     const addMilk = calls.find((c) => c[1] === "add_item" && (c[2] as any).item === "Milk");
     expect(addMilk?.[0]).toBe("todo");
-    expect((addMilk?.[2] as any)?.list).toBe("todo.consuela_grocery");
+    expect((addMilk?.[2] as any)?.entity_id).toBe("todo.consuela_grocery");
     expect(calls.some((c) => c[1] === "remove_item" && (c[2] as any).item === "Chips")).toBe(true);
     expect(saved.names).toEqual(["Eggs", "Milk"]);
   });

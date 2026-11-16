@@ -133,6 +133,9 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
       const outcomes = await Promise.all(
         events.map((ev: any) => {
           const key = eventKey(ev);
+          // If the event previously had a PocketBase server id and is missing from existingEvents,
+          // it was deleted on the server; do not resurrect it.
+          if (typeof ev.id === "string" && /^[a-z0-9]{15}$/.test(ev.id)) return Promise.resolve(null);
           if (existingKeys.has(key) || pushedKeys.has(key)) return Promise.resolve(null);
           pushedKeys.add(key);
           return pushItem(() => db.insertEvent(ev)).then((ok) => (ok ? "pushed" : "error"));
@@ -164,6 +167,9 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
       const outcomes = await Promise.all(
         schedules.map((sch: any) => {
           const key = `${String(sch.title || "").toLowerCase()}|${String(sch.time || "")}|${String(sch.days || "").toLowerCase()}`;
+          // If the schedule previously had a PocketBase server id and is missing from existingSchedules,
+          // it was deleted on the server; do not resurrect it.
+          if (typeof sch.id === "string" && /^[a-z0-9]{15}$/.test(sch.id)) return Promise.resolve(null);
           if (existingKeys.has(key)) return Promise.resolve(null);
           return pushItem(() => db.insertSchedule(sch)).then((ok) => (ok ? "pushed" : "error"));
         })

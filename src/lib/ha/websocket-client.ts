@@ -39,7 +39,6 @@ export class HAWebSocketClient {
   private socket: WebSocketLike | null = null;
   private _status: ConnectionStatus = "disconnected";
   private nextId = 1;
-  private nextSubId = 1;
   private subscriptionId: number | null = null;
   private pending = new Map<number, PendingCall>();
   private stateHandlers = new Set<StateChangeHandler>();
@@ -178,7 +177,7 @@ export class HAWebSocketClient {
             }
             return;
           case "auth_ok":
-            this.subscriptionId = this.nextSubId++;
+            this.subscriptionId = this.nextId++;
             try {
               socket.send(
                 JSON.stringify({
@@ -326,11 +325,16 @@ export class HAWebSocketClient {
     };
   }
 
-  callService(
+  async callService(
     domain: string,
     service: string,
     serviceData?: Record<string, unknown>
   ): Promise<unknown> {
+    if (this.connectPromise) {
+      await this.connectPromise;
+    } else if (!this.socket && !this.closedExplicitly && !this.authFailed) {
+      await this.connect();
+    }
     const socket = this.socket;
     if (!socket) {
       return Promise.reject(new Error("Not connected"));
@@ -361,17 +365,24 @@ export class HAWebSocketClient {
   }
 }
 
-let singleton: HAWebSocketClient | null = null;
+const gWS = globalThis as unknown as {
+  __consuelaHAWSClient?: HAWebSocketClient | null;
+};
 
 export async function getHAWebSocketClient(): Promise<HAWebSocketClient> {
-  if (!singleton) {
-    singleton = new HAWebSocketClient(await getHAConfig());
+  if (!gWS.__consuelaHAWSClient) {
+    const client = new HAWebSocketClient(await getHAConfig());
+    gWS.__consuelaHAWSClient = client;
+    if (!process.env.VITEST) {
+      client.connect().catch(() => {});
+    }
   }
-  return singleton;
+  return gWS.__consuelaHAWSClient;
 }
 
 /** Drop the control-path singleton so the next getter re-reads config —
  * called on credential rotation so stale tokens stop being served. */
 export function resetHAWebSocketClient(): void {
-  singleton = null;
+  gWS.__consuelaHAWSClient?.close?.();
+  gWS.__consuelaHAWSClient = null;
 }

@@ -86,6 +86,13 @@ export async function DELETE(request: NextRequest, ctx: Ctx) {
     await withAdmin(async (pb) => pb.collection(collection).delete(id, { requestKey: null }));
     return NextResponse.json({ ok: true });
   } catch (err) {
+    const isNotFound =
+      (err as { status?: number })?.status === 404 ||
+      (err as { response?: { status?: number } })?.response?.status === 404 ||
+      (err as { data?: { code?: number } })?.data?.code === 404;
+    if (isNotFound) {
+      return NextResponse.json({ ok: true, deleted: false, alreadyGone: true });
+    }
     return dbErrorResponse(err);
   }
 }

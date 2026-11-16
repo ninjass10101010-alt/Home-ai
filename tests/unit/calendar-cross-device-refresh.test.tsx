@@ -31,10 +31,13 @@ vi.mock("@/db", () => ({
   },
 }));
 
-const server = vi.hoisted(() => ({ events: [] as any[] }));
+const server = vi.hoisted(() => ({ events: [] as any[], schedules: [] as any[] }));
 
 vi.mock("@/db/gateway-client", () => ({
-  gatewayList: async () => server.events.map((r) => ({ ...r })),
+  gatewayList: async (col: string) => {
+    if (col === "schedules") return server.schedules.map((r) => ({ ...r }));
+    return server.events.map((r) => ({ ...r }));
+  },
 }));
 
 let activeRoot: Root | null = null;
@@ -83,6 +86,7 @@ describe("Calendar page cross-device refresh", () => {
       vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ connected: false }) }))
     );
     server.events = [];
+    server.schedules = [];
     mockAuth.currentUser = null;
     mockAuth.isLoggedIn = false;
   });
@@ -200,5 +204,43 @@ describe("Calendar page cross-device refresh", () => {
     await settle();
 
     expect(el.textContent).toContain("Phone Party XYZ");
+  });
+
+  it("removes schedules deleted on the server when consuela-data-refreshed fires", async () => {
+    localStorage.setItem("consuela-schedules-v", "3");
+    localStorage.setItem("consuela-schedules", JSON.stringify([
+      { id: "sched_deleted", title: "Old Morning Walk", time: "7:00 AM", days: "weekdays", type: "routine", icon: "⏰", color: "green" },
+    ]));
+    server.schedules = [
+      { id: "sched_kept", title: "Breakfast", time: "8:00 AM", days: "all", type: "routine", icon: "⏰", color: "green" },
+    ];
+
+    const el = await renderAsync(
+      <ThemeProvider>
+        <WeatherProvider>
+          <AtmosphericProvider>
+            <CalendarPage />
+          </AtmosphericProvider>
+        </WeatherProvider>
+      </ThemeProvider>
+    );
+    await settle();
+
+    // Switch to Schedule tab via SegmentedControl
+    const schedTabBtn = Array.from(el.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Schedule")
+    ) as HTMLButtonElement | undefined;
+    if (schedTabBtn) {
+      await act(async () => {
+        schedTabBtn.click();
+      });
+      await settle();
+    }
+
+    expect(el.textContent).toContain("Breakfast");
+    expect(el.textContent).not.toContain("Old Morning Walk");
+    expect(JSON.parse(localStorage.getItem("consuela-schedules") || "[]")).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ title: "Old Morning Walk" })])
+    );
   });
 });

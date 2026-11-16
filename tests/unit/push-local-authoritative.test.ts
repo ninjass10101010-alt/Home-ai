@@ -128,4 +128,24 @@ describe("pushLocalToPB authoritative reads", () => {
 
     expect(results.some((result) => result.collection === "emergency_contacts")).toBe(false);
   });
+
+  it("does not resurrect deleted schedules or events that previously had server ids", async () => {
+    // 15-character lowercase alphanumeric IDs from PocketBase
+    localStorage.setItem("consuela-schedules", JSON.stringify([
+      { id: "cz2ce7f8uptwif0", title: "Deleted Walk", time: "7:00 PM", days: "daily" },
+      { id: 1731520000000, title: "Genuine New Offline Walk", time: "8:00 AM", days: "daily" },
+    ]));
+    localStorage.setItem("consuela-events", JSON.stringify([
+      { id: "b532ex6dcfmyn9n", title: "Deleted Birthday", date: "2026-10-24" },
+      { id: "temp-event-1", title: "Genuine New Offline Event", date: "2026-10-25" },
+    ]));
+
+    const results = await pushLocalToPB();
+
+    expect(results.find((result) => result.collection === "schedules")).toMatchObject({ pushed: 1, errors: 0 });
+    expect(h.insertedSchedules.map((s) => s.title)).toEqual(["Genuine New Offline Walk"]);
+
+    expect(results.find((result) => result.collection === "events")).toMatchObject({ pushed: 1, errors: 0 });
+    expect(h.insertedEvents.map((e) => e.title)).toEqual(["Genuine New Offline Event"]);
+  });
 });

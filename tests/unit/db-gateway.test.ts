@@ -87,6 +87,14 @@ describe("db gateway", () => {
     expect((await deleteOne(await withSession(sessionReq("http://x/api/db/grocery_list_items/r1", { method: "DELETE" })), p)).status).toBe(200);
   });
 
+  it("treats DELETE on already-deleted (404) record as idempotent 200 success", async () => {
+    col.delete.mockRejectedValueOnce({ status: 404, message: "The requested resource wasn't found." });
+    const p = { params: Promise.resolve({ collection: "grocery_list_items", id: "gone1" }) } as any;
+    const res = await deleteOne(await withSession(sessionReq("http://x/api/db/grocery_list_items/gone1", { method: "DELETE" })), p);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, deleted: false, alreadyGone: true });
+  });
+
   it("a command-owned collection is never writable through the gateway, not even by a parent", async () => {
     const p = { params: Promise.resolve({ collection: "tasks", id: "r1" }) } as any;
     const create = await createPOST(
