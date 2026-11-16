@@ -81,6 +81,7 @@ services:
       - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
     networks:
       - dashboard-net
+      - media-net
 
 volumes:
   pocketbase_data:
@@ -88,4 +89,7 @@ volumes:
 networks:
   dashboard-net:
     name: familydashboard_consuela-net
+    external: true
+  media-net:
+    name: media-stack_default
     external: true
