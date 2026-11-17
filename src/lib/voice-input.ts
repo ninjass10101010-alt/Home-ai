@@ -121,9 +121,26 @@ let voiceUnavailableReason: string | null = VOICE_UNAVAILABLE_MESSAGE;
  * service" is an expected state, not an exception. See
  * {@link voiceUnavailableReason}.
  */
-async function transcribeAudio(_audioBlob: Blob): Promise<string | null> {
-  voiceUnavailableReason = VOICE_UNAVAILABLE_MESSAGE;
-  return null;
+async function transcribeAudio(audioBlob: Blob): Promise<string | null> {
+  if (!audioBlob || audioBlob.size === 0) {
+    voiceUnavailableReason = null;
+    return null;
+  }
+  try {
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const { haTranscribe } = await import("@/lib/ha/voice");
+    const result = await haTranscribe(buffer);
+    if (result && result.text) {
+      voiceUnavailableReason = null;
+      return result.text;
+    }
+    voiceUnavailableReason = null;
+    return null;
+  } catch (_err) {
+    voiceUnavailableReason = VOICE_UNAVAILABLE_MESSAGE;
+    return null;
+  }
 }
 
 /**

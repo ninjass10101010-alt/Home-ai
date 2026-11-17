@@ -16,7 +16,7 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN apk add --no-cache docker-cli docker-cli-compose git
+RUN apk add --no-cache ffmpeg docker-cli docker-cli-compose git
 
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
