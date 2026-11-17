@@ -1,6 +1,6 @@
 "use client";
 
-import { entitiesByDomain, type HAState } from "@/hooks/useHAState";
+import { controllableLights, entitiesByDomain, type HAState } from "@/hooks/useHAState";
 
 const OPEN_SENSOR_CLASSES = new Set(["door", "window", "motion"]);
 
@@ -17,7 +17,7 @@ export function formatRoomName(room: string): string {
 }
 
 export default function RoomCard({ room, states, onOpen }: RoomCardProps) {
-  const toggleables = [...entitiesByDomain(states, "light"), ...entitiesByDomain(states, "switch")];
+  const toggleables = controllableLights(states);
   const climate = entitiesByDomain(states, "climate")[0];
   const climateTemp =
     climate && typeof climate.attributes?.current_temperature === "number"

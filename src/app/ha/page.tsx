@@ -15,7 +15,7 @@ import ClimateCard from "@/components/ha/ClimateCard";
 import LightsGrid from "@/components/ha/LightsGrid";
 import VacuumCard from "@/components/ha/VacuumCard";
 import EnergyCard from "@/components/ha/EnergyCard";
-import { entitiesByDomain, entityFriendlyName, useHAState, type HAState } from "@/hooks/useHAState";
+import { entitiesByDomain, entityFriendlyName, isControllableLightOrSwitch, useHAState, type HAState } from "@/hooks/useHAState";
 import { useAuth } from "@/hooks/useAuth";
 
 const TABS = [
@@ -34,6 +34,7 @@ export function roomsFor(states: HAState[]): { room: string; states: HAState[] }
   const byRoom = new Map<string, HAState[]>();
   for (const s of states) {
     if (NON_ROOM_DOMAINS.has(s.entity_id.split(".")[0])) continue;
+    if (s.entity_id.startsWith("switch.") && !isControllableLightOrSwitch(s)) continue;
     const area = typeof s.attributes?.area_id === "string" && s.attributes.area_id.length > 0 ? s.attributes.area_id : "Other";
     const list = byRoom.get(area) ?? [];
     list.push(s);

@@ -4,7 +4,7 @@ import Modal from "@/components/ui/Modal";
 import Chip from "@/components/ui/Chip";
 import ListRow from "@/components/ui/ListRow";
 import SoftButton from "@/components/ui/SoftButton";
-import { entitiesByDomain, entityFriendlyName, useHACall, type HAState } from "@/hooks/useHAState";
+import { controllableLights, entitiesByDomain, entityFriendlyName, useHACall, type HAState } from "@/hooks/useHAState";
 import { useAuth } from "@/hooks/useAuth";
 import { formatRoomName } from "./RoomCard";
 
@@ -29,7 +29,7 @@ export default function RoomSheet({ room, states, onClose, onRefresh }: RoomShee
     return area === room;
   });
 
-  const toggleables = [...entitiesByDomain(roomStates, "light"), ...entitiesByDomain(roomStates, "switch")];
+  const toggleables = controllableLights(roomStates);
   const climate = entitiesByDomain(roomStates, "climate")[0];
   const openSensors = roomStates.filter(
     (s) =>

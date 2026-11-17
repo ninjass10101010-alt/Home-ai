@@ -232,6 +232,46 @@ export function entitiesByDomain(states: HAState[], domain: string): HAState[] {
   return states.filter((s) => s.entity_id.startsWith(prefix));
 }
 
+const SYSTEM_SWITCH_PREFIXES = [
+  "switch.demo_sim_",
+  "switch.unifi_",
+  "switch.usw_",
+  "switch.cloud_gateway_",
+  "switch.samba_share",
+  "switch.mosquitto_broker",
+  "switch.terminal_ssh",
+  "switch.piper",
+  "switch.whisper",
+  "switch.ssh_",
+];
+
+const SYSTEM_SWITCH_PARTS = ["_poe", "_dns", "_enabled", "_pre_release", "_child_lock"];
+
+/** True for real/demo lighting entities and household outlet/light switches (excludes UniFi/HA/sim switches). */
+export function isControllableLightOrSwitch(e: HAState): boolean {
+  const id = e.entity_id.toLowerCase();
+  if (id.startsWith("light.")) return true;
+  if (!id.startsWith("switch.")) return false;
+  if (SYSTEM_SWITCH_PREFIXES.some((p) => id.startsWith(p))) return false;
+  if (SYSTEM_SWITCH_PARTS.some((p) => id.includes(p))) return false;
+  return true;
+}
+
+/** Controlled lights: all light.* entities + outlet/light switches (or all clean switches if zero light.* exist). */
+export function controllableLights(states: HAState[]): HAState[] {
+  const clean = states.filter(isControllableLightOrSwitch);
+  const lights = clean.filter((s) => s.entity_id.startsWith("light."));
+  const switches = clean.filter((s) => s.entity_id.startsWith("switch."));
+  if (lights.length > 0) {
+    const lightLikeSwitches = switches.filter((s) => {
+      const id = s.entity_id.toLowerCase();
+      return s.attributes?.device_class === "outlet" || id.includes("light") || id.includes("lamp");
+    });
+    return [...lights, ...lightLikeSwitches];
+  }
+  return switches;
+}
+
 /** `attributes.friendly_name` when it is a string, otherwise the entity id. */
 export function entityFriendlyName(e: HAState): string {
   const name = e.attributes?.friendly_name;

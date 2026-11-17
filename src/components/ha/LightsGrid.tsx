@@ -2,7 +2,7 @@
 
 import EmptyState from "@/components/ui/EmptyState";
 import SoftButton from "@/components/ui/SoftButton";
-import { entitiesByDomain, entityFriendlyName, useHACall, type HAState } from "@/hooks/useHAState";
+import { controllableLights, entityFriendlyName, useHACall, type HAState } from "@/hooks/useHAState";
 import { useAuth } from "@/hooks/useAuth";
 import { formatRoomName } from "./RoomCard";
 
@@ -16,18 +16,28 @@ export default function LightsGrid({ states, onRefresh }: LightsGridProps) {
   const readOnly = currentUser?.role === "child";
   const { calling, callService } = useHACall();
 
-  const lightEntities = entitiesByDomain(states, "light");
-  const domain = lightEntities.length > 0 ? "light" : "switch";
-  const lights = lightEntities.length > 0 ? lightEntities : entitiesByDomain(states, "switch");
+  const lights = controllableLights(states);
   const anyOn = lights.some((l) => l.state === "on");
 
   const toggle = async (entityId: string) => {
-    const ok = await callService(domain, "toggle", { entity_id: entityId });
+    const entityDomain = entityId.split(".")[0] || "light";
+    const ok = await callService(entityDomain, "toggle", { entity_id: entityId });
     if (ok) await onRefresh?.();
   };
 
   const turnAllOff = async () => {
-    const ok = await callService(domain, "turn_off", { entity_id: lights.map((l) => l.entity_id) });
+    const byDomain = new Map<string, string[]>();
+    for (const item of lights) {
+      const dom = item.entity_id.split(".")[0] || "light";
+      const ids = byDomain.get(dom) ?? [];
+      ids.push(item.entity_id);
+      byDomain.set(dom, ids);
+    }
+    let ok = true;
+    for (const [dom, ids] of byDomain.entries()) {
+      const res = await callService(dom, "turn_off", { entity_id: ids });
+      if (!res) ok = false;
+    }
     if (ok) await onRefresh?.();
   };
 
