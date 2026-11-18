@@ -43,6 +43,7 @@ import { sanitizeUserId } from "@/lib/auth";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 import { FINANCE_TOOLS } from "@/lib/finance/tools";
 import { MEDIA_TOOLS } from "@/lib/media/tools";
+import { publishBroadcast } from "@/lib/broadcast";
 import { listActiveKidGoals, setKidGoal } from "@/lib/goals";
 // Live readers + shared helpers were extracted to ./consuela/live-reads
 // (Task 8, 2026-09-14). Imported here for the tool handlers below and
@@ -3598,6 +3599,43 @@ const TOOLS: Tool[] = [
       });
     },
   },
+  {
+    definition: {
+      name: "broadcast_announcement",
+      description:
+        "Broadcast an audio/voice announcement to the family Android tablet (ApoloSign wall panel) and speak it aloud in the house. Use whenever the user asks to broadcast, announce, or tell everyone on the tablet/wall panel something (e.g. 'broadcast dinner is ready', 'announce time for bed', 'tell everyone to come downstairs').",
+      parameters: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            description: "The exact announcement message to speak aloud on the tablet",
+          },
+          title: {
+            type: "string",
+            description: "Optional short title or headline (e.g. 'Dinner Time', 'Family Announcement')",
+          },
+        },
+        required: ["message"],
+      },
+    },
+    handler: async (args, ctx) => {
+      const message = String(args.message || "").trim();
+      if (!message) {
+        return "❌ Tell me what message to broadcast.";
+      }
+      const sender = ctx?.caller?.name || "Family";
+      try {
+        await publishBroadcast(message, {
+          title: typeof args.title === "string" ? args.title : undefined,
+          sender,
+        });
+        return `📢 Broadcasted to the wall panel tablet: "${message}"`;
+      } catch (err) {
+        return `⚠️ Broadcast failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  },
   ...FINANCE_TOOLS,
   ...MEDIA_TOOLS,
 ];
@@ -3647,6 +3685,7 @@ export function buildToolsForOpenAI(options?: {
 // (update/restart/containers/PB), suggestion ops, logistics (conflicts,
 // buffers, price compare), and house control is excluded for child sessions.
 const KID_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "broadcast_announcement",
   "get_weather",
   "get_family_members",
   "get_todays_events",

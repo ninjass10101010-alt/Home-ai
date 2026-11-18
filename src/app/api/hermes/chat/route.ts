@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { publishBroadcast } from "@/lib/broadcast";
 import { buildToolsForOpenAI, getTool, type ToolHandlerContext } from "@/lib/hermes-tools";
 import { db } from "@/db";
 import { authorizeCurrentMemberRequest, requireLiveSession } from "@/lib/server-auth";
@@ -1025,6 +1026,13 @@ async function handlePlanner(request: NextRequest, body: ChatRequestBody) {
   });
 }
 
+function parseBroadcastCommand(msg: string): string | null {
+  if (!msg) return null;
+  const trimmed = msg.trim();
+  const m = trimmed.match(/^(?:broadcast|announce|tell the tablet|tell the house)\s*[:,\-]?\s*(.+)$/i);
+  return m && m[1] ? m[1].trim() : null;
+}
+
 export async function POST(request: NextRequest) {
   let body: ChatRequestBody;
   try {
@@ -1049,6 +1057,40 @@ export async function POST(request: NextRequest) {
   const resolved = await resolveChatCaller(request, body);
   if (resolved instanceof Response) return resolved;
   const { live: caller, internal } = resolved;
+
+  // Direct fast-path for broadcast / announce commands
+  const broadcastText = parseBroadcastCommand(message);
+  if (broadcastText) {
+    const sender = caller?.name || "Family";
+    try {
+      await publishBroadcast(broadcastText, { sender });
+      const reply = `📢 Broadcasted to the wall panel tablet: "${broadcastText}"`;
+      await persistChatPair(request, message, reply, sender);
+      if (body.stream === true) {
+        const enc = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(enc.encode(`data: ${JSON.stringify({ content: reply })}\n\n`));
+            controller.enqueue(enc.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+          },
+        });
+      }
+      return NextResponse.json({
+        content: reply,
+        message: reply,
+      });
+    } catch (e: any) {
+      console.error("[chat broadcast fast-path] Error:", e);
+    }
+  }
 
   if (body.stream === true) {
     return handleStreamedChat(request, body, { live: caller, internal });
