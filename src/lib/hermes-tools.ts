@@ -3685,7 +3685,6 @@ export function buildToolsForOpenAI(options?: {
 // (update/restart/containers/PB), suggestion ops, logistics (conflicts,
 // buffers, price compare), and house control is excluded for child sessions.
 const KID_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "broadcast_announcement",
   "get_weather",
   "get_family_members",
   "get_todays_events",
