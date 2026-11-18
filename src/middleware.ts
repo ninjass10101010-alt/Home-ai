@@ -75,6 +75,8 @@ const API_EXEMPT = [
   // could never land and the points would never move.
   "/api/rewards/redeem",
   "/api/members/verify",
+  // Family-visible broadcast announcements: wall panel tablet polls this without session
+  "/api/broadcast",
 ];
 
 // MF-5 — exact-match OR trailing-slash semantics. Plain startsWith(p) made
