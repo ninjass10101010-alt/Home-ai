@@ -13,6 +13,24 @@ vi.mock("@/lib/ha/voice", () => ({
   })),
 }));
 
+const { announceToSpeakersMock } = vi.hoisted(() => ({
+  announceToSpeakersMock: vi.fn(async () => ({
+    ok: true,
+    attempted: 1,
+    delivered: 1,
+    failed: 0,
+    errors: [],
+  })),
+}));
+
+vi.mock("@/lib/ha/speakers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ha/speakers")>();
+  return {
+    ...actual,
+    announceToSpeakers: announceToSpeakersMock,
+  };
+});
+
 describe("broadcast subsystem", () => {
   beforeEach(() => {
     resetBroadcastForTests();
@@ -80,5 +98,25 @@ describe("broadcast subsystem", () => {
   it("waitForBroadcast times out with empty array when no broadcast arrives", async () => {
     const items = await waitForBroadcast("now", 50);
     expect(items).toEqual([]);
+  });
+
+  it("skipTablet: true forwards to Google speakers without enqueueing broadcastHistory", async () => {
+    const first = await publishBroadcast("Baseline");
+    const skipped = await publishBroadcast("Take Dogs Out!", {
+      title: "Routine Starting",
+      category: "routines",
+      voiceKey: "routine_dogs",
+      skipTablet: true,
+    });
+
+    expect(skipped.speakers?.delivered).toBe(1);
+    expect(announceToSpeakersMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Take Dogs Out!",
+        category: "routines",
+        voiceKey: "routine_dogs",
+      })
+    );
+    expect(getRecentBroadcasts(first.id)).toEqual([]);
   });
 });

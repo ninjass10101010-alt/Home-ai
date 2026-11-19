@@ -1,4 +1,10 @@
 import { haSynthesize } from "./ha/voice";
+import {
+  announceToSpeakers,
+  resolveLanMediaBaseUrl,
+  type SpeakerAnnounceResult,
+  type SpeakerBroadcastCategory,
+} from "./ha/speakers";
 
 export interface BroadcastItem {
   id: string;
@@ -7,6 +13,17 @@ export interface BroadcastItem {
   sender: string;
   audioUrl?: string;
   createdAt: string;
+  speakers?: SpeakerAnnounceResult;
+}
+
+export interface PublishBroadcastOptions {
+  title?: string;
+  sender?: string;
+  category?: SpeakerBroadcastCategory;
+  voiceKey?: string | null;
+  volume?: number | null;
+  lanBaseUrl?: string | null;
+  skipTablet?: boolean;
 }
 
 // In-memory circular buffer of recent broadcasts (max 30 items)
@@ -35,11 +52,38 @@ export function getLatestBroadcastId(): string | null {
 
 export async function publishBroadcast(
   message: string,
-  options?: { title?: string; sender?: string }
+  options?: PublishBroadcastOptions
 ): Promise<BroadcastItem> {
   const cleanMessage = (message || "").trim();
   if (!cleanMessage) {
     throw new Error("Cannot broadcast empty message");
+  }
+
+  const resolvedLanBase = options?.lanBaseUrl ?? resolveLanMediaBaseUrl(null);
+  const category = options?.category ?? "chat";
+
+  if (options?.skipTablet === true) {
+    let speakers: SpeakerAnnounceResult | undefined;
+    try {
+      speakers = await announceToSpeakers({
+        message: cleanMessage,
+        category,
+        voiceKey: options?.voiceKey,
+        volume: options?.volume,
+        lanBaseUrl: resolvedLanBase,
+      });
+    } catch (err) {
+      console.warn("[broadcast] speaker fan-out warning:", err);
+    }
+
+    return {
+      id: `bc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      message: cleanMessage,
+      title: options?.title?.trim() || "Family Announcement 📢",
+      sender: options?.sender?.trim() || "Consuela",
+      createdAt: new Date().toISOString(),
+      ...(speakers ? { speakers } : {}),
+    };
   }
 
   let audioUrl = "";
@@ -73,6 +117,16 @@ export async function publishBroadcast(
     }
   }
   waitingResolvers.clear();
+
+  // Mirror chat/general broadcasts to configured Google speakers without blocking tablet pollers
+  void announceToSpeakers({
+    message: cleanMessage,
+    category,
+    voiceKey: options?.voiceKey,
+    audioUrl: audioUrl || null,
+    volume: options?.volume,
+    lanBaseUrl: resolvedLanBase,
+  }).catch(() => {});
 
   return broadcast;
 }

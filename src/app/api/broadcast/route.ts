@@ -4,6 +4,7 @@ import {
   waitForBroadcast,
   getLatestBroadcastId,
 } from "@/lib/broadcast";
+import { resolveLanMediaBaseUrl, type SpeakerBroadcastCategory } from "@/lib/ha/speakers";
 
 export const dynamic = "force-dynamic";
 
@@ -47,9 +48,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const validCategories = new Set<SpeakerBroadcastCategory>([
+      "chat",
+      "routines",
+      "calendar",
+      "weather",
+      "emergency",
+      "general",
+    ]);
+    const category =
+      typeof body?.category === "string" && validCategories.has(body.category as SpeakerBroadcastCategory)
+        ? (body.category as SpeakerBroadcastCategory)
+        : undefined;
+
     const broadcast = await publishBroadcast(message.trim(), {
       title: body?.title,
       sender: body?.sender,
+      category,
+      voiceKey: typeof body?.voiceKey === "string" ? body.voiceKey : null,
+      volume: typeof body?.volume === "number" && Number.isFinite(body.volume) ? body.volume : null,
+      skipTablet: body?.skipTablet === true,
+      lanBaseUrl: resolveLanMediaBaseUrl(request.headers.get("host")),
     });
 
     return NextResponse.json({
