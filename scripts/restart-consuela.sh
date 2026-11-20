@@ -30,3 +30,5 @@ docker run -d \
 # Attach the host-visible bridge network so the dashboard is
 # reachable on 192.168.0.28:3000 (the QNAP host IP your tablet hits).
 docker network connect bridge consuela-dashboard 2>/dev/null || true
+# Attach the media stack network so Rubio/MUSE tools reach radarr, sonarr, qbittorrent, and prowlarr.
+docker network connect media-stack_default consuela-dashboard 2>/dev/null || true

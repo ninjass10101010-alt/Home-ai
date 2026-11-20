@@ -47,6 +47,13 @@ function getProwlarrConfig() {
   };
 }
 
+function formatFetchError(err: unknown): string {
+  const e = err as { message?: string; cause?: { code?: string } } | null;
+  const base = e?.message || String(err);
+  const code = e?.cause?.code;
+  return code && !base.includes(code) ? `${base} (${code})` : base;
+}
+
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -652,7 +659,7 @@ async function executePlexMediaDelete(args: PlexMediaDeleteParams): Promise<stri
       deleteFiles: false,
       removedFromLibrary: false,
       error: "Failed to delete media from Plex/Arr stack",
-      details: err?.message || String(err),
+      details: formatFetchError(err),
     });
   }
 }
@@ -665,18 +672,21 @@ export const MEDIA_TOOLS: Tool[] = [
         "Search for movies in Radarr / TMDB. Checks if a movie is already downloaded, queued in Radarr, or available to add. Returns title, year, status, tmdbId, and overview.",
       parameters: {
         type: "object",
-        required: ["query"],
         properties: {
           query: {
             type: "string",
-            description: "Movie title to search for (e.g. 'Avatar', 'Dune: Part Two')",
+            description: "Movie title to search for (e.g. 'Avatar', 'Dune: Part Two'). Accepts title as alias.",
+          },
+          title: {
+            type: "string",
+            description: "Alias for query (movie title to search for).",
           },
         },
       },
     },
     handler: async (args) => {
-      const query = String(args.query || "").trim();
-      if (!query) return JSON.stringify({ error: "query is required" });
+      const query = String(args.query || args.title || "").trim();
+      if (!query) return JSON.stringify({ error: "query or title is required" });
       const { url, apiKey } = await getRadarrConfig();
       if (!apiKey) {
         return JSON.stringify({ error: "RADARR_API_KEY is not configured" });
@@ -728,7 +738,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to search movies in Radarr",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -755,7 +765,7 @@ export const MEDIA_TOOLS: Tool[] = [
       },
     },
     handler: async (args) => {
-      const tmdbId = Number(args.tmdbId);
+      const tmdbId = Number(args.tmdbId ?? args.tmdb_id);
       if (!tmdbId || Number.isNaN(tmdbId)) {
         return JSON.stringify({ error: "valid tmdbId is required" });
       }
@@ -871,7 +881,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to download movie",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -883,18 +893,21 @@ export const MEDIA_TOOLS: Tool[] = [
         "Search for TV shows in Sonarr / TVDB. Checks if a show is already tracked, monitored seasons, and availability. Returns title, year, tvdbId, status, and season count.",
       parameters: {
         type: "object",
-        required: ["query"],
         properties: {
           query: {
             type: "string",
-            description: "TV show title to search for (e.g. 'Breaking Bad', 'Bluey')",
+            description: "TV show title to search for (e.g. 'Breaking Bad', 'Bluey'). Accepts title as alias.",
+          },
+          title: {
+            type: "string",
+            description: "Alias for query (TV show title to search for).",
           },
         },
       },
     },
     handler: async (args) => {
-      const query = String(args.query || "").trim();
-      if (!query) return JSON.stringify({ error: "query is required" });
+      const query = String(args.query || args.title || "").trim();
+      if (!query) return JSON.stringify({ error: "query or title is required" });
       const { url, apiKey } = await getSonarrConfig();
       if (!apiKey) {
         return JSON.stringify({ error: "SONARR_API_KEY is not configured" });
@@ -937,7 +950,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to search TV shows in Sonarr",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -963,7 +976,7 @@ export const MEDIA_TOOLS: Tool[] = [
       },
     },
     handler: async (args) => {
-      const tvdbId = Number(args.tvdbId);
+      const tvdbId = Number(args.tvdbId ?? args.tvdb_id);
       if (!tvdbId || Number.isNaN(tvdbId)) {
         return JSON.stringify({ error: "valid tvdbId is required" });
       }
@@ -1073,7 +1086,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to download TV show",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -1132,7 +1145,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to query active downloads from qBittorrent",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -1144,18 +1157,21 @@ export const MEDIA_TOOLS: Tool[] = [
         "Search the Garcia family Plex library to check if a movie, episode, or show is already in the collection and ready to watch.",
       parameters: {
         type: "object",
-        required: ["query"],
         properties: {
           query: {
             type: "string",
-            description: "Title or keyword to search in Plex.",
+            description: "Title or keyword to search in Plex. Accepts title as alias.",
+          },
+          title: {
+            type: "string",
+            description: "Alias for query (title or keyword to search in Plex).",
           },
         },
       },
     },
     handler: async (args) => {
-      const query = String(args.query || "").trim();
-      if (!query) return JSON.stringify({ error: "query is required" });
+      const query = String(args.query || args.title || "").trim();
+      if (!query) return JSON.stringify({ error: "query or title is required" });
       const { url: plexBaseUrl, token } = await getPlexConfig();
       if (!token) {
         return JSON.stringify({ error: "PLEX_TOKEN is not configured" });
@@ -1201,7 +1217,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to search Plex inventory",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -1225,7 +1241,11 @@ export const MEDIA_TOOLS: Tool[] = [
           },
           query: {
             type: "string",
-            description: "Optional keyword to filter watched titles by name (e.g. 'Gladiator', 'Dune').",
+            description: "Optional keyword to filter watched titles by name (e.g. 'Gladiator', 'Dune'). Accepts title as alias.",
+          },
+          title: {
+            type: "string",
+            description: "Alias for query (optional keyword to filter watched titles).",
           },
         },
       },
@@ -1233,7 +1253,7 @@ export const MEDIA_TOOLS: Tool[] = [
     handler: async (args) => {
       const mediaType = String(args.mediaType || "movie").toLowerCase();
       const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
-      const query = String(args.query || "").trim().toLowerCase();
+      const query = String(args.query || args.title || "").trim().toLowerCase();
 
       const { url: plexBaseUrl, token } = await getPlexConfig();
       if (!token) {
@@ -1309,7 +1329,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to get Plex watch history",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -1324,7 +1344,11 @@ export const MEDIA_TOOLS: Tool[] = [
         properties: {
           query: {
             type: "string",
-            description: "Optional keyword to search within watched movies (e.g. 'Inception', 'Star Wars').",
+            description: "Optional keyword to search within watched movies (e.g. 'Inception', 'Star Wars'). Accepts title as alias.",
+          },
+          title: {
+            type: "string",
+            description: "Alias for query (optional keyword to search within watched movies).",
           },
           limit: {
             type: "number",
@@ -1339,7 +1363,7 @@ export const MEDIA_TOOLS: Tool[] = [
       },
     },
     handler: async (args) => {
-      const query = String(args.query || "").trim().toLowerCase();
+      const query = String(args.query || args.title || "").trim().toLowerCase();
       const limit = Math.min(Math.max(Number(args.limit) || 25, 1), 50);
       const sortBy = String(args.sortBy || "lastViewedAt");
 
@@ -1377,26 +1401,30 @@ export const MEDIA_TOOLS: Tool[] = [
         if (sortBy === "title") plexSort = "titleSort:asc";
         else if (sortBy === "viewCount") plexSort = "viewCount:desc";
 
-        const allWatched: any[] = [];
+        const sectionResults = await Promise.allSettled(
+          movieSections.map(async (section) => {
+            const secUrl = `${base}/library/sections/${section.key}/all?unwatched=0&sort=${plexSort}&X-Plex-Token=${token}`;
+            const secRes = await fetch(secUrl, {
+              headers: { Accept: "application/json", "X-Plex-Token": token },
+              signal: AbortSignal.timeout(15000),
+            });
 
-        for (const section of movieSections) {
-          const secUrl = `${base}/library/sections/${section.key}/all?unwatched=0&sort=${plexSort}&X-Plex-Token=${token}`;
-          const secRes = await fetch(secUrl, {
-            headers: { Accept: "application/json", "X-Plex-Token": token },
-            signal: AbortSignal.timeout(8000),
-          });
-
-          if (secRes.ok) {
+            if (!secRes.ok) return [];
             const secData: any = await secRes.json();
             const items: any[] = secData.MediaContainer?.Metadata || [];
-            for (const item of items) {
-              if (item.viewCount && item.viewCount > 0) {
-                allWatched.push({
-                  ...item,
-                  library: section.title,
-                });
-              }
-            }
+            return items
+              .filter((item) => item.viewCount && item.viewCount > 0)
+              .map((item) => ({
+                ...item,
+                library: section.title,
+              }));
+          })
+        );
+
+        const allWatched: any[] = [];
+        for (const res of sectionResults) {
+          if (res.status === "fulfilled") {
+            allWatched.push(...res.value);
           }
         }
 
@@ -1439,7 +1467,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to get watched movies from Plex",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -1505,7 +1533,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to get active Plex sessions",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -1716,7 +1744,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to edit Plex movie",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -1983,7 +2011,7 @@ export const MEDIA_TOOLS: Tool[] = [
       } catch (err: any) {
         return JSON.stringify({
           error: "Failed to update Plex watch status",
-          details: err?.message || String(err),
+          details: formatFetchError(err),
         });
       }
     },
@@ -2069,7 +2097,7 @@ export const MEDIA_TOOLS: Tool[] = [
       const results = checks.map((c, i) => {
         if (c.status === "fulfilled") return c.value;
         const names = ["Radarr", "Sonarr", "Plex", "qBittorrent", "Prowlarr"];
-        return { name: names[i], status: "offline", error: c.reason?.message || "unreachable" };
+        return { name: names[i], status: "offline", error: c.reason ? formatFetchError(c.reason) : "unreachable" };
       });
 
       const allHealthy = results.every((r) => r.status === "healthy");

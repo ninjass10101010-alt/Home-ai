@@ -235,7 +235,7 @@ The parent `Dashboard` repo (deployment shell: docker-compose, deploy scripts, P
 
 **Local-only (gitignored — never commit):** `.env*` (except `.env.example`), `DEPLOY_NAS_LOCAL.md`, `backups/`, `*.log`, `.agents/` (skills — reinstall via the tracked `skills-lock.json`), `.impeccable/`, `.opencode/`, `.superpowers/`, `pb_data/` + `pocketbase_data/` (live DB state), `.DS_Store`.
 
-**Deploy ≠ push:** pushing to GitHub never changes the running NAS container — always end feature work by asking "Deploy to NAS now?" (runbook: `DEPLOY_NAS_LOCAL.md`, local-only).
+**Deploy ≠ push:** pushing to GitHub never changes the running NAS container — always end feature work by asking "Deploy to NAS now?" (runbook: `DEPLOY_NAS_LOCAL.md`, local-only). Whenever `consuela-dashboard` is swapped on the NAS via `docker run`, ALWAYS attach BOTH `familydashboard_consuela-net` AND `media-stack_default` (`docker network connect media-stack_default consuela-dashboard`), because NAS deploys use `docker run` rather than `docker-compose.yml` and dropping `media-stack_default` breaks Radarr/Sonarr/qBittorrent/Prowlarr MUSE tools (`ENOTFOUND`).
 
 ---
 

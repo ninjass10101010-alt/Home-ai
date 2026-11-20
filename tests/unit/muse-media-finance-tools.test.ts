@@ -1341,4 +1341,178 @@ describe("Rubio Media Tools", () => {
     expect(res.services.find((s: any) => s.name === "Sonarr")?.status).toBe("healthy");
     expect(res.services.find((s: any) => s.name === "Plex")?.status).toBe("healthy");
   });
+
+  it("check_plex_inventory, search_movies, and search_shows accept title as an alias for query", async () => {
+    const calledUrls: string[] = [];
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      calledUrls.push(url);
+      if (url.includes("/search?query=")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [
+                {
+                  title: "Paw Patrol: The Dino Movie",
+                  year: 2026,
+                  type: "movie",
+                  ratingKey: "14001",
+                  librarySectionTitle: "Kids Movies",
+                  Media: [{ videoResolution: "1080" }],
+                },
+              ],
+            },
+          }),
+        } as any;
+      }
+      if (url.includes("/api/v3/movie/lookup")) {
+        return {
+          ok: true,
+          json: async () => [{ title: "Paw Patrol: The Dino Movie", year: 2026, tmdbId: 999001, id: 0, hasFile: false }],
+        } as any;
+      }
+      if (url.includes("/api/v3/series/lookup")) {
+        return {
+          ok: true,
+          json: async () => [{ title: "Bluey", year: 2018, tvdbId: 353553, id: 1, status: "continuing", seasonCount: 3 }],
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const plexRes = JSON.parse(await getTool("check_plex_inventory")!.handler({ title: "Paw Patrol: The Dino Movie" }));
+    expect(plexRes.inPlex).toBe(true);
+    expect(plexRes.query).toBe("Paw Patrol: The Dino Movie");
+    expect(plexRes.items[0].title).toBe("Paw Patrol: The Dino Movie");
+
+    const movieRes = JSON.parse(await getTool("search_movies")!.handler({ title: "Paw Patrol: The Dino Movie" }));
+    expect(movieRes.matchCount).toBe(1);
+    expect(movieRes.movies[0].tmdbId).toBe(999001);
+
+    const showRes = JSON.parse(await getTool("search_shows")!.handler({ title: "Bluey" }));
+    expect(showRes.matchCount).toBe(1);
+    expect(showRes.shows[0].tvdbId).toBe(353553);
+
+    expect(calledUrls.some((u) => u.includes("Paw%20Patrol%3A%20The%20Dino%20Movie"))).toBe(true);
+  });
+
+  it("download_movie accepts tmdb_id and download_show accepts tvdb_id", async () => {
+    const calledUrls: string[] = [];
+    global.fetch = vi.fn().mockImplementation(async (url: string, opts?: any) => {
+      calledUrls.push(`${opts?.method || "GET"} ${url}`);
+      if (url.includes("/api/v3/movie/lookup/tmdb?tmdbId=19995")) {
+        return { ok: true, json: async () => ({ title: "Avatar", year: 2009, tmdbId: 19995, id: 0 }) } as any;
+      }
+      if (url.includes("/api/v3/series/lookup?term=tvdb:81189")) {
+        return { ok: true, json: async () => [{ title: "Breaking Bad", year: 2008, tvdbId: 81189, id: 0, seasons: [{ seasonNumber: 1 }] }] } as any;
+      }
+      if (url.includes("/api/v3/qualityprofile")) {
+        return { ok: true, json: async () => [{ id: 4, name: "HD-1080p" }] } as any;
+      }
+      if (url.includes("/api/v3/rootfolder")) {
+        return { ok: true, json: async () => [{ path: "/media/Movies" }] } as any;
+      }
+      if (url.endsWith("/api/v3/movie") && opts?.method === "POST") {
+        return { ok: true, json: async () => ({ title: "Avatar", year: 2009 }) } as any;
+      }
+      if (url.endsWith("/api/v3/series") && opts?.method === "POST") {
+        return { ok: true, json: async () => ({ title: "Breaking Bad" }) } as any;
+      }
+      return { ok: false, status: 404 } as any;
+    });
+
+    const movieRes = JSON.parse(await getTool("download_movie")!.handler({ tmdb_id: 19995 }));
+    expect(movieRes.status).toBe("added_and_searching");
+    expect(movieRes.title).toBe("Avatar");
+
+    const showRes = JSON.parse(await getTool("download_show")!.handler({ tvdb_id: 81189 }));
+    expect(showRes.status).toBe("added_and_searching");
+    expect(showRes.title).toBe("Breaking Bad");
+
+    expect(calledUrls.some((u) => u.includes("tmdbId=19995"))).toBe(true);
+    expect(calledUrls.some((u) => u.includes("term=tvdb:81189"))).toBe(true);
+  });
+
+  it("get_plex_watched_movies fetches movie sections in parallel and survives a failing section", async () => {
+    let activeFetches = 0;
+    let maxConcurrent = 0;
+
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/library/sections?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Directory: [
+                { key: "1", type: "movie", title: "Movies" },
+                { key: "2", type: "movie", title: "Kids Movies" },
+              ],
+            },
+          }),
+        } as any;
+      }
+      if (url.includes("/library/sections/1/all")) {
+        activeFetches++;
+        maxConcurrent = Math.max(maxConcurrent, activeFetches);
+        await new Promise((r) => setTimeout(r, 15));
+        activeFetches--;
+        return {
+          ok: true,
+          json: async () => ({
+            MediaContainer: {
+              Metadata: [{ title: "Gladiator", year: 2000, viewCount: 2, lastViewedAt: 1730100000 }],
+            },
+          }),
+        } as any;
+      }
+      if (url.includes("/library/sections/2/all")) {
+        activeFetches++;
+        maxConcurrent = Math.max(maxConcurrent, activeFetches);
+        await new Promise((r) => setTimeout(r, 15));
+        activeFetches--;
+        throw new TypeError("fetch failed");
+      }
+      return { ok: false } as any;
+    });
+
+    const res = JSON.parse(await getTool("get_plex_watched_movies")!.handler({}));
+    expect(maxConcurrent).toBe(2);
+    expect(res.watchedMovieCount).toBe(1);
+    expect(res.movies[0].title).toBe("Gladiator");
+    expect(res.movies[0].library).toBe("Movies");
+  });
+
+  it("get_media_stack_health surfaces cause.code on Node fetch failures", async () => {
+    const dnsErr = Object.assign(new TypeError("fetch failed"), {
+      cause: { code: "ENOTFOUND" },
+    });
+
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("radarr") || url.includes("7878")) {
+        throw dnsErr;
+      }
+      if (url.includes("sonarr") || url.includes("8989")) {
+        return { ok: true, json: async () => ({ version: "4.0.17" }) } as any;
+      }
+      if (url.includes("plex") || url.includes("32400")) {
+        return { ok: true } as any;
+      }
+      if (url.includes("api/v2/auth/login")) {
+        return { ok: true, headers: new Headers({ "set-cookie": "SID=x;" }) } as any;
+      }
+      if (url.includes("api/v2/app/version")) {
+        return { ok: true, text: async () => "v5.0.0" } as any;
+      }
+      if (url.includes("prowlarr") || url.includes("9696")) {
+        return { ok: true, json: async () => ({ version: "2.3.5" }) } as any;
+      }
+      return { ok: false } as any;
+    });
+
+    const res = JSON.parse(await getTool("get_media_stack_health")!.handler({}));
+    expect(res.allHealthy).toBe(false);
+    const radarr = res.services.find((s: any) => s.name === "Radarr");
+    expect(radarr?.status).toBe("offline");
+    expect(radarr?.error).toBe("fetch failed (ENOTFOUND)");
+  });
 });
