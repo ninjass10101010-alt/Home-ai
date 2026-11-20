@@ -19,11 +19,13 @@ export const COMPOSIO_AUTH_CONFIGS_PATH = `${COMPOSIO_API_BASE}/auth_configs`;
 export const COMPOSIO_TOOLKITS = {
   CALENDAR: "googlecalendar",
   TASKS: "googletasks",
+  YOUTUBE: "youtube",
 } as const;
 
 export type ComposioToolkit = (typeof COMPOSIO_TOOLKITS)[keyof typeof COMPOSIO_TOOLKITS];
 
-// Verified action slugs (public docs, 2026-10-05).
+// Verified action slugs (public docs, 2026-10-05; YouTube slugs live-verified
+// against Composio v3.1 API on 2026-11-20).
 // NOTE: there is no GOOGLECALENDAR_SYNC_EVENTS action. Incremental sync tokens
 // are NOT exposed through Composio — the adapter does a full-window
 // EVENTS_LIST per calendar (30 days back / 90 forward) and upserts by
@@ -40,10 +42,19 @@ export const COMPOSIO_ACTIONS = {
   TASKS_CREATE_TASK: "GOOGLETASKS_INSERT_TASK",
   TASKS_UPDATE_TASK: "GOOGLETASKS_PATCH_TASK",
   TASKS_DELETE_TASK: "GOOGLETASKS_DELETE_TASK",
+  YOUTUBE_LIST_USER_PLAYLISTS: "YOUTUBE_LIST_USER_PLAYLISTS",
+  YOUTUBE_LIST_PLAYLIST_ITEMS: "YOUTUBE_LIST_PLAYLIST_ITEMS",
+  YOUTUBE_CREATE_PLAYLIST: "YOUTUBE_CREATE_PLAYLIST",
+  YOUTUBE_ADD_VIDEO_TO_PLAYLIST: "YOUTUBE_ADD_VIDEO_TO_PLAYLIST",
+  YOUTUBE_DELETE_PLAYLIST_ITEM: "YOUTUBE_DELETE_PLAYLIST_ITEM",
+  YOUTUBE_DELETE_PLAYLIST: "YOUTUBE_DELETE_PLAYLIST",
+  YOUTUBE_RATE_VIDEO: "YOUTUBE_RATE_VIDEO",
+  YOUTUBE_LIST_RATED_VIDEOS: "YOUTUBE_LIST_RATED_VIDEOS",
+  YOUTUBE_LIST_USER_SUBSCRIPTIONS: "YOUTUBE_LIST_USER_SUBSCRIPTIONS",
 } as const;
 
-// Arg names are LIVE-VERIFIED against the real API (2026-10-05) and are
-// PER-ACTION — do not assume one convention:
+// Arg names are LIVE-VERIFIED against the real API (2026-10-05 / 2026-11-20)
+// and are PER-ACTION — do not assume one convention:
 // - GOOGLECALENDAR_EVENTS_LIST: camelCase — calendarId, timeMin, timeMax,
 //   singleEvents, showDeleted, maxResults, pageToken, orderBy, timeZone,
 //   syncToken, iCalUID, eventTypes, updatedMin. timeMin/timeMax REQUIRED (no
@@ -67,6 +78,15 @@ export const COMPOSIO_ACTIONS = {
 //   completed.
 // - GOOGLETASKS_DELETE_TASK: tasklist_id, task_id.
 // - GOOGLETASKS_CREATE_TASK_LIST: tasklist_title (NOT `title`).
+// - YOUTUBE_LIST_USER_PLAYLISTS: part, maxResults, pageToken.
+// - YOUTUBE_LIST_PLAYLIST_ITEMS: playlistId (required), part, maxResults, pageToken, videoId.
+// - YOUTUBE_CREATE_PLAYLIST: title (required), description, privacyStatus.
+// - YOUTUBE_ADD_VIDEO_TO_PLAYLIST: playlistId (required), videoId (required), position.
+// - YOUTUBE_DELETE_PLAYLIST_ITEM: id (required — playlistItemId, NOT videoId).
+// - YOUTUBE_DELETE_PLAYLIST: id (required), confirmDelete (required).
+// - YOUTUBE_RATE_VIDEO: id (required — videoId), rating ("like" | "dislike" | "none").
+// - YOUTUBE_LIST_RATED_VIDEOS: snake_case max_results, page_token + rating ("like"), part.
+// - YOUTUBE_LIST_USER_SUBSCRIPTIONS: part, maxResults, pageToken.
 // - Composio execute response shape is `{ data, successful, error }`.
 export const COMPOSIO_CONNECT_FLOW_NOTES = {
   // Connect Links are PER-TOOLKIT: POST /connected_accounts/link takes exactly

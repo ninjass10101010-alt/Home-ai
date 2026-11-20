@@ -7,6 +7,7 @@ const SNAPSHOT_KEY = "google_composio_connection";
 const LOCK = "google-connection-state";
 
 export const TASKS_SNAPSHOT_KEY = "google_composio_tasks";
+export const YOUTUBE_SNAPSHOT_KEY = "google_composio_youtube";
 
 export type GoogleAuthErrorCode = "no_grant" | "unavailable" | "revoked" | "expired" | "refresh_failed" | "config" | "not_configured";
 
@@ -165,6 +166,6 @@ export async function reconcileGoogleConnection(
   return updated;
 }
 
-export async function disconnectGoogle(): Promise<void> {
-  await clearConnectionSnapshot();
+export async function disconnectGoogle(key: string = SNAPSHOT_KEY): Promise<void> {
+  await clearConnectionSnapshot(key);
 }

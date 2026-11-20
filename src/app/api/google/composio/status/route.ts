@@ -21,8 +21,13 @@ export const runtime = "nodejs";
 
 type Toolkit = (typeof COMPOSIO_TOOLKITS)[keyof typeof COMPOSIO_TOOLKITS];
 
+const YOUTUBE_TOOLKIT: Toolkit = (COMPOSIO_TOOLKITS.YOUTUBE ?? "youtube") as Toolkit;
+const YOUTUBE_KEY = "google_composio_youtube";
+
 function snapshotKeyFor(toolkit: Toolkit): string | undefined {
-  return toolkit === COMPOSIO_TOOLKITS.TASKS ? TASKS_SNAPSHOT_KEY : undefined;
+  if (toolkit === COMPOSIO_TOOLKITS.TASKS) return TASKS_SNAPSHOT_KEY;
+  if (toolkit === YOUTUBE_TOOLKIT) return YOUTUBE_KEY;
+  return undefined;
 }
 
 function composioErrorResponse(error: unknown): NextResponse | null {
@@ -56,12 +61,17 @@ export async function GET(req: NextRequest) {
   if (
     requested !== null &&
     requested !== COMPOSIO_TOOLKITS.CALENDAR &&
-    requested !== COMPOSIO_TOOLKITS.TASKS
+    requested !== COMPOSIO_TOOLKITS.TASKS &&
+    requested !== YOUTUBE_TOOLKIT
   ) {
     return NextResponse.json({ ok: false, error: "invalid_toolkit" }, { status: 400 });
   }
   const toolkit: Toolkit =
-    requested === COMPOSIO_TOOLKITS.TASKS ? COMPOSIO_TOOLKITS.TASKS : COMPOSIO_TOOLKITS.CALENDAR;
+    requested === COMPOSIO_TOOLKITS.TASKS
+      ? COMPOSIO_TOOLKITS.TASKS
+      : requested === YOUTUBE_TOOLKIT
+        ? YOUTUBE_TOOLKIT
+        : COMPOSIO_TOOLKITS.CALENDAR;
   const key = snapshotKeyFor(toolkit);
 
   let snapshot: ConnectionSnapshot;
